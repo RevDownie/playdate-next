@@ -7,6 +7,8 @@ const pd = @cImport({
 var playdate_api: *pd.PlaydateAPI = undefined;
 var player_sprite: *pd.LCDBitmap = undefined;
 var player_pos = Vec2i{ .x = 100, .y = 100 };
+var player_vel = Vec2i{ .x = 0, .y = 0 };
+var player_sprite_dir: pd.LCDBitmapFlip = pd.kBitmapUnflipped;
 
 pub export fn eventHandler(playdate: [*c]pd.PlaydateAPI, event: pd.PDSystemEvent, _: c_ulong) callconv(.C) c_int {
     switch (event) {
@@ -50,7 +52,14 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
     sys.getButtonState.?(&current, &pushed, &released);
 
     player_pos = playerMovementSystemUpdate(current, player_pos);
-    graphics.drawBitmap.?(player_sprite, player_pos.x, player_pos.y, pd.kBitmapUnflipped);
+
+    if (player_vel.x > 0) {
+        player_sprite_dir = pd.kBitmapUnflipped;
+    } else if (player_vel.x < 0) {
+        player_sprite_dir = pd.kBitmapFlippedX;
+    }
+
+    graphics.drawBitmap.?(player_sprite, player_pos.x, player_pos.y, player_sprite_dir);
 
     const shouldFire = firingSystemUpdate(sys);
     if (shouldFire) {
@@ -65,7 +74,6 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
 ///
 const accel = 1;
 const max_speed = 8;
-var player_vel = Vec2i{ .x = 0, .y = 0 };
 fn playerMovementSystemUpdate(current_button_states: pd.PDButtons, current_player_pos: Vec2i) Vec2i {
     var updated_pos = current_player_pos;
     var move_pressed = false;
