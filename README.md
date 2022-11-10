@@ -7,6 +7,7 @@ Inspired by shooters like Minigore this will be a simple horde survival game whe
 ##TODO List
 * Simulator hot reload of DLL
 * Scrolling camera to follow player
+** Offset in the direction of movement
 * Bullet projectiles
 * Enemies
 * Auto targetting? Or button to switch target?
@@ -17,3 +18,4 @@ Inspired by shooters like Minigore this will be a simple horde survival game whe
 * Actual character sprite and animation
 * Launcher tile
 * Running on device
+* Add running on sim and device to zig build (pdutil)
