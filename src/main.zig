@@ -5,11 +5,15 @@ const pd = @cImport({
 });
 
 var playdate_api: *pd.PlaydateAPI = undefined;
+
+/// Common game state
 var player_sprite: *pd.LCDBitmap = undefined;
-var player_pos = Vec2i{ .x = 100, .y = 100 };
-var player_vel = Vec2i{ .x = 0, .y = 0 };
+var player_pos = @Vector(2, i32){ 100, 100 };
+var player_vel = @Vector(2, i32){ 0, 0 };
 var player_sprite_dir: pd.LCDBitmapFlip = pd.kBitmapUnflipped;
 
+/// Exposed via the shared library to the Playdate runner which forwards on events
+///
 pub export fn eventHandler(playdate: [*c]pd.PlaydateAPI, event: pd.PDSystemEvent, _: c_ulong) callconv(.C) c_int {
     switch (event) {
         pd.kEventInit => {
@@ -22,6 +26,8 @@ pub export fn eventHandler(playdate: [*c]pd.PlaydateAPI, event: pd.PDSystemEvent
     return 0;
 }
 
+/// Upfront setup - allocates all the memory required and loads and initialises all assets and pools
+///
 fn gameInit() void {
     //Spawn the player sprite
     const graphics = playdate_api.graphics.*;
@@ -31,16 +37,12 @@ fn gameInit() void {
     //Init the systems
 }
 
-const Vec2i = struct {
-    x: i32,
-    y: i32,
-};
-
+/// The main game update loop that drives the various systems. Also acts as the render loop
+///
 fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
     const playdate = playdate_api;
     const graphics = playdate.graphics.*;
     const sys = playdate.system.*;
-    // const disp = playdate.display.*;
 
     graphics.clear.?(pd.kColorWhite);
     sys.drawFPS.?(0, 0);
@@ -51,15 +53,15 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
     var released: pd.PDButtons = undefined;
     sys.getButtonState.?(&current, &pushed, &released);
 
-    player_pos = playerMovementSystemUpdate(current, player_pos);
+    playerMovementSystemUpdate(current, &player_pos, &player_vel);
 
-    if (player_vel.x > 0) {
+    if (player_vel[0] > 0) {
         player_sprite_dir = pd.kBitmapUnflipped;
-    } else if (player_vel.x < 0) {
+    } else if (player_vel[0] < 0) {
         player_sprite_dir = pd.kBitmapFlippedX;
     }
 
-    graphics.drawBitmap.?(player_sprite, player_pos.x, player_pos.y, player_sprite_dir);
+    graphics.drawBitmap.?(player_sprite, player_pos[0], player_pos[1], player_sprite_dir);
 
     const shouldFire = firingSystemUpdate(sys);
     if (shouldFire) {
@@ -69,51 +71,48 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
     return 0;
 }
 
-/// Calculate the updated position based on input state and acceleration
+/// Calculate the updated velocity and position based on input state and acceleration
 /// TODO: Prob convert to floating point
 ///
 const accel = 1;
 const max_speed = 8;
-fn playerMovementSystemUpdate(current_button_states: pd.PDButtons, current_player_pos: Vec2i) Vec2i {
-    var updated_pos = current_player_pos;
+fn playerMovementSystemUpdate(current_button_states: pd.PDButtons, current_player_pos: *@Vector(2, i32), current_player_vel: *@Vector(2, i32)) void {
     var move_pressed = false;
 
     if ((current_button_states & pd.kButtonRight) > 0) {
-        player_vel.x += accel;
+        current_player_vel.*[0] += accel;
         move_pressed = true;
     }
     if ((current_button_states & pd.kButtonLeft) > 0) {
-        player_vel.x -= accel;
+        current_player_vel.*[0] -= accel;
         move_pressed = true;
     }
     if ((current_button_states & pd.kButtonUp) > 0) {
-        player_vel.y -= accel;
+        current_player_vel.*[1] -= accel;
         move_pressed = true;
     }
     if ((current_button_states & pd.kButtonDown) > 0) {
-        player_vel.y += accel;
+        current_player_vel.*[1] += accel;
         move_pressed = true;
     }
 
     if (move_pressed == false) {
-        player_vel = Vec2i{ .x = 0, .y = 0 };
+        current_player_vel.* = @Vector(2, i32){ 0, 0 };
     }
 
-    if (player_vel.x < -max_speed) {
-        player_vel.x = -max_speed;
-    } else if (player_vel.x > max_speed) {
-        player_vel.x = max_speed;
+    if (current_player_vel.*[0] < -max_speed) {
+        current_player_vel.*[0] = -max_speed;
+    } else if (current_player_vel.*[0] > max_speed) {
+        current_player_vel.*[0] = max_speed;
     }
 
-    if (player_vel.y < -max_speed) {
-        player_vel.y = -max_speed;
-    } else if (player_vel.y > max_speed) {
-        player_vel.y = max_speed;
+    if (current_player_vel.*[1] < -max_speed) {
+        current_player_vel.*[1] = -max_speed;
+    } else if (current_player_vel.*[1] > max_speed) {
+        current_player_vel.*[1] = max_speed;
     }
 
-    updated_pos.x += player_vel.x;
-    updated_pos.y += player_vel.y;
-    return updated_pos;
+    current_player_pos.* += current_player_vel.*;
 }
 
 /// Fire everytime the crank moves through 360 degrees
