@@ -11,10 +11,7 @@ pub fn build(b: *Builder) !void {
     const target = b.standardTargetOptions(.{});
 
     const sdk_path = try std.process.getEnvVarOwned(allocator, "PLAYDATE_SDK_PATH");
-    const c_sdk_path = try std.fs.path.join(allocator, &[_]string{
-        sdk_path,
-        "C_API",
-    });
+    const c_sdk_path = try std.fs.path.join(allocator, &[_]string{ sdk_path, "C_API" });
 
     //Create simulator DLL
     const simulator = b.addSharedLibrary("pdex", "src/main.zig", .unversioned);
@@ -63,10 +60,7 @@ fn copyAssets(_: *std.build.Step) !void {
     try std.fs.cwd().copyFile("pdxinfo", output_dir, "pdxinfo", .{});
 
     //Images
-    var image_dir = try std.fs.cwd().openDir(
-        "images",
-        .{ .iterate = true },
-    );
+    var image_dir = try std.fs.cwd().openDir("images", .{ .iterate = true });
     defer image_dir.close();
 
     var iter = image_dir.iterate();
