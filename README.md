@@ -9,6 +9,7 @@ Inspired by shooters like Minigore this will be a simple horde survival game whe
 * Scrolling camera to follow player
 ** Offset in the direction of movement
 * Convert world space to metres
+* Physics with respect to time
 * Bullet projectiles
 * Culling
 * Enemies

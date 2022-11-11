@@ -1,9 +1,7 @@
 const std = @import("std");
+const pd = @import("playdate.zig").api;
 const graphics_coords = @import("graphics_coords.zig");
 const maths = @import("maths.zig");
-const pd = @cImport({
-    @cInclude("pd_api.h");
-});
 
 const Vec2i = @Vector(2, i32);
 const Vec2f = @Vector(2, f32);
