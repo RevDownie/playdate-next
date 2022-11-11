@@ -159,11 +159,12 @@ fn firingSystemUpdate(sys: pd.playdate_sys) bool {
 /// Enemies seek out the player and move towards them to attack
 ///
 fn enemyMovementSystem(player_world_pos: Vec2f, enemy_world_pos: []Vec2f) void {
-    const enemy_speed = @splat(2, ENEMY_MAX_SPEED);
-    //TODO: Accelerate and stop the jitter from overshoot
     var i: usize = 0;
     while (i < enemy_world_pos.len) : (i += 1) {
-        const to_target = maths.normalise_safe(player_world_pos - enemy_world_pos[i]);
-        enemy_world_pos[i] += to_target * enemy_speed;
+        const to_target = player_world_pos - enemy_world_pos[i];
+        const mag = maths.magnitude(to_target);
+        const dir_to_target = maths.normaliseSafeMag(to_target, mag);
+
+        enemy_world_pos[i] += dir_to_target * @splat(2, @minimum(ENEMY_MAX_SPEED, mag));
     }
 }
