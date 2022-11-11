@@ -9,6 +9,7 @@ Inspired by shooters like Minigore this will be a simple horde survival game whe
 * Scrolling camera to follow player
 ** Offset in the direction of movement
 * Bullet projectiles
+* Culling
 * Enemies
 * Auto targetting? Or button to switch target?
 * Split up main.zig as it gets too large
