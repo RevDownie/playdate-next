@@ -8,9 +8,12 @@ Inspired by shooters like Minigore this will be a simple horde survival game whe
 * Simulator hot reload of DLL
 * Scrolling camera to follow player
 ** Offset in the direction of movement
+* Convert world space to metres
 * Bullet projectiles
 * Culling
 * Enemies
+* Health
+* Scoreboard
 * Auto targetting? Or button to switch target?
 * Split up main.zig as it gets too large
 * Level background (isometric tiles?)

@@ -1,23 +1,26 @@
 const std = @import("std");
 const graphics_coords = @import("graphics_coords.zig");
+const maths = @import("maths.zig");
 const pd = @cImport({
     @cInclude("pd_api.h");
 });
 
 const Vec2i = @Vector(2, i32);
+const Vec2f = @Vector(2, f32);
 
 /// Game constants
 const MAX_ENTITIES = 2;
-const PLAYER_ACC = 1;
-const PLAYER_MAX_SPEED = 8;
+const PLAYER_ACC: f32 = 1;
+const PLAYER_MAX_SPEED: f32 = 8;
+const ENEMY_MAX_SPEED: f32 = 6;
 
 /// Common game state
 var playdate_api: *pd.PlaydateAPI = undefined;
 var entity_sprites: [MAX_ENTITIES]*pd.LCDBitmap = undefined;
 var player_sprite_dir: pd.LCDBitmapFlip = pd.kBitmapUnflipped;
-var entity_world_pos = [_]Vec2i{Vec2i{ 0, 0 }} ** MAX_ENTITIES;
-var entity_vels = [_]Vec2i{Vec2i{ 0, 0 }} ** MAX_ENTITIES;
-var camera_pos = Vec2i{ 0, 0 };
+var entity_world_pos = [_]Vec2f{Vec2f{ 0, 0 }} ** MAX_ENTITIES;
+var entity_vels = [_]Vec2f{Vec2f{ 0, 0 }} ** MAX_ENTITIES;
+var camera_pos = Vec2f{ 0, 0 };
 
 var enemy_sprite_tmp: *pd.LCDBitmap = undefined;
 
@@ -63,6 +66,7 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
     sys.getButtonState.?(&current, &pushed, &released);
 
     playerMovementSystemUpdate(current, &entity_world_pos[0], &entity_vels[0]);
+    enemyMovementSystem(entity_world_pos[0], entity_world_pos[1..]);
 
     //System for all entities
     if (entity_vels[0][0] > 0) {
@@ -95,9 +99,8 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
 }
 
 /// Calculate the updated velocity and position based on input state and PLAYER_ACCeration
-/// TODO: Prob convert to floating point
 ///
-fn playerMovementSystemUpdate(current_button_states: pd.PDButtons, current_player_world_pos: *Vec2i, current_player_vel: *Vec2i) void {
+fn playerMovementSystemUpdate(current_button_states: pd.PDButtons, current_player_world_pos: *Vec2f, current_player_vel: *Vec2f) void {
     var move_pressed = false;
 
     if ((current_button_states & pd.kButtonRight) > 0) {
@@ -118,7 +121,7 @@ fn playerMovementSystemUpdate(current_button_states: pd.PDButtons, current_playe
     }
 
     if (move_pressed == false) {
-        current_player_vel.* = Vec2i{ 0, 0 };
+        current_player_vel.* = Vec2f{ 0, 0 };
     }
 
     if (current_player_vel.*[0] < -PLAYER_MAX_SPEED) {
@@ -151,4 +154,16 @@ fn firingSystemUpdate(sys: pd.playdate_sys) bool {
     }
 
     return false;
+}
+
+/// Enemies seek out the player and move towards them to attack
+///
+fn enemyMovementSystem(player_world_pos: Vec2f, enemy_world_pos: []Vec2f) void {
+    const enemy_speed = @splat(2, ENEMY_MAX_SPEED);
+    //TODO: Accelerate and stop the jitter from overshoot
+    var i: usize = 0;
+    while (i < enemy_world_pos.len) : (i += 1) {
+        const to_target = maths.normalise_safe(player_world_pos - enemy_world_pos[i]);
+        enemy_world_pos[i] += to_target * enemy_speed;
+    }
 }
