@@ -115,16 +115,16 @@ fn playerMovementSystemUpdate(current_button_states: pd.PDButtons, current_playe
     current_player_pos.* += current_player_vel.*;
 }
 
-/// Fire everytime the crank moves through 360 degrees
+/// Fire everytime the crank moves through 60 degrees (6 bullets per revolution)
 ///
 var crank_angle_since_fire: f32 = 0.0;
 fn firingSystemUpdate(sys: pd.playdate_sys) bool {
     const crank_delta = sys.getCrankChange.?();
     if (crank_delta >= 0) {
         crank_angle_since_fire += crank_delta;
-        if (crank_angle_since_fire >= 360) {
+        if (crank_angle_since_fire >= 60) {
             //Fire
-            crank_angle_since_fire -= 360;
+            crank_angle_since_fire -= 60;
             return true;
         }
     }
