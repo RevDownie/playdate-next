@@ -2,6 +2,7 @@ const std = @import("std");
 const pd = @import("playdate.zig").api;
 const graphics_coords = @import("graphics_coords.zig");
 const maths = @import("maths.zig");
+const bullet_sys = @import("bullet_system.zig");
 
 const Vec2i = @Vector(2, i32);
 const Vec2f = @Vector(2, f32);
@@ -15,9 +16,9 @@ const ENEMY_MAX_SPEED: f32 = 6;
 /// Common game state
 var playdate_api: *pd.PlaydateAPI = undefined;
 var entity_sprites: [MAX_ENTITIES]*pd.LCDBitmap = undefined;
-var player_sprite_dir: pd.LCDBitmapFlip = pd.kBitmapUnflipped;
 var entity_world_pos = [_]Vec2f{Vec2f{ 0, 0 }} ** MAX_ENTITIES;
 var entity_vels = [_]Vec2f{Vec2f{ 0, 0 }} ** MAX_ENTITIES;
+var player_sprite_dir: pd.LCDBitmapFlip = pd.kBitmapUnflipped;
 var camera_pos = Vec2f{ 0, 0 };
 
 var enemy_sprite_tmp: *pd.LCDBitmap = undefined;
@@ -45,7 +46,6 @@ fn gameInit() void {
     entity_sprites[0] = graphics.loadBitmap.?("Test0.pdi", null).?;
     entity_sprites[1] = graphics.loadBitmap.?("Test1.pdi", null).?;
 
-    //Load the enemies sprite pool
     //Init the systems
 }
 
@@ -63,8 +63,15 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
     var released: pd.PDButtons = undefined;
     sys.getButtonState.?(&current, &pushed, &released);
 
+    const shouldFire = firingSystemUpdate(sys);
+    if (shouldFire) {
+        sys.logToConsole.?("Fire");
+        bullet_sys.fire(entity_world_pos[0], Vec2f{ 1, 0 });
+    }
+
     playerMovementSystemUpdate(current, &entity_world_pos[0], &entity_vels[0]);
     enemyMovementSystem(entity_world_pos[0], entity_world_pos[1..]);
+    bullet_sys.update(sys.getElapsedTime.?());
 
     //System for all entities
     if (entity_vels[0][0] > 0) {
@@ -85,13 +92,11 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
         graphics.drawBitmap.?(entity_sprites[i], entity_screen_pos[i][0], entity_screen_pos[i][1], player_sprite_dir);
     }
 
-    const shouldFire = firingSystemUpdate(sys);
-    if (shouldFire) {
-        sys.logToConsole.?("Fire");
-    }
+    bullet_sys.render(graphics, disp, camera_pos);
 
     _ = graphics.drawText.?("hello world!", 12, pd.kASCIIEncoding, 100, 100);
     sys.drawFPS.?(0, 0);
+    sys.resetElapsedTime.?();
 
     return 0;
 }
