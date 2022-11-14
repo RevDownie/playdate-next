@@ -169,6 +169,6 @@ fn enemyMovementSystem(player_world_pos: Vec2f, enemy_world_pos: []Vec2f) void {
         const mag = maths.magnitude(to_target);
         const dir_to_target = maths.normaliseSafeMag(to_target, mag);
 
-        enemy_world_pos[i] += dir_to_target * @splat(2, @minimum(ENEMY_MAX_SPEED, mag));
+        enemy_world_pos[i] += dir_to_target * @splat(2, @min(ENEMY_MAX_SPEED, mag));
     }
 }

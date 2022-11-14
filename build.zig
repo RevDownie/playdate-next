@@ -15,7 +15,7 @@ pub fn build(b: *Builder) !void {
 
     //Create simulator DLL
     const simulator = b.addSharedLibrary("pdex", "src/main.zig", .unversioned);
-    simulator.addIncludeDir(c_sdk_path);
+    simulator.addIncludePath(c_sdk_path);
     simulator.defineCMacro("TARGET_SIMULATOR", null);
     simulator.defineCMacro("TARGET_EXTENSION", null);
     simulator.defineCMacro("_WINDLL", null);
@@ -53,6 +53,11 @@ fn createEmptyBin(_: *std.build.Step) !void {
 
 fn copyAssets(_: *std.build.Step) !void {
     std.debug.print("Copying assets...\n", .{});
+
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
     var output_dir = try std.fs.cwd().openDir("zig-out/lib", .{});
     defer output_dir.close();
 
@@ -60,14 +65,15 @@ fn copyAssets(_: *std.build.Step) !void {
     try std.fs.cwd().copyFile("pdxinfo", output_dir, "pdxinfo", .{});
 
     //Images
-    var image_dir = try std.fs.cwd().openDir("images", .{ .iterate = true });
+    var image_dir = try std.fs.cwd().openIterableDir("images", .{});
     defer image_dir.close();
 
     var iter = image_dir.iterate();
     while (try iter.next()) |entry| {
         if (entry.kind == .File) {
             std.debug.print("Copying image: {s}\n", .{entry.name});
-            try image_dir.copyFile(entry.name, output_dir, entry.name, .{});
+            const path = try std.fs.path.join(allocator, &[_]string{ "images", entry.name });
+            try std.fs.cwd().copyFile(path, output_dir, entry.name, .{});
         }
     }
 }
