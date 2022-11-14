@@ -41,6 +41,7 @@ pub export fn eventHandler(playdate: [*c]pd.PlaydateAPI, event: pd.PDSystemEvent
 ///
 fn gameInit() void {
     const graphics = playdate_api.graphics.*;
+    playdate_api.display.*.setRefreshRate.?(0); //Temp unleashing the frame limit to measure performance
 
     //Spawn the player sprite
     entity_sprites[0] = graphics.loadBitmap.?("Test0.pdi", null).?;
