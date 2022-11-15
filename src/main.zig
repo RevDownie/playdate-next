@@ -21,17 +21,11 @@ var entity_vels = [_]Vec2f{Vec2f{ 0, 0 }} ** MAX_ENTITIES;
 var player_sprite_dir: pd.LCDBitmapFlip = pd.kBitmapUnflipped;
 var camera_pos = Vec2f{ 0, 0 };
 
-var enemy_sprite_tmp: *pd.LCDBitmap = undefined;
-
 /// Exposed via the shared library to the Playdate runner which forwards on events
 ///
 pub export fn eventHandler(playdate: [*c]pd.PlaydateAPI, event: pd.PDSystemEvent, _: c_ulong) callconv(.C) c_int {
     switch (event) {
-        pd.kEventInit => {
-            playdate_api = playdate;
-            gameInit();
-            playdate.*.system.*.setUpdateCallback.?(gameUpdate, null);
-        },
+        pd.kEventInit => gameInit(playdate),
         else => {},
     }
     return 0;
@@ -39,15 +33,19 @@ pub export fn eventHandler(playdate: [*c]pd.PlaydateAPI, event: pd.PDSystemEvent
 
 /// Upfront setup - allocates all the memory required and loads and initialises all assets and pools
 ///
-fn gameInit() void {
+fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
+    playdate_api = playdate;
+    playdate_api.system.*.setUpdateCallback.?(gameUpdate, null);
+
     const graphics = playdate_api.graphics.*;
-    playdate_api.display.*.setRefreshRate.?(0); //Temp unleashing the frame limit to measure performance
+    //playdate_api.display.*.setRefreshRate.?(0); //Temp unleashing the frame limit to measure performance
 
     //Spawn the player sprite
     entity_sprites[0] = graphics.loadBitmap.?("Test0.pdi", null).?;
     entity_sprites[1] = graphics.loadBitmap.?("Test1.pdi", null).?;
 
     //Init the systems
+
 }
 
 /// The main game update loop that drives the various systems. Also acts as the render loop
@@ -56,6 +54,8 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
     const graphics = playdate_api.graphics.*;
     const sys = playdate_api.system.*;
     const disp = playdate_api.display.*;
+
+    const dt = 0.02; //TODO figure out how to derive this
 
     graphics.clear.?(pd.kColorWhite);
 
@@ -66,13 +66,12 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
 
     const shouldFire = firingSystemUpdate(sys);
     if (shouldFire) {
-        sys.logToConsole.?("Fire");
         bullet_sys.fire(entity_world_pos[0], Vec2f{ 1, 0 });
     }
 
     playerMovementSystemUpdate(current, &entity_world_pos[0], &entity_vels[0]);
     enemyMovementSystem(entity_world_pos[0], entity_world_pos[1..]);
-    bullet_sys.update(sys.getElapsedTime.?());
+    bullet_sys.update(dt);
 
     //System for all entities
     if (entity_vels[0][0] > 0) {
@@ -97,9 +96,8 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
 
     _ = graphics.drawText.?("hello world!", 12, pd.kASCIIEncoding, 100, 100);
     sys.drawFPS.?(0, 0);
-    sys.resetElapsedTime.?();
 
-    return 0;
+    return 1;
 }
 
 /// Calculate the updated velocity and position based on input state and PLAYER_ACCeration

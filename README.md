@@ -2,7 +2,11 @@
 A Playdate game written in Zig using Windows
 
 ## Game Overview
-Inspired by shooters like Minigore this will be a simple horde survival game where the player moves around and uses a crank controlled gatling gone to take down enemies
+Inspired by shooters like Minigore. This is a simple horde survival game where the player moves around and uses a crank controlled gatling gun to take down enemies.
+
+## Toolchain
+- Built with Zig 0.10.0
+- Build with Arm toolchain 11.3.1
 
 ## TODO List
 * Simulator hot reload of DLL

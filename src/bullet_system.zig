@@ -7,7 +7,7 @@ const Vec2i = @Vector(2, i32);
 const BULLET_POOL_SIZE = 100; //TODO: Calculate better approx based on fire rate and lifetime
 const BULLET_MAX_SPEED: f32 = 10;
 const BULLET_MAX_SPEED_V = @splat(2, BULLET_MAX_SPEED);
-const BULLET_LIFETIME = 5;
+const BULLET_LIFETIME = 3;
 
 var num_active: usize = 0;
 var bullet_world_pos_pool: [BULLET_POOL_SIZE]Vec2f = undefined;
@@ -54,6 +54,6 @@ pub fn render(graphics: pd.playdate_graphics, disp: pd.playdate_display, camera_
     graphics_coords.worldSpaceToScreenSpace(camera_pos, active, bullet_screen_pos[0..], disp.getWidth.?(), disp.getHeight.?());
 
     for (active) |_, i| {
-        graphics.drawRect.?(bullet_screen_pos[i][0], bullet_screen_pos[i][1], 15, 15, pd.kColorBlack);
+        graphics.drawRect.?(bullet_screen_pos[i][0], bullet_screen_pos[i][1], 8, 8, pd.kColorBlack);
     }
 }
