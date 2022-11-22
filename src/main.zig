@@ -8,18 +8,63 @@ const Vec2i = @Vector(2, i32);
 const Vec2f = @Vector(2, f32);
 
 /// Game constants
-const MAX_ENTITIES = 2;
+const MAX_ENTITIES = 100;
 const PLAYER_ACC: f32 = 1;
 const PLAYER_MAX_SPEED: f32 = 8;
 const ENEMY_MAX_SPEED: f32 = 6;
+const FIRE_ANGLE_DELTA: f32 = 60;
+
+const SpriteIndex = struct { index: i32, flip: pd.LCDBitmapFlip };
+
+//Our sprites are captured at 22.5 degree snapshots
+//0 is facing towards screen and 8 is facing away, 4 is facing to the left
+const SPRITE_INDEX_MAP = [_]SpriteIndex{
+    SpriteIndex{ .index = 0, .flip = pd.kBitmapUnflipped }, //0
+    SpriteIndex{ .index = 0, .flip = pd.kBitmapUnflipped }, //10
+    SpriteIndex{ .index = 1, .flip = pd.kBitmapUnflipped }, //20
+    SpriteIndex{ .index = 1, .flip = pd.kBitmapUnflipped }, //30
+    SpriteIndex{ .index = 2, .flip = pd.kBitmapUnflipped }, //40
+    SpriteIndex{ .index = 2, .flip = pd.kBitmapUnflipped }, //50
+    SpriteIndex{ .index = 3, .flip = pd.kBitmapUnflipped }, //60
+    SpriteIndex{ .index = 3, .flip = pd.kBitmapUnflipped }, //70
+    SpriteIndex{ .index = 4, .flip = pd.kBitmapUnflipped }, //80
+    SpriteIndex{ .index = 4, .flip = pd.kBitmapUnflipped }, //90
+    SpriteIndex{ .index = 4, .flip = pd.kBitmapUnflipped }, //100
+    SpriteIndex{ .index = 5, .flip = pd.kBitmapUnflipped }, //110
+    SpriteIndex{ .index = 5, .flip = pd.kBitmapUnflipped }, //120
+    SpriteIndex{ .index = 6, .flip = pd.kBitmapUnflipped }, //130
+    SpriteIndex{ .index = 6, .flip = pd.kBitmapUnflipped }, //140
+    SpriteIndex{ .index = 7, .flip = pd.kBitmapUnflipped }, //150
+    SpriteIndex{ .index = 7, .flip = pd.kBitmapUnflipped }, //160
+    SpriteIndex{ .index = 8, .flip = pd.kBitmapUnflipped }, //170
+    SpriteIndex{ .index = 8, .flip = pd.kBitmapUnflipped }, //180
+    SpriteIndex{ .index = 8, .flip = pd.kBitmapUnflipped }, //190
+    SpriteIndex{ .index = 7, .flip = pd.kBitmapUnflipped }, //200
+    SpriteIndex{ .index = 7, .flip = pd.kBitmapUnflipped }, //210
+    SpriteIndex{ .index = 6, .flip = pd.kBitmapFlippedX }, //220
+    SpriteIndex{ .index = 6, .flip = pd.kBitmapFlippedX }, //230
+    SpriteIndex{ .index = 5, .flip = pd.kBitmapFlippedX }, //240
+    SpriteIndex{ .index = 5, .flip = pd.kBitmapFlippedX }, //250
+    SpriteIndex{ .index = 4, .flip = pd.kBitmapFlippedX }, //260
+    SpriteIndex{ .index = 4, .flip = pd.kBitmapFlippedX }, //270
+    SpriteIndex{ .index = 4, .flip = pd.kBitmapFlippedX }, //280
+    SpriteIndex{ .index = 3, .flip = pd.kBitmapFlippedX }, //290
+    SpriteIndex{ .index = 3, .flip = pd.kBitmapFlippedX }, //300
+    SpriteIndex{ .index = 2, .flip = pd.kBitmapFlippedX }, //310
+    SpriteIndex{ .index = 2, .flip = pd.kBitmapFlippedX }, //320
+    SpriteIndex{ .index = 1, .flip = pd.kBitmapFlippedX }, //330
+    SpriteIndex{ .index = 1, .flip = pd.kBitmapFlippedX }, //340
+    SpriteIndex{ .index = 0, .flip = pd.kBitmapUnflipped }, //350
+    SpriteIndex{ .index = 0, .flip = pd.kBitmapUnflipped }, //360
+};
 
 /// Common game state
 var playdate_api: *pd.PlaydateAPI = undefined;
-var entity_sprites: [MAX_ENTITIES]*pd.LCDBitmap = undefined;
 var entity_world_pos = [_]Vec2f{Vec2f{ 0, 0 }} ** MAX_ENTITIES;
 var entity_vels = [_]Vec2f{Vec2f{ 0, 0 }} ** MAX_ENTITIES;
-var player_sprite_dir: pd.LCDBitmapFlip = pd.kBitmapUnflipped;
 var camera_pos = Vec2f{ 0, 0 };
+var hero_bitmap_table: *pd.LCDBitmapTable = undefined;
+var num_active_entities: usize = 0;
 
 /// Exposed via the shared library to the Playdate runner which forwards on events
 ///
@@ -38,11 +83,13 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     playdate_api.system.*.setUpdateCallback.?(gameUpdate, null);
 
     const graphics = playdate_api.graphics.*;
-    //playdate_api.display.*.setRefreshRate.?(0); //Temp unleashing the frame limit to measure performance
+    playdate_api.display.*.setRefreshRate.?(0); //Temp unleashing the frame limit to measure performance
+
+    //Load the assets
+    hero_bitmap_table = graphics.loadBitmapTable.?("hero1", null).?;
 
     //Spawn the player sprite
-    entity_sprites[0] = graphics.loadBitmap.?("Test0.pdi", null).?;
-    entity_sprites[1] = graphics.loadBitmap.?("Test1.pdi", null).?;
+    num_active_entities = 2;
 
     //Init the systems
 
@@ -64,37 +111,36 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
     var released: pd.PDButtons = undefined;
     sys.getButtonState.?(&current, &pushed, &released);
 
-    const shouldFire = firingSystemUpdate(sys);
-    if (shouldFire) {
-        bullet_sys.fire(entity_world_pos[0], Vec2f{ 1, 0 });
-    }
-
     playerMovementSystemUpdate(current, &entity_world_pos[0], &entity_vels[0]);
     enemyMovementSystem(entity_world_pos[0], entity_world_pos[1..]);
+    const target_dir = autoTargetingSystem(entity_world_pos[0], entity_world_pos[1..]);
     bullet_sys.update(dt);
 
-    //System for all entities
-    if (entity_vels[0][0] > 0) {
-        player_sprite_dir = pd.kBitmapUnflipped;
-    } else if (entity_vels[0][0] < 0) {
-        player_sprite_dir = pd.kBitmapFlippedX;
+    const shouldFire = firingSystemUpdate(sys);
+    if (shouldFire) {
+        bullet_sys.fire(entity_world_pos[0], target_dir);
     }
 
     camera_pos = entity_world_pos[0]; //Follow the player directly for now
 
-    //TODO: Handle only slice of max entities that is used
-    var entity_screen_pos = [_]Vec2i{Vec2i{ 0, 0 }} ** MAX_ENTITIES;
-    graphics_coords.worldSpaceToScreenSpace(camera_pos, entity_world_pos[0..], entity_screen_pos[0..], disp.getWidth.?(), disp.getHeight.?());
+    //Render the entities
+    var entity_screen_pos: [MAX_ENTITIES]Vec2i = undefined;
+    graphics_coords.worldSpaceToScreenSpace(camera_pos, entity_world_pos[0..num_active_entities], entity_screen_pos[0..num_active_entities], disp.getWidth.?(), disp.getHeight.?());
+
+    //TODO: Interpolation
+    //Player facing the way they are firing
+    const deg = maths.angleDegrees360(Vec2f{ 0, -1 }, target_dir);
+    const spriteIdx = angleToSpriteIndex(deg);
 
     var i: usize = 0;
-    while (i < entity_sprites.len) : (i += 1) {
+    while (i < num_active_entities) : (i += 1) {
         //TODO Culling (in a pass or just in time?)
-        graphics.drawBitmap.?(entity_sprites[i], entity_screen_pos[i][0], entity_screen_pos[i][1], player_sprite_dir);
+        //TODO: Handle centering the sprite at the ground better
+        graphics.drawBitmap.?(graphics.getTableBitmap.?(hero_bitmap_table, spriteIdx.index).?, entity_screen_pos[i][0] - 32, entity_screen_pos[i][1] - 64, spriteIdx.flip);
     }
 
     bullet_sys.render(graphics, disp, camera_pos);
 
-    _ = graphics.drawText.?("hello world!", 12, pd.kASCIIEncoding, 100, 100);
     sys.drawFPS.?(0, 0);
 
     return 1;
@@ -148,9 +194,9 @@ fn firingSystemUpdate(sys: pd.playdate_sys) bool {
     const crank_delta = sys.getCrankChange.?();
     if (crank_delta >= 0) {
         crank_angle_since_fire += crank_delta;
-        if (crank_angle_since_fire >= 60) {
+        if (crank_angle_since_fire >= FIRE_ANGLE_DELTA) {
             //Fire
-            crank_angle_since_fire -= 60;
+            crank_angle_since_fire -= FIRE_ANGLE_DELTA;
             return true;
         }
     }
@@ -169,4 +215,15 @@ fn enemyMovementSystem(player_world_pos: Vec2f, enemy_world_pos: []Vec2f) void {
 
         enemy_world_pos[i] += dir_to_target * @splat(2, @min(ENEMY_MAX_SPEED, mag));
     }
+}
+
+/// Pick the hottest target - closest for now
+///
+fn autoTargetingSystem(player_world_pos: Vec2f, enemy_world_pos: []Vec2f) Vec2f {
+    return maths.normaliseSafe(enemy_world_pos[0] - player_world_pos);
+}
+
+inline fn angleToSpriteIndex(degrees: f32) SpriteIndex {
+    const index = @floatToInt(usize, degrees * 0.1);
+    return SPRITE_INDEX_MAP[index];
 }
