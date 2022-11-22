@@ -3,6 +3,7 @@ const pd = @import("playdate.zig").api;
 const graphics_coords = @import("graphics_coords.zig");
 const maths = @import("maths.zig");
 const bullet_sys = @import("bullet_system.zig");
+const anim = @import("animation.zig");
 
 const Vec2i = @Vector(2, i32);
 const Vec2f = @Vector(2, f32);
@@ -13,50 +14,6 @@ const PLAYER_ACC: f32 = 1;
 const PLAYER_MAX_SPEED: f32 = 8;
 const ENEMY_MAX_SPEED: f32 = 6;
 const FIRE_ANGLE_DELTA: f32 = 60;
-
-const SpriteIndex = struct { index: i32, flip: pd.LCDBitmapFlip };
-
-//Our sprites are captured at 22.5 degree snapshots
-//0 is facing towards screen and 8 is facing away, 4 is facing to the left
-const SPRITE_INDEX_MAP = [_]SpriteIndex{
-    SpriteIndex{ .index = 0, .flip = pd.kBitmapUnflipped }, //0
-    SpriteIndex{ .index = 0, .flip = pd.kBitmapUnflipped }, //10
-    SpriteIndex{ .index = 1, .flip = pd.kBitmapUnflipped }, //20
-    SpriteIndex{ .index = 1, .flip = pd.kBitmapUnflipped }, //30
-    SpriteIndex{ .index = 2, .flip = pd.kBitmapUnflipped }, //40
-    SpriteIndex{ .index = 2, .flip = pd.kBitmapUnflipped }, //50
-    SpriteIndex{ .index = 3, .flip = pd.kBitmapUnflipped }, //60
-    SpriteIndex{ .index = 3, .flip = pd.kBitmapUnflipped }, //70
-    SpriteIndex{ .index = 4, .flip = pd.kBitmapUnflipped }, //80
-    SpriteIndex{ .index = 4, .flip = pd.kBitmapUnflipped }, //90
-    SpriteIndex{ .index = 4, .flip = pd.kBitmapUnflipped }, //100
-    SpriteIndex{ .index = 5, .flip = pd.kBitmapUnflipped }, //110
-    SpriteIndex{ .index = 5, .flip = pd.kBitmapUnflipped }, //120
-    SpriteIndex{ .index = 6, .flip = pd.kBitmapUnflipped }, //130
-    SpriteIndex{ .index = 6, .flip = pd.kBitmapUnflipped }, //140
-    SpriteIndex{ .index = 7, .flip = pd.kBitmapUnflipped }, //150
-    SpriteIndex{ .index = 7, .flip = pd.kBitmapUnflipped }, //160
-    SpriteIndex{ .index = 8, .flip = pd.kBitmapUnflipped }, //170
-    SpriteIndex{ .index = 8, .flip = pd.kBitmapUnflipped }, //180
-    SpriteIndex{ .index = 8, .flip = pd.kBitmapUnflipped }, //190
-    SpriteIndex{ .index = 7, .flip = pd.kBitmapUnflipped }, //200
-    SpriteIndex{ .index = 7, .flip = pd.kBitmapUnflipped }, //210
-    SpriteIndex{ .index = 6, .flip = pd.kBitmapFlippedX }, //220
-    SpriteIndex{ .index = 6, .flip = pd.kBitmapFlippedX }, //230
-    SpriteIndex{ .index = 5, .flip = pd.kBitmapFlippedX }, //240
-    SpriteIndex{ .index = 5, .flip = pd.kBitmapFlippedX }, //250
-    SpriteIndex{ .index = 4, .flip = pd.kBitmapFlippedX }, //260
-    SpriteIndex{ .index = 4, .flip = pd.kBitmapFlippedX }, //270
-    SpriteIndex{ .index = 4, .flip = pd.kBitmapFlippedX }, //280
-    SpriteIndex{ .index = 3, .flip = pd.kBitmapFlippedX }, //290
-    SpriteIndex{ .index = 3, .flip = pd.kBitmapFlippedX }, //300
-    SpriteIndex{ .index = 2, .flip = pd.kBitmapFlippedX }, //310
-    SpriteIndex{ .index = 2, .flip = pd.kBitmapFlippedX }, //320
-    SpriteIndex{ .index = 1, .flip = pd.kBitmapFlippedX }, //330
-    SpriteIndex{ .index = 1, .flip = pd.kBitmapFlippedX }, //340
-    SpriteIndex{ .index = 0, .flip = pd.kBitmapUnflipped }, //350
-    SpriteIndex{ .index = 0, .flip = pd.kBitmapUnflipped }, //360
-};
 
 /// Common game state
 var playdate_api: *pd.PlaydateAPI = undefined;
@@ -123,14 +80,13 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
 
     camera_pos = entity_world_pos[0]; //Follow the player directly for now
 
-    //Render the entities
+    //---Render the entities
     var entity_screen_pos: [MAX_ENTITIES]Vec2i = undefined;
     graphics_coords.worldSpaceToScreenSpace(camera_pos, entity_world_pos[0..num_active_entities], entity_screen_pos[0..num_active_entities], disp.getWidth.?(), disp.getHeight.?());
 
     //TODO: Interpolation
     //Player facing the way they are firing
-    const deg = maths.angleDegrees360(Vec2f{ 0, -1 }, target_dir);
-    const spriteIdx = angleToSpriteIndex(deg);
+    const spriteIdx = anim.bitmapFrameForDir(target_dir);
 
     var i: usize = 0;
     while (i < num_active_entities) : (i += 1) {
@@ -221,9 +177,4 @@ fn enemyMovementSystem(player_world_pos: Vec2f, enemy_world_pos: []Vec2f) void {
 ///
 fn autoTargetingSystem(player_world_pos: Vec2f, enemy_world_pos: []Vec2f) Vec2f {
     return maths.normaliseSafe(enemy_world_pos[0] - player_world_pos);
-}
-
-inline fn angleToSpriteIndex(degrees: f32) SpriteIndex {
-    const index = @floatToInt(usize, degrees * 0.1);
-    return SPRITE_INDEX_MAP[index];
 }
