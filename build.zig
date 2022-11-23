@@ -56,6 +56,13 @@ pub fn build(b: *Builder) !void {
     const pdc_step = b.addSystemCommand(&.{ "pdc", "-k", "zig-out/lib", b.fmt("zig-out/{s}.pdx", .{game_name}) });
     pdc_step.step.dependOn(copy_assets_step);
     b.getInstallStep().dependOn(&pdc_step.step);
+
+    //Tests
+    const maths_test_step = b.addTest("src/maths.zig");
+    const graph_coords_test_step = b.addTest("src/graphics_coords.zig");
+    const test_step = b.step("test", "Run tests");
+    test_step.dependOn(&maths_test_step.step);
+    test_step.dependOn(&graph_coords_test_step.step);
 }
 
 fn createEmptyBin(_: *std.build.Step) !void {
