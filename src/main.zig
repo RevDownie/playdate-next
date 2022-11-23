@@ -73,8 +73,8 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
     const target_dir = autoTargetingSystem(entity_world_pos[0], entity_world_pos[1..]);
     bullet_sys.update(dt);
 
-    const shouldFire = firingSystemUpdate(sys);
-    if (shouldFire) {
+    const should_fire = firingSystemUpdate(sys);
+    if (should_fire) {
         bullet_sys.fire(entity_world_pos[0], target_dir);
     }
 
