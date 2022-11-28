@@ -57,6 +57,13 @@ pub fn build(b: *Builder) !void {
     pdc_step.step.dependOn(copy_assets_step);
     b.getInstallStep().dependOn(&pdc_step.step);
 
+    //run on simulator
+    const sim_path = try std.fs.path.join(allocator, &[_]string{ sdk_path, "bin/PlaydateSimulator.exe" });
+    const run_sim_cmd = b.addSystemCommand(&.{ sim_path, "zig-out/" ++ game_name ++ ".pdx" });
+    run_sim_cmd.step.dependOn(b.getInstallStep());
+    const run_sim_step = b.step("run-sim", "Run the game on simulator");
+    run_sim_step.dependOn(&run_sim_cmd.step);
+
     //Tests
     const maths_test_step = b.addTest("src/maths.zig");
     const graph_coords_test_step = b.addTest("src/graphics_coords.zig");
