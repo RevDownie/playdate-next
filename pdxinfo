@@ -1,5 +1,6 @@
 name=Playdate-Next
 author=Scott Downie
-description=Playdate next
+description=You are the last bastion against the horde. How long can you hold out?
+version=0.1.0
 bundleID=com.downie.next
 imagePath=

@@ -10,23 +10,19 @@ Inspired by shooters like Minigore. This is a simple horde survival game where t
 
 ## TODO List
 * Simulator hot reload of DLL
-* Scrolling camera to follow player
-** Offset in the direction of movement
+* Offset camera in the direction of movement
 * Convert world space to metres
-* Physics with respect to time
-* Bullet projectiles
 * Culling
-* Enemies
+* Enemy types
+* Enemy deaths
+* Better enemy spawning logic
+* Better auto targetting
 * Health
 * Scoreboard
-* Auto targetting? Or button to switch target?
-* Split up main.zig as it gets too large
 * Level background (isometric tiles?)
 * Movement bounds
 * Actual character sprite and animation
 * Launcher tile
-* Running on device
 * Add running on sim and device to zig build (pdutil)
-* Transparency
-* Sprites vs Bitmaps
 * Enemy spawn effects - pattern
+* Audio
