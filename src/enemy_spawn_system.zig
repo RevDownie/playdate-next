@@ -30,8 +30,8 @@ pub fn update(dt: f32, num_active: usize) []SpawnData {
         //Spawn
         next_spawn_timer = spawn_time;
         spawn_time -= 1.0;
-        const x = (rand.random().float(f32) * 2.0 - 1.0) * 100;
-        const y = (rand.random().float(f32) * 2.0 - 1.0) * 100;
+        const x = (rand.random().float(f32) * 2.0 - 1.0) * 10;
+        const y = (rand.random().float(f32) * 2.0 - 1.0) * 10;
         const sd = SpawnData{ .world_pos = Vec2f{ x, y } };
         spawn_buffer[0] = sd;
         return spawn_buffer[0..1];

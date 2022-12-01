@@ -11,9 +11,9 @@ const Vec2f = @Vector(2, f32);
 
 /// Game constants
 const MAX_ENTITIES = 100;
-const PLAYER_ACC: f32 = 1;
-const PLAYER_MAX_SPEED: f32 = 8;
-const ENEMY_MAX_SPEED: f32 = 6;
+const PLAYER_ACC: f32 = 2;
+const PLAYER_MAX_SPEED: f32 = 2.6;
+const ENEMY_MAX_SPEED: f32 = 2.4;
 const FIRE_ANGLE_DELTA: f32 = 60;
 
 /// Common game state
@@ -61,7 +61,7 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
     const sys = playdate_api.system.*;
     const disp = playdate_api.display.*;
 
-    const dt = 0.02; //TODO figure out how to derive this
+    const dt: f32 = 0.02; //TODO figure out how to derive this
 
     graphics.clear.?(pd.kColorWhite);
 
@@ -78,8 +78,8 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
     }
     num_active_entities += spawned.len;
 
-    playerMovementSystemUpdate(current, &entity_world_pos[0], &entity_vels[0]);
-    enemyMovementSystem(entity_world_pos[0], entity_world_pos[1..], entity_vels[1..]);
+    playerMovementSystemUpdate(current, dt, &entity_world_pos[0], &entity_vels[0]);
+    enemyMovementSystem(entity_world_pos[0], dt, entity_world_pos[1..], entity_vels[1..]);
     const target_dir = autoTargetingSystem(entity_world_pos[0], entity_world_pos[1..]);
     bullet_sys.update(dt);
 
@@ -117,43 +117,47 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
 
 /// Calculate the updated velocity and position based on input state and PLAYER_ACCeration
 ///
-fn playerMovementSystemUpdate(current_button_states: pd.PDButtons, current_player_world_pos: *Vec2f, current_player_vel: *Vec2f) void {
+fn playerMovementSystemUpdate(current_button_states: pd.PDButtons, dt: f32, current_player_world_pos: *Vec2f, current_player_vel: *Vec2f) void {
     var move_pressed = false;
 
+    const acc = PLAYER_ACC * dt;
+    var vel = current_player_vel.*;
+
     if ((current_button_states & pd.kButtonRight) > 0) {
-        current_player_vel.*[0] += PLAYER_ACC;
+        vel[0] += acc;
         move_pressed = true;
     }
     if ((current_button_states & pd.kButtonLeft) > 0) {
-        current_player_vel.*[0] -= PLAYER_ACC;
+        vel[0] -= acc;
         move_pressed = true;
     }
     if ((current_button_states & pd.kButtonUp) > 0) {
-        current_player_vel.*[1] += PLAYER_ACC;
+        vel[1] += acc;
         move_pressed = true;
     }
     if ((current_button_states & pd.kButtonDown) > 0) {
-        current_player_vel.*[1] -= PLAYER_ACC;
+        vel[1] -= acc;
         move_pressed = true;
     }
 
     if (move_pressed == false) {
-        current_player_vel.* = Vec2f{ 0, 0 };
+        vel = Vec2f{ 0, 0 };
     }
 
-    if (current_player_vel.*[0] < -PLAYER_MAX_SPEED) {
-        current_player_vel.*[0] = -PLAYER_MAX_SPEED;
-    } else if (current_player_vel.*[0] > PLAYER_MAX_SPEED) {
-        current_player_vel.*[0] = PLAYER_MAX_SPEED;
+    if (vel[0] < -PLAYER_MAX_SPEED) {
+        vel[0] = -PLAYER_MAX_SPEED;
+    } else if (vel[0] > PLAYER_MAX_SPEED) {
+        vel[0] = PLAYER_MAX_SPEED;
     }
 
-    if (current_player_vel.*[1] < -PLAYER_MAX_SPEED) {
-        current_player_vel.*[1] = -PLAYER_MAX_SPEED;
-    } else if (current_player_vel.*[1] > PLAYER_MAX_SPEED) {
-        current_player_vel.*[1] = PLAYER_MAX_SPEED;
+    if (vel[1] < -PLAYER_MAX_SPEED) {
+        vel[1] = -PLAYER_MAX_SPEED;
+    } else if (vel[1] > PLAYER_MAX_SPEED) {
+        vel[1] = PLAYER_MAX_SPEED;
     }
 
-    current_player_world_pos.* += current_player_vel.*;
+    current_player_world_pos.* += vel * @splat(2, dt);
+    current_player_vel.* = vel;
 }
 
 /// Fire everytime the crank moves through 60 degrees (6 bullets per revolution)
@@ -175,14 +179,14 @@ fn firingSystemUpdate(sys: pd.playdate_sys) bool {
 
 /// Enemies seek out the player and move towards them to attack
 ///
-fn enemyMovementSystem(player_world_pos: Vec2f, enemy_world_pos: []Vec2f, enemy_vels: []Vec2f) void {
+fn enemyMovementSystem(player_world_pos: Vec2f, dt: f32, enemy_world_pos: []Vec2f, enemy_vels: []Vec2f) void {
     var i: usize = 0;
     while (i < enemy_world_pos.len) : (i += 1) {
         const to_target = player_world_pos - enemy_world_pos[i];
         const mag = maths.magnitude(to_target);
         const dir_to_target = maths.normaliseSafeMag(to_target, mag);
         enemy_vels[i] = dir_to_target * @splat(2, @min(ENEMY_MAX_SPEED, mag));
-        enemy_world_pos[i] += enemy_vels[i];
+        enemy_world_pos[i] += enemy_vels[i] * @splat(2, dt);
     }
 }
 
