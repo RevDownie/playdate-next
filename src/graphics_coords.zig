@@ -20,11 +20,11 @@ pub fn worldSpaceToScreenSpace(camera_pos: Vec2f, world_pos: []const Vec2f, scre
     }
 }
 
-test "[graphics_coords] worldSpaceToScreenSpace - extremes" {
-    const world_pos = [_]Vec2f{ Vec2f{ 0, 0 }, Vec2f{ 200, -120 }, Vec2f{ 200, 120 }, Vec2f{ -200, -120 }, Vec2f{ -200, 120 } };
+test "[graphics_coords] worldSpaceToScreenSpace - metre conversion" {
+    const world_pos = [_]Vec2f{ Vec2f{ 0, 0 }, Vec2f{ 1, -1 }, Vec2f{ 1, 1 }, Vec2f{ -1, -1 }, Vec2f{ -1, 1 } };
     const camera_pos = Vec2f{ 0, 0 };
     var screen_pos: [5]Vec2i = undefined;
-    const expected = [_]Vec2i{ Vec2i{ 200, 120 }, Vec2i{ 400, 240 }, Vec2i{ 400, 0 }, Vec2i{ 0, 240 }, Vec2i{ 0, 0 } };
+    const expected = [_]Vec2i{ Vec2i{ 200, 120 }, Vec2i{ 200 + 128, 120 + 128 }, Vec2i{ 200 + 128, 120 - 128 }, Vec2i{ 200 - 128, 120 + 128 }, Vec2i{ 200 - 128, 120 - 128 } };
     worldSpaceToScreenSpace(camera_pos, world_pos[0..], screen_pos[0..], 400, 240);
 
     var i: usize = 0;
