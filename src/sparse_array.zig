@@ -72,6 +72,21 @@ pub fn SparseArray(comptime T: type) type {
             return self.data[existing_idx];
         }
 
+        /// Lookup the index into the data for the given key
+        ///
+        pub fn lookupDataIndex(self: *Self, key: usize) Error!T {
+            if (key >= self.key_to_index.len) {
+                return Error.KeyOutOfRange;
+            }
+
+            const existing_idx = self.key_to_index[key];
+            if (existing_idx >= self.key_to_index.len) {
+                return Error.KeyNotFound;
+            }
+
+            return existing_idx;
+        }
+
         /// Remove the value with the given key, this can cause underlying array order to shift
         ///
         pub fn remove(self: *Self, key: usize) Error!void {
