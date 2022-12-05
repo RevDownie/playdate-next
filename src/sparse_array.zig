@@ -3,6 +3,7 @@ const std = @import("std");
 const Error = error{
     KeyOutOfRange,
     KeyNotFound,
+    KeyAlreadyExists,
 };
 
 /// Basic look up array allowing us to decouple the index (key) used for look up from the index of the data
@@ -49,6 +50,25 @@ pub fn SparseArray(comptime T: type) type {
             if (existing_idx < self.key_to_index.len) {
                 self.data[existing_idx] = element;
                 return;
+            }
+
+            self.key_to_index[key] = self.len;
+            self.index_to_key[self.len] = key;
+            self.data[self.len] = element;
+            self.len += 1;
+        }
+
+        /// Does not overwrite - will fail if key already exists. Otherwise
+        /// creates a new entry
+        ///
+        pub fn insertFirst(self: *Self, key: usize, element: T) Error!void {
+            if (key >= self.key_to_index.len) {
+                return Error.KeyOutOfRange;
+            }
+
+            const existing_idx = self.key_to_index[key];
+            if (existing_idx < self.key_to_index.len) {
+                return Error.KeyAlreadyExists;
             }
 
             self.key_to_index[key] = self.len;
@@ -192,6 +212,17 @@ test "[sparse_array] insert multiple" {
 
     const v2 = try a.lookup(1);
     try std.testing.expect(v2 == 11);
+}
+
+test "[sparse_array] insert first" {
+    const alloc = std.testing.allocator;
+    var a = try SparseArray(u32).init(100, alloc);
+    defer a.deinit();
+
+    try a.insertFirst(10, 12);
+    try std.testing.expectError(Error.KeyAlreadyExists, a.insertFirst(10, 11));
+    const v = try a.lookup(10);
+    try std.testing.expect(v == 12);
 }
 
 test "[sparse_array] remove" {
