@@ -5,14 +5,14 @@ const Vec2f = @Vector(2, f32);
 pub const SpawnData = struct { world_pos: Vec2f };
 
 //TODO: Centralise consts for spawning
-var max_active_allowed: usize = 0;
+var max_active_allowed: u8 = 0;
 var spawn_time: f32 = 10;
 var next_spawn_timer: f32 = 1;
 var spawn_buffer: [5]SpawnData = undefined;
 var rand: std.rand.DefaultPrng = undefined;
 
-pub fn init(maxActive: usize) void {
-    max_active_allowed = maxActive;
+pub fn init(max_active: u8) void {
+    max_active_allowed = max_active;
     rand = std.rand.DefaultPrng.init(42);
 }
 
