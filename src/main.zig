@@ -26,6 +26,7 @@ var camera_pos = Vec2f{ 0, 0 };
 /// Assets
 var bg_bitmap: *pd.LCDBitmap = undefined;
 var hero_bitmap_table: *pd.LCDBitmapTable = undefined;
+var enemy_bitmap_table: *pd.LCDBitmapTable = undefined;
 
 /// Entities
 var entity_memory: [1024 * 1024]u8 = undefined;
@@ -71,6 +72,7 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) !void {
     //Load the assets
     bg_bitmap = graphics.loadBitmap.?("bg", null).?;
     hero_bitmap_table = graphics.loadBitmapTable.?("hero1", null).?;
+    enemy_bitmap_table = graphics.loadBitmapTable.?("enemy1", null).?;
 
     //Create the entity pools
     var fba = std.heap.FixedBufferAllocator.init(&entity_memory);
@@ -166,7 +168,7 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
     for (enemy_world_positions.toDataSlice()) |_, i| {
         //TODO Culling (in a pass or just in time?)
         //TODO: Handle centering the sprite at the ground better
-        graphics.drawBitmap.?(graphics.getTableBitmap.?(hero_bitmap_table, enemy_bitmap_frames[i].index).?, enemy_screen_pos[i][0] - 32, enemy_screen_pos[i][1] - 64, enemy_bitmap_frames[i].flip);
+        graphics.drawBitmap.?(graphics.getTableBitmap.?(enemy_bitmap_table, enemy_bitmap_frames[i].index).?, enemy_screen_pos[i][0] - 32, enemy_screen_pos[i][1] - 64, enemy_bitmap_frames[i].flip);
     }
 
     bullet_sys.render(graphics, disp, camera_pos);
