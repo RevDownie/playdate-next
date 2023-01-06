@@ -1,4 +1,4 @@
-# playdate-next
+# Until there were none...
 A Playdate game written in Zig using Windows
 
 ## Game Overview
@@ -29,7 +29,8 @@ Inspired by shooters like Minigore. This is a simple horde survival game where t
 * Better auto targetting
 * Enemies spawning in waves and at better locations
 * Leaderboard
-* Launcher tile
+* Launcher and card images
+* Violence warning
 
 
 ### P3 - Polish
