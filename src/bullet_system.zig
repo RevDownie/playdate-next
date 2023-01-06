@@ -42,7 +42,7 @@ pub fn update(dt: f32) void {
 
     i = 0;
     while (i < num_active) : (i += 1) {
-        bullet_world_pos_pool[i] += bullet_dir_pool[i] * BULLET_MAX_SPEED_V;
+        bullet_world_pos_pool[i] += bullet_dir_pool[i] * BULLET_MAX_SPEED_V * @splat(2, dt);
     }
 }
 
