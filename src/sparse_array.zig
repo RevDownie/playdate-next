@@ -85,7 +85,7 @@ pub fn SparseArray(comptime T: type, comptime TKey: type) type {
             }
 
             const existing_idx = self.key_to_index[key];
-            if (existing_idx >= self.key_to_index.len) {
+            if (existing_idx >= self.len) {
                 return Error.KeyNotFound;
             }
 
@@ -100,11 +100,25 @@ pub fn SparseArray(comptime T: type, comptime TKey: type) type {
             }
 
             const existing_idx = self.key_to_index[key];
-            if (existing_idx >= self.key_to_index.len) {
+            if (existing_idx >= self.len) {
                 return Error.KeyNotFound;
             }
 
             return existing_idx;
+        }
+
+        /// Using the index to find the key
+        ///
+        pub fn lookupKeyByIndex(self: *const Self, index: usize) Error!TKey {
+            if (index >= self.index_to_key.len) {
+                return Error.KeyOutOfRange;
+            }
+
+            if (index >= self.len) {
+                return Error.KeyNotFound;
+            }
+
+            return self.index_to_key[index];
         }
 
         /// Return slice of the keys and how they map to indices
@@ -125,7 +139,7 @@ pub fn SparseArray(comptime T: type, comptime TKey: type) type {
             }
 
             const existing_idx = self.key_to_index[key];
-            if (existing_idx >= self.key_to_index.len) {
+            if (existing_idx >= self.len) {
                 return Error.KeyNotFound;
             }
 
@@ -150,7 +164,7 @@ pub fn SparseArray(comptime T: type, comptime TKey: type) type {
             }
 
             const existing_idx = self.key_to_index[key];
-            if (existing_idx >= self.key_to_index.len) {
+            if (existing_idx >= self.len) {
                 return;
             }
 
@@ -164,6 +178,12 @@ pub fn SparseArray(comptime T: type, comptime TKey: type) type {
             self.index_to_key[existing_idx] = moved_key;
 
             self.len -= 1;
+        }
+
+        /// Reset the array to empty
+        ///
+        pub fn clear(self: *Self) void {
+            self.len = 0;
         }
 
         /// Release all memory and reset
@@ -233,6 +253,19 @@ test "[sparse_array] lookup missing key" {
     try std.testing.expectError(Error.KeyNotFound, a.lookup(0));
 }
 
+test "[sparse_array] lookup key by index" {
+    const alloc = std.testing.allocator;
+    var a = try SparseArray(u32, u8).init(100, alloc);
+    defer a.deinit();
+
+    try a.insert(10, 12);
+    try a.insert(5, 13);
+    try std.testing.expectError(Error.KeyOutOfRange, a.lookupKeyByIndex(100));
+    try std.testing.expectError(Error.KeyNotFound, a.lookupKeyByIndex(5));
+    try std.testing.expect(try a.lookupKeyByIndex(0) == 10);
+    try std.testing.expect(try a.lookupKeyByIndex(1) == 5);
+}
+
 test "[sparse_array] insert multiple" {
     const alloc = std.testing.allocator;
     var a = try SparseArray(u32, u8).init(100, alloc);
@@ -275,6 +308,20 @@ test "[sparse_array] remove" {
     try std.testing.expect(v == 12);
 
     try a.remove(10);
+    try std.testing.expect(a.len == 0);
+    try std.testing.expectError(Error.KeyNotFound, a.lookup(10));
+}
+
+test "[sparse_array] clear" {
+    const alloc = std.testing.allocator;
+    var a = try SparseArray(u32, u8).init(100, alloc);
+    defer a.deinit();
+
+    try a.insert(10, 12);
+    try a.insert(1, 11);
+
+    a.clear();
+
     try std.testing.expect(a.len == 0);
     try std.testing.expectError(Error.KeyNotFound, a.lookup(10));
 }
