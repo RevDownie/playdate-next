@@ -15,13 +15,16 @@ const SparseArray = sparse_array.SparseArray;
 
 /// Game constants
 const MAX_ENTITIES: u8 = 100;
-const PLAYER_ACC: f32 = 2;
-const PLAYER_MAX_SPEED: f32 = 2.6;
+const PLAYER_ACC: f32 = 1.0;
+const PLAYER_MAX_SPEED: f32 = 1.5;
 const FIRE_ANGLE_DELTA: f32 = 60;
 
 /// Common game state
 var playdate_api: *pd.PlaydateAPI = undefined;
 var camera_pos = Vec2f{ 0, 0 };
+
+/// Assets
+var bg_bitmap: *pd.LCDBitmap = undefined;
 var hero_bitmap_table: *pd.LCDBitmapTable = undefined;
 
 /// Entities
@@ -50,6 +53,7 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) !void {
     playdate_api.display.*.setRefreshRate.?(0); //Temp unleashing the frame limit to measure performance
 
     //Load the assets
+    bg_bitmap = graphics.loadBitmap.?("bg", null).?;
     hero_bitmap_table = graphics.loadBitmapTable.?("hero1", null).?;
 
     //Create the entity pools - player is always ID 0
@@ -116,6 +120,12 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
     }
 
     camera_pos = entity_world_positions.data[0]; //Follow the player directly for now
+
+    //---Render the BG
+    const bg_world_pos = [_]Vec2f{Vec2f{ 0, 0 }};
+    var bg_screen_pos: [1]Vec2i = undefined;
+    graphics_coords.worldSpaceToScreenSpace(camera_pos, bg_world_pos[0..], bg_screen_pos[0..], disp.getWidth.?(), disp.getHeight.?());
+    graphics.tileBitmap.?(bg_bitmap, bg_screen_pos[0][0] - 200, bg_screen_pos[0][1] - 200, 2000, 2000, pd.kBitmapUnflipped);
 
     //---Render the entities
     var entity_screen_pos: [MAX_ENTITIES]Vec2i = undefined;

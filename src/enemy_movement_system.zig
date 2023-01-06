@@ -4,7 +4,7 @@ const SparseArray = @import("sparse_array.zig").SparseArray;
 
 const Vec2f = @Vector(2, f32);
 
-const ENEMY_MAX_SPEED: f32 = 2.4;
+const ENEMY_MAX_SPEED: f32 = 1.2;
 const BUMP_DISTANCE = 0.2;
 const BUMP_TIME = 0.5;
 
