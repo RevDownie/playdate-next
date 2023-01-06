@@ -9,7 +9,7 @@ const playdate_target = std.zig.CrossTarget{
     .os_tag = .freestanding,
     .abi = .eabihf,
 };
-const game_name = "playdate-next";
+const game_name = "until-none";
 const arm_toolchain_version = "11.3.1";
 
 pub fn build(b: *Builder) !void {
