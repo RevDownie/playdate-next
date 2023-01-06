@@ -72,9 +72,8 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) !void {
     bg_bitmap = graphics.loadBitmap.?("bg", null).?;
     hero_bitmap_table = graphics.loadBitmapTable.?("hero1", null).?;
 
-    //Create the entity pools - player is always ID 0
+    //Create the entity pools
     var fba = std.heap.FixedBufferAllocator.init(&entity_memory);
-
     //TODO: No point having multiple lookups when they are shared across all arrays
     enemy_world_positions = try SparseArray(Vec2f, u8).init(MAX_ENEMIES, fba.allocator());
     enemy_velocities = try SparseArray(Vec2f, u8).init(MAX_ENEMIES, fba.allocator());

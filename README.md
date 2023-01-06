@@ -9,20 +9,42 @@ Inspired by shooters like Minigore. This is a simple horde survival game where t
 - Build with Arm toolchain 11.3.1
 
 ## TODO List
-* Simulator hot reload of DLL
-* Offset camera in the direction of movement
-* Convert world space to metres
-* Culling
-* Enemy types
-* Enemy deaths
-* Better enemy spawning logic
-* Better auto targetting
-* Health
-* Scoreboard
-* Level background (isometric tiles?)
+### P1 - Functional
+* Enemy health and deaths
+* Player health and death
+* Bullet pooling
+* Scoring
+* Add running on device to zig build (pdutil)
+* Music
+* SFX
+
+### P2 - Improvements
+* Combine sparse arrays for enemies
+* Actual dt rather than hardcoded
+* Centralise tweak constants
+* Handle centering the sprites
+* Culling - Test if we need to cull and handle the culling logic
 * Movement bounds
-* Actual character sprite and animation
+* Enemy visuals - Have enemies look different than player
+* Better auto targetting
+* Enemies spawning in waves and at better locations
+* Leaderboard
 * Launcher tile
-* Add running on sim and device to zig build (pdutil)
-* Enemy spawn effects - pattern
-* Audio
+
+
+### P3 - Polish
+* Offset camera in the direction of movement
+* Instructions
+* Spawn effects
+* Hit effects
+* Fire effects
+* Player/enemy die anim
+* Player/enemy move anim
+* Player fire anim
+* Better BG
+* Rotation interpolation for new target
+
+### P4 - Future
+* Levels
+* Enemy types
+* Gun types
