@@ -39,35 +39,35 @@ pub fn startBumpBack(entity_id: u8, world_pos: Vec2f, bump_dir: Vec2f) !void {
 /// * Entities moving towards the player target
 /// * Entities bumping back in response to a collision
 ///
-pub fn update(player_world_pos: Vec2f, dt: f32, entity_world_positions: SparseArray(Vec2f, u8), entity_velocities: SparseArray(Vec2f, u8)) !void {
-    try updateSeeking(player_world_pos, dt, entity_world_positions, entity_velocities);
-    try updateBumpBack(dt, entity_world_positions);
+pub fn update(player_world_pos: Vec2f, dt: f32, enemy_world_positions: SparseArray(Vec2f, u8), enemy_velocities: SparseArray(Vec2f, u8)) !void {
+    try updateSeeking(player_world_pos, dt, enemy_world_positions, enemy_velocities);
+    try updateBumpBack(dt, enemy_world_positions);
 }
 
 /// Enemies seek out the player and move towards them to attack
 ///
-fn updateSeeking(player_world_pos: Vec2f, dt: f32, entity_world_positions: SparseArray(Vec2f, u8), entity_velocities: SparseArray(Vec2f, u8)) !void {
+fn updateSeeking(player_world_pos: Vec2f, dt: f32, enemy_world_positions: SparseArray(Vec2f, u8), enemy_velocities: SparseArray(Vec2f, u8)) !void {
     for (entity_seek_data.toDataSlice()) |ent| {
         const entity_id = ent.entity_id;
-        const entity_pos_idx = try entity_world_positions.lookupDataIndex(entity_id);
-        const to_target = player_world_pos - entity_world_positions.data[entity_pos_idx];
+        const entity_pos_idx = try enemy_world_positions.lookupDataIndex(entity_id);
+        const to_target = player_world_pos - enemy_world_positions.data[entity_pos_idx];
         const mag = maths.magnitude(to_target);
         const dir_to_target = maths.normaliseSafeMag(to_target, mag);
         const vel = dir_to_target * @splat(2, @min(ENEMY_MAX_SPEED, mag));
-        entity_velocities.data[entity_pos_idx] = vel;
-        entity_world_positions.data[entity_pos_idx] += vel * @splat(2, dt);
+        enemy_velocities.data[entity_pos_idx] = vel;
+        enemy_world_positions.data[entity_pos_idx] += vel * @splat(2, dt);
     }
 }
 
 /// Animated push back
 ///
-fn updateBumpBack(dt: f32, entity_world_positions: SparseArray(Vec2f, u8)) !void {
-    for (entity_bump_data.toDataSlice()) |*ent| {
+fn updateBumpBack(dt: f32, enemy_world_positions: SparseArray(Vec2f, u8)) !void {
+    for (entity_bump_data.toMutableDataSlice()) |*ent| {
         ent.*.timer += dt;
         const x = @min(ent.*.timer / BUMP_TIME, 1.0);
         const y = easeOutBack(x);
-        const entity_pos_idx = try entity_world_positions.lookupDataIndex(ent.*.entity_id);
-        entity_world_positions.data[entity_pos_idx] = ent.*.start_world_pos + ent.*.bump_dir * @splat(2, BUMP_DISTANCE * y);
+        const entity_pos_idx = try enemy_world_positions.lookupDataIndex(ent.*.entity_id);
+        enemy_world_positions.data[entity_pos_idx] = ent.*.start_world_pos + ent.*.bump_dir * @splat(2, BUMP_DISTANCE * y);
 
         if (x >= 1.0) {
             //Done bumping so put back to seeking

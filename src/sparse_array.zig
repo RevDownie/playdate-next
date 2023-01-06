@@ -121,13 +121,15 @@ pub fn SparseArray(comptime T: type, comptime TKey: type) type {
             return self.index_to_key[index];
         }
 
-        /// Return slice of the keys and how they map to indices
-        pub fn toKeysMapSlice(self: *Self) []TKey {
-            return self.key_to_index[0..self.len];
+        /// Return non const slice of the data array actually in use
+        ///
+        pub fn toMutableDataSlice(self: *Self) []T {
+            return self.data[0..self.len];
         }
 
         /// Return slice of the data array actually in use
-        pub fn toDataSlice(self: *Self) []T {
+        ///
+        pub fn toDataSlice(self: *const Self) []const T {
             return self.data[0..self.len];
         }
 
