@@ -109,7 +109,7 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
     enemy_move_sys.update(entity_world_positions.data[0], dt, entity_world_positions, entity_velocities) catch @panic("Enemy movement system issue");
 
     //Now that the enemy positions have been updated - the player can re-evaluate the hottest one to target
-    const target_dir = auto_target_sys.calculateHottestTargetDir(entity_world_positions.data[0], entity_world_positions.toDataSlice());
+    const target_dir = auto_target_sys.calculateHottestTargetDir(entity_world_positions.data[0], entity_world_positions.toDataSlice()) orelse entity_velocities.data[0];
 
     //Move any fired projectiles
     bullet_sys.update(dt);
