@@ -114,7 +114,7 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
     //Move any fired projectiles
     bullet_sys.update(dt);
 
-    const should_fire = firingSystemUpdate(sys);
+    const should_fire = firingSystemUpdate(current, sys);
     if (should_fire) {
         bullet_sys.fire(entity_world_positions.data[0], target_dir);
     }
@@ -201,7 +201,11 @@ fn playerMovementSystemUpdate(current_button_states: pd.PDButtons, dt: f32, curr
 /// Fire everytime the crank moves through 60 degrees (6 bullets per revolution)
 ///
 var crank_angle_since_fire: f32 = 0.0;
-fn firingSystemUpdate(sys: pd.playdate_sys) bool {
+fn firingSystemUpdate(current: pd.PDButtons, sys: pd.playdate_sys) bool {
+    if ((current & pd.kButtonB) > 0) {
+        return true;
+    }
+
     const crank_delta = sys.getCrankChange.?();
     if (crank_delta >= 0) {
         crank_angle_since_fire += crank_delta;
