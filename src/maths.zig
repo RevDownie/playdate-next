@@ -28,6 +28,12 @@ pub inline fn magnitude(v: Vec2f) f32 {
     return @sqrt(v[0] * v[0] + v[1] * v[1]);
 }
 
+/// Calculate the length of the vector without doing the square root
+///
+pub inline fn magnitudeSqrd(v: Vec2f) f32 {
+    return v[0] * v[0] + v[1] * v[1];
+}
+
 /// Returns the angle in degrees between the 2 vectors in the range 0 - 360
 ///
 pub inline fn angleDegrees360(v1: Vec2f, v2: Vec2f) f32 {
