@@ -35,7 +35,7 @@ var enemy_world_positions: SparseArray(Vec2f, u8) = undefined;
 var enemy_velocities: SparseArray(Vec2f, u8) = undefined;
 var enemy_free_id_stack = createEnemyIds();
 var enemy_free_id_head = MAX_ENEMIES - 1;
-var bullet_collision_map: SparseArray(Vec2f, u8) = undefined;
+var bullet_collision_info: [MAX_ENEMIES]bullet_sys.CollisionInfo = undefined;
 
 /// Exposed via the shared library to the Playdate runner which forwards on events
 ///
@@ -77,7 +77,6 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) !void {
     //TODO: No point having multiple lookups when they are shared across all arrays
     enemy_world_positions = try SparseArray(Vec2f, u8).init(MAX_ENEMIES, fba.allocator());
     enemy_velocities = try SparseArray(Vec2f, u8).init(MAX_ENEMIES, fba.allocator());
-    bullet_collision_map = try SparseArray(Vec2f, u8).init(MAX_ENEMIES, fba.allocator());
 
     //Init the systems
     enemy_spawn_sys.init(MAX_ENEMIES);
@@ -122,6 +121,14 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
 
     //Move any fired projectiles
     bullet_sys.update(dt);
+
+    //Apply any bullet -> Enemy collisions that push the enemy back and deduct health
+    var num_hits: u8 = 0;
+    bullet_sys.checkForCollisions(enemy_world_positions, bullet_collision_info[0..], &num_hits) catch @panic("Bullet collision issue");
+    for (bullet_collision_info[0..num_hits]) |info| {
+        const pos = enemy_world_positions.lookup(info.entity_id) catch @panic("Missing world pos for id");
+        enemy_move_sys.startBumpBack(info.entity_id, pos, info.impact_dir) catch @panic("Bullet collision bump back issue");
+    }
 
     //Fire
     const should_fire = firingSystemUpdate(current, sys);

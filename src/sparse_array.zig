@@ -182,12 +182,6 @@ pub fn SparseArray(comptime T: type, comptime TKey: type) type {
             self.len -= 1;
         }
 
-        /// Reset the array to empty
-        ///
-        pub fn clear(self: *Self) void {
-            self.len = 0;
-        }
-
         /// Release all memory and reset
         ///
         pub fn deinit(self: *Self) void {
@@ -310,20 +304,6 @@ test "[sparse_array] remove" {
     try std.testing.expect(v == 12);
 
     try a.remove(10);
-    try std.testing.expect(a.len == 0);
-    try std.testing.expectError(Error.KeyNotFound, a.lookup(10));
-}
-
-test "[sparse_array] clear" {
-    const alloc = std.testing.allocator;
-    var a = try SparseArray(u32, u8).init(100, alloc);
-    defer a.deinit();
-
-    try a.insert(10, 12);
-    try a.insert(1, 11);
-
-    a.clear();
-
     try std.testing.expect(a.len == 0);
     try std.testing.expectError(Error.KeyNotFound, a.lookup(10));
 }

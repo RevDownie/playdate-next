@@ -1,6 +1,9 @@
 const std = @import("std");
 const pd = @import("playdate.zig").api;
 const graphics_coords = @import("graphics_coords.zig");
+const maths = @import("maths.zig");
+const SparseArray = @import("sparse_array.zig").SparseArray;
+
 const Vec2f = @Vector(2, f32);
 const Vec2i = @Vector(2, i32);
 
@@ -13,6 +16,11 @@ var num_active: usize = 0;
 var bullet_world_pos_pool: [BULLET_POOL_SIZE]Vec2f = undefined;
 var bullet_dir_pool: [BULLET_POOL_SIZE]Vec2f = undefined;
 var bullet_lifetime_pool: [BULLET_POOL_SIZE]f32 = undefined;
+
+pub const CollisionInfo = struct {
+    entity_id: u8,
+    impact_dir: Vec2f,
+};
 
 /// Spawn a new bullet that moves along the given trajectory
 ///
@@ -54,6 +62,25 @@ pub fn render(graphics: pd.playdate_graphics, disp: pd.playdate_display, camera_
     graphics_coords.worldSpaceToScreenSpace(camera_pos, active, bullet_screen_pos[0..], disp.getWidth.?(), disp.getHeight.?());
 
     for (active) |_, i| {
-        graphics.drawRect.?(bullet_screen_pos[i][0], bullet_screen_pos[i][1], 8, 8, pd.kColorBlack);
+        graphics.drawRect.?(bullet_screen_pos[i][0], bullet_screen_pos[i][1], 4, 4, pd.kColorBlack);
     }
+}
+
+/// Check for collision between the bullets and the given entities
+/// Uses circle - point collision and returns the ids and hit directions of the hit entities
+///
+pub fn checkForCollisions(entity_world_positions: SparseArray(Vec2f, u8), collision_data: []CollisionInfo, num_collisions: *u8) !void {
+    var out_idx: u8 = 0;
+
+    for (bullet_world_pos_pool[0..num_active]) |bullet_pos, bullet_idx| {
+        for (entity_world_positions.toDataSlice()) |entity_pos, entity_idx| {
+            const delta = entity_pos - bullet_pos;
+            if (maths.magnitudeSqrd(delta) <= 0.25 * 0.25) {
+                collision_data[out_idx] = CollisionInfo{ .entity_id = try entity_world_positions.lookupKeyByIndex(entity_idx), .impact_dir = bullet_dir_pool[bullet_idx] };
+                out_idx += 1;
+            }
+        }
+    }
+
+    num_collisions.* = out_idx;
 }
