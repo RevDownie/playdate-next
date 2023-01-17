@@ -29,6 +29,7 @@ Inspired by shooters like Minigore. This is a simple horde survival game where t
 * Leaderboard
 * Launcher and card images
 * Violence warning
+* Bullet system refactor so it doesn't have outlier rendering pattern
 
 
 ### P3 - Polish
