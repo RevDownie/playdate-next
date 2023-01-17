@@ -184,7 +184,7 @@ fn render() !void {
     const bg_world_pos = [_]Vec2f{Vec2f{ 0, 0 }};
     var bg_screen_pos: [1]Vec2i = undefined;
     graphics_coords.worldSpaceToScreenSpace(camera_pos, bg_world_pos[0..], bg_screen_pos[0..], disp.getWidth.?(), disp.getHeight.?());
-    graphics.tileBitmap.?(bg_bitmap, bg_screen_pos[0][0] - 200, bg_screen_pos[0][1] - 200, 2000, 2000, pd.kBitmapUnflipped);
+    graphics.tileBitmap.?(bg_bitmap, bg_screen_pos[0][0] - 1000, bg_screen_pos[0][1] - 1000, 2000, 2000, pd.kBitmapUnflipped);
 
     //---Render the player
     const player_world_pos_tmp = [_]Vec2f{player_world_pos};
