@@ -33,6 +33,9 @@ var enemy_bitmap_table: *pd.LCDBitmapTable = undefined;
 var entity_memory: [1024 * 1024]u8 = undefined;
 var player_world_pos = Vec2f{ 0, 0 };
 var player_velocity = Vec2f{ 0, 0 };
+var player_facing_dir = Vec2f{ 0, 0 };
+var player_health = 100;
+
 var enemy_world_positions: SparseArray(Vec2f, u8) = undefined;
 var enemy_velocities: SparseArray(Vec2f, u8) = undefined;
 var enemy_healths: SparseArray(u8, u8) = undefined;
@@ -88,22 +91,21 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) !void {
     try enemy_move_sys.init(MAX_ENEMIES, fba.allocator());
 }
 
-/// The main game update loop that drives the various systems. Also acts as the render loop
+/// Ticks the main game update and render loops
 /// We wrap this to make error handling simpler as we cannot use try within this function
 ///
 fn gameUpdateWrapper(_: ?*anyopaque) callconv(.C) c_int {
-    gameUpdate() catch @panic("ERROR!");
+    update() catch @panic("UPDATE ERROR!");
+    render() catch @panic("RENDER ERROR!");
     return 1; //Inform the SDK we have stuff to render
 }
 
-fn gameUpdate() !void {
-    const graphics = playdate_api.graphics.*;
+/// The main update loop that drives the various systems
+///
+fn update() !void {
     const sys = playdate_api.system.*;
-    const disp = playdate_api.display.*;
 
     const dt: f32 = 0.02; //TODO figure out how to derive this
-
-    graphics.clear.?(pd.kColorWhite);
 
     var current: pd.PDButtons = undefined;
     var pushed: pd.PDButtons = undefined;
@@ -151,6 +153,8 @@ fn gameUpdate() !void {
         }
     }
 
+    //Check for collisions with enemies and player and deduct damage
+
     //Now that the enemy positions have been updated - the player can re-evaluate the hottest one to target
     const target_dir = auto_target_sys.calculateHottestTargetDir(player_world_pos, enemy_world_positions.toDataSlice()) orelse player_velocity;
 
@@ -161,6 +165,17 @@ fn gameUpdate() !void {
     }
 
     camera_pos = player_world_pos; //Follow the player directly for now
+    player_facing_dir = target_dir; //Player facing the way they are firing
+}
+
+/// Perform the transformations from world to screen space and render the bitmaps
+///
+fn render() !void {
+    const sys = playdate_api.system.*;
+    const disp = playdate_api.display.*;
+    const graphics = playdate_api.graphics.*;
+
+    graphics.clear.?(pd.kColorWhite);
 
     //---Render the BG
     const bg_world_pos = [_]Vec2f{Vec2f{ 0, 0 }};
@@ -171,7 +186,7 @@ fn gameUpdate() !void {
     //---Render the player
     const player_world_pos_tmp = [_]Vec2f{player_world_pos};
     var player_screen_pos: [1]Vec2i = undefined;
-    const player_bitmap_frame = anim.bitmapFrameForDir(target_dir); //Player facing the way they are firing
+    const player_bitmap_frame = anim.bitmapFrameForDir(player_facing_dir);
     graphics_coords.worldSpaceToScreenSpace(camera_pos, player_world_pos_tmp[0..], player_screen_pos[0..], disp.getWidth.?(), disp.getHeight.?());
     graphics.drawBitmap.?(graphics.getTableBitmap.?(hero_bitmap_table, player_bitmap_frame.index).?, player_screen_pos[0][0] - 32, player_screen_pos[0][1] - 64, player_bitmap_frame.flip);
 
