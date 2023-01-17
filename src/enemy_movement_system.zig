@@ -35,6 +35,13 @@ pub fn startBumpBack(entity_id: u8, world_pos: Vec2f, bump_dir: Vec2f) !void {
     try entity_bump_data.insert(entity_id, BumpData{ .entity_id = entity_id, .start_world_pos = world_pos, .bump_dir = bump_dir, .timer = 0 });
 }
 
+/// Remove the entity from the system
+///
+pub fn remove(entity_id: u8) !void {
+    try entity_seek_data.removeIfExists(entity_id);
+    try entity_bump_data.removeIfExists(entity_id);
+}
+
 /// Animate:
 /// * Entities moving towards the player target
 /// * Entities bumping back in response to a collision

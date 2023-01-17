@@ -18,6 +18,7 @@ const MAX_ENEMIES: u8 = 100;
 const PLAYER_ACC: f32 = 2.0;
 const PLAYER_MAX_SPEED: f32 = 1.5;
 const FIRE_ANGLE_DELTA: f32 = 60;
+const DMG_PER_HIT: u8 = 10;
 
 /// Common game state
 var playdate_api: *pd.PlaydateAPI = undefined;
@@ -34,6 +35,7 @@ var player_world_pos = Vec2f{ 0, 0 };
 var player_velocity = Vec2f{ 0, 0 };
 var enemy_world_positions: SparseArray(Vec2f, u8) = undefined;
 var enemy_velocities: SparseArray(Vec2f, u8) = undefined;
+var enemy_healths: SparseArray(u8, u8) = undefined;
 var enemy_free_id_stack = createEnemyIds();
 var enemy_free_id_head = MAX_ENEMIES - 1;
 var bullet_collision_info: [MAX_ENEMIES]bullet_sys.CollisionInfo = undefined;
@@ -64,7 +66,7 @@ fn createEnemyIds() [MAX_ENEMIES]u8 {
 ///
 fn gameInit(playdate: [*c]pd.PlaydateAPI) !void {
     playdate_api = playdate;
-    playdate_api.system.*.setUpdateCallback.?(gameUpdate, null);
+    playdate_api.system.*.setUpdateCallback.?(gameUpdateWrapper, null);
 
     const graphics = playdate_api.graphics.*;
     playdate_api.display.*.setRefreshRate.?(0); //Temp unleashing the frame limit to measure performance
@@ -79,6 +81,7 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) !void {
     //TODO: No point having multiple lookups when they are shared across all arrays
     enemy_world_positions = try SparseArray(Vec2f, u8).init(MAX_ENEMIES, fba.allocator());
     enemy_velocities = try SparseArray(Vec2f, u8).init(MAX_ENEMIES, fba.allocator());
+    enemy_healths = try SparseArray(u8, u8).init(MAX_ENEMIES, fba.allocator());
 
     //Init the systems
     enemy_spawn_sys.init(MAX_ENEMIES);
@@ -86,8 +89,14 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) !void {
 }
 
 /// The main game update loop that drives the various systems. Also acts as the render loop
+/// We wrap this to make error handling simpler as we cannot use try within this function
 ///
-fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
+fn gameUpdateWrapper(_: ?*anyopaque) callconv(.C) c_int {
+    gameUpdate() catch @panic("ERROR!");
+    return 1; //Inform the SDK we have stuff to render
+}
+
+fn gameUpdate() !void {
     const graphics = playdate_api.graphics.*;
     const sys = playdate_api.system.*;
     const disp = playdate_api.display.*;
@@ -107,30 +116,43 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
         const ent_id = enemy_free_id_stack[enemy_free_id_head];
         enemy_free_id_head -= 1;
 
-        enemy_world_positions.insertFirst(ent_id, s.world_pos) catch @panic("Failed to spawn");
-        enemy_velocities.insertFirst(ent_id, Vec2f{ 0, 0 }) catch @panic("Failed to spawn");
-        enemy_move_sys.startSeeking(ent_id) catch @panic("Failed to spawn");
+        try enemy_world_positions.insertFirst(ent_id, s.world_pos);
+        try enemy_velocities.insertFirst(ent_id, Vec2f{ 0, 0 });
+        try enemy_healths.insertFirst(ent_id, 100);
+        try enemy_move_sys.startSeeking(ent_id);
     }
 
-    //Move the player based on input
+    //Move the player based on input and move any enemies that are in the seeking or bumping back state
     playerMovementSystemUpdate(current, dt, &player_world_pos, &player_velocity);
+    try enemy_move_sys.update(player_world_pos, dt, enemy_world_positions, enemy_velocities);
 
-    //Move any enemies that are in the seeking or bumping back state
-    enemy_move_sys.update(player_world_pos, dt, enemy_world_positions, enemy_velocities) catch @panic("Enemy movement system issue");
+    //Move any fired projectiles and check for collisions
+    var num_hits: u8 = 0;
+    try bullet_sys.update(dt, enemy_world_positions, bullet_collision_info[0..], &num_hits);
+
+    //Apply any bullet -> Enemy collisions that push the enemy back, deduct health and ultimately destroy
+    for (bullet_collision_info[0..num_hits]) |info| {
+        if (enemy_healths.tryLookup(info.entity_id)) |current_health| {
+            if (current_health <= DMG_PER_HIT) {
+                //Enemy is dead - TODO: Graceful death and not just dissappear
+                try enemy_world_positions.remove(info.entity_id);
+                try enemy_velocities.remove(info.entity_id);
+                try enemy_healths.remove(info.entity_id);
+                try enemy_move_sys.remove(info.entity_id);
+
+                enemy_free_id_head += 1;
+                enemy_free_id_stack[enemy_free_id_head] = info.entity_id;
+            } else {
+                const new_health = current_health - DMG_PER_HIT;
+                try enemy_healths.insert(info.entity_id, new_health);
+                const pos = try enemy_world_positions.lookup(info.entity_id);
+                try enemy_move_sys.startBumpBack(info.entity_id, pos, info.impact_dir);
+            }
+        }
+    }
 
     //Now that the enemy positions have been updated - the player can re-evaluate the hottest one to target
     const target_dir = auto_target_sys.calculateHottestTargetDir(player_world_pos, enemy_world_positions.toDataSlice()) orelse player_velocity;
-
-    //Move any fired projectiles
-    bullet_sys.update(dt);
-
-    //Apply any bullet -> Enemy collisions that push the enemy back and deduct health
-    var num_hits: u8 = 0;
-    bullet_sys.checkForCollisions(enemy_world_positions, bullet_collision_info[0..], &num_hits) catch @panic("Bullet collision issue");
-    for (bullet_collision_info[0..num_hits]) |info| {
-        const pos = enemy_world_positions.lookup(info.entity_id) catch @panic("Missing world pos for id");
-        enemy_move_sys.startBumpBack(info.entity_id, pos, info.impact_dir) catch @panic("Bullet collision bump back issue");
-    }
 
     //Fire
     const should_fire = firingSystemUpdate(current, sys);
@@ -161,7 +183,7 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
     //Enemies facing the way they are moving
     var enemy_bitmap_frames: [MAX_ENEMIES]anim.BitmapFrame = undefined;
     for (enemy_velocities.toDataSlice()) |v, idx| {
-        const id = enemy_velocities.lookupKeyByIndex(idx) catch @panic("Velocity missing");
+        const id = try enemy_velocities.lookupKeyByIndex(idx);
         enemy_bitmap_frames[id] = anim.bitmapFrameForDir(v);
     }
 
@@ -174,8 +196,6 @@ fn gameUpdate(_: ?*anyopaque) callconv(.C) c_int {
     bullet_sys.render(graphics, disp, camera_pos);
 
     sys.drawFPS.?(0, 0);
-
-    return 1;
 }
 
 /// Calculate the updated velocity and position based on input state and PLAYER_ACCeration

@@ -34,8 +34,9 @@ pub fn fire(world_pos: Vec2f, world_dir: Vec2f) void {
 
 /// Move any spawned bullets along their trajectories
 /// Recycle any that time out
+/// Return any collisions
 ///
-pub fn update(dt: f32) void {
+pub fn update(dt: f32, entity_world_positions: SparseArray(Vec2f, u8), collision_data: []CollisionInfo, num_collisions: *u8) !void {
     var i: usize = 0;
     while (i < num_active) : (i += 1) {
         bullet_lifetime_pool[i] -= dt;
@@ -52,6 +53,8 @@ pub fn update(dt: f32) void {
     while (i < num_active) : (i += 1) {
         bullet_world_pos_pool[i] += bullet_dir_pool[i] * BULLET_MAX_SPEED_V * @splat(2, dt);
     }
+
+    try checkForCollisions(entity_world_positions, collision_data, num_collisions);
 }
 
 /// Bullets are currently rendered via geometry and therefore have their own render path
@@ -69,7 +72,9 @@ pub fn render(graphics: pd.playdate_graphics, disp: pd.playdate_display, camera_
 /// Check for collision between the bullets and the given entities
 /// Uses circle - point collision and returns the ids and hit directions of the hit entities
 ///
-pub fn checkForCollisions(entity_world_positions: SparseArray(Vec2f, u8), collision_data: []CollisionInfo, num_collisions: *u8) !void {
+/// TODO: Non brute force collision and prevent duplicate collisions
+///
+fn checkForCollisions(entity_world_positions: SparseArray(Vec2f, u8), collision_data: []CollisionInfo, num_collisions: *u8) !void {
     var out_idx: u8 = 0;
 
     for (bullet_world_pos_pool[0..num_active]) |bullet_pos, bullet_idx| {
@@ -78,6 +83,10 @@ pub fn checkForCollisions(entity_world_positions: SparseArray(Vec2f, u8), collis
             if (maths.magnitudeSqrd(delta) <= 0.25 * 0.25) {
                 collision_data[out_idx] = CollisionInfo{ .entity_id = try entity_world_positions.lookupKeyByIndex(entity_idx), .impact_dir = bullet_dir_pool[bullet_idx] };
                 out_idx += 1;
+
+                //Destroy the bullet
+                bullet_lifetime_pool[bullet_idx] = 0;
+                break;
             }
         }
     }

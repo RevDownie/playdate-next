@@ -92,6 +92,21 @@ pub fn SparseArray(comptime T: type, comptime TKey: type) type {
             return self.data[existing_idx];
         }
 
+        /// Lookup the value for the given key and returns an optional
+        ///
+        pub fn tryLookup(self: *const Self, key: TKey) ?T {
+            if (key >= self.key_to_index.len) {
+                return null;
+            }
+
+            const existing_idx = self.key_to_index[key];
+            if (existing_idx >= self.len) {
+                return null;
+            }
+
+            return self.data[existing_idx];
+        }
+
         /// Lookup the index into the data for the given key
         ///
         pub fn lookupDataIndex(self: *const Self, key: TKey) Error!TKey {
@@ -180,6 +195,21 @@ pub fn SparseArray(comptime T: type, comptime TKey: type) type {
             self.index_to_key[existing_idx] = moved_key;
 
             self.len -= 1;
+        }
+
+        /// Returns true if the key exists
+        ///
+        pub fn exists(self: *const Self, key: TKey) bool {
+            if (key >= self.key_to_index.len) {
+                return false;
+            }
+
+            const existing_idx = self.key_to_index[key];
+            if (existing_idx >= self.len) {
+                return false;
+            }
+
+            return true;
         }
 
         /// Release all memory and reset
@@ -306,4 +336,22 @@ test "[sparse_array] remove" {
     try a.remove(10);
     try std.testing.expect(a.len == 0);
     try std.testing.expectError(Error.KeyNotFound, a.lookup(10));
+}
+
+test "[sparse_array] exists true" {
+    const alloc = std.testing.allocator;
+    var a = try SparseArray(u32, u8).init(100, alloc);
+    defer a.deinit();
+
+    try a.insertFirst(10, 12);
+    try std.testing.expect(a.exists(10) == true);
+}
+
+test "[sparse_array] exists false" {
+    const alloc = std.testing.allocator;
+    var a = try SparseArray(u32, u8).init(100, alloc);
+    defer a.deinit();
+
+    try a.insertFirst(10, 12);
+    try std.testing.expect(a.exists(12) == false);
 }
