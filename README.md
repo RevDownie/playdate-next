@@ -10,7 +10,6 @@ Inspired by shooters like Minigore. This is a simple horde survival game where t
 
 ## TODO List
 ### P1 - Functional
-* Enemy health and deaths
 * Player health and death
 * Bullet pooling
 * Scoring
@@ -20,7 +19,6 @@ Inspired by shooters like Minigore. This is a simple horde survival game where t
 
 ### P2 - Improvements
 * Combine sparse arrays for enemies
-* Actual dt rather than hardcoded
 * Centralise tweak constants
 * Handle centering the sprites
 * Culling - Test if we need to cull and handle the culling logic

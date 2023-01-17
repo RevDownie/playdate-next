@@ -23,6 +23,7 @@ const DMG_PER_HIT: u8 = 10;
 /// Common game state
 var playdate_api: *pd.PlaydateAPI = undefined;
 var camera_pos = Vec2f{ 0, 0 };
+var time_last_tick: u32 = undefined;
 
 /// Assets
 var bg_bitmap: *pd.LCDBitmap = undefined;
@@ -69,9 +70,11 @@ fn createEnemyIds() [MAX_ENEMIES]u8 {
 ///
 fn gameInit(playdate: [*c]pd.PlaydateAPI) !void {
     playdate_api = playdate;
-    playdate_api.system.*.setUpdateCallback.?(gameUpdateWrapper, null);
-
+    const sys = playdate_api.system.*;
     const graphics = playdate_api.graphics.*;
+
+    sys.setUpdateCallback.?(gameUpdateWrapper, null);
+
     playdate_api.display.*.setRefreshRate.?(0); //Temp unleashing the frame limit to measure performance
 
     //Load the assets
@@ -89,6 +92,8 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) !void {
     //Init the systems
     enemy_spawn_sys.init(MAX_ENEMIES);
     try enemy_move_sys.init(MAX_ENEMIES, fba.allocator());
+
+    time_last_tick = sys.getCurrentTimeMilliseconds.?();
 }
 
 /// Ticks the main game update and render loops
@@ -105,7 +110,9 @@ fn gameUpdateWrapper(_: ?*anyopaque) callconv(.C) c_int {
 fn update() !void {
     const sys = playdate_api.system.*;
 
-    const dt: f32 = 0.02; //TODO figure out how to derive this
+    const time_this_tick = sys.getCurrentTimeMilliseconds.?();
+    const dt = @intToFloat(f32, time_this_tick - time_last_tick) * 0.001;
+    time_last_tick = time_this_tick;
 
     var current: pd.PDButtons = undefined;
     var pushed: pd.PDButtons = undefined;
