@@ -1,12 +1,9 @@
 const std = @import("std");
 const maths = @import("maths.zig");
 const SparseArray = @import("sparse_array.zig").SparseArray;
+const consts = @import("tweak_constants.zig");
 
 const Vec2f = @Vector(2, f32);
-
-const ENEMY_MAX_SPEED: f32 = 1.2;
-const BUMP_DISTANCE = 0.2;
-const BUMP_TIME = 0.5;
 
 const SeekData = struct { entity_id: u8 };
 const BumpData = struct { entity_id: u8, start_world_pos: Vec2f, bump_dir: Vec2f, timer: f32 };
@@ -60,7 +57,7 @@ fn updateSeeking(player_world_pos: Vec2f, dt: f32, enemy_world_positions: Sparse
         const to_target = player_world_pos - enemy_world_positions.data[entity_pos_idx];
         const mag = maths.magnitude(to_target);
         const dir_to_target = maths.normaliseSafeMag(to_target, mag);
-        const vel = dir_to_target * @splat(2, @min(ENEMY_MAX_SPEED, mag));
+        const vel = dir_to_target * @splat(2, @min(consts.ENEMY_MAX_SPEED, mag));
         enemy_velocities.data[entity_pos_idx] = vel;
         enemy_world_positions.data[entity_pos_idx] += vel * @splat(2, dt);
     }
@@ -71,10 +68,10 @@ fn updateSeeking(player_world_pos: Vec2f, dt: f32, enemy_world_positions: Sparse
 fn updateBumpBack(dt: f32, enemy_world_positions: SparseArray(Vec2f, u8)) !void {
     for (entity_bump_data.toMutableDataSlice()) |*ent| {
         ent.*.timer += dt;
-        const x = @min(ent.*.timer / BUMP_TIME, 1.0);
+        const x = @min(ent.*.timer / consts.BUMP_TIME, 1.0);
         const y = easeOutBack(x);
         const entity_pos_idx = try enemy_world_positions.lookupDataIndex(ent.*.entity_id);
-        enemy_world_positions.data[entity_pos_idx] = ent.*.start_world_pos + ent.*.bump_dir * @splat(2, BUMP_DISTANCE * y);
+        enemy_world_positions.data[entity_pos_idx] = ent.*.start_world_pos + ent.*.bump_dir * @splat(2, consts.BUMP_DISTANCE * y);
 
         if (x >= 1.0) {
             //Done bumping so put back to seeking

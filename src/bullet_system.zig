@@ -3,14 +3,13 @@ const pd = @import("playdate.zig").api;
 const graphics_coords = @import("graphics_coords.zig");
 const maths = @import("maths.zig");
 const SparseArray = @import("sparse_array.zig").SparseArray;
+const consts = @import("tweak_constants.zig");
 
 const Vec2f = @Vector(2, f32);
 const Vec2i = @Vector(2, i32);
 
 const BULLET_POOL_SIZE = 100; //TODO: Calculate better approx based on fire rate and lifetime
-const BULLET_MAX_SPEED: f32 = 10;
-const BULLET_MAX_SPEED_V = @splat(2, BULLET_MAX_SPEED);
-const BULLET_LIFETIME = 3;
+const BULLET_MAX_SPEED_V = @splat(2, consts.BULLET_MAX_SPEED);
 
 var num_active: usize = 0;
 var bullet_world_pos_pool: [BULLET_POOL_SIZE]Vec2f = undefined;
@@ -28,7 +27,7 @@ pub fn fire(world_pos: Vec2f, world_dir: Vec2f) void {
     //TODO: Handle circling round to avoid running out
     bullet_world_pos_pool[num_active] = world_pos;
     bullet_dir_pool[num_active] = world_dir;
-    bullet_lifetime_pool[num_active] = BULLET_LIFETIME;
+    bullet_lifetime_pool[num_active] = consts.BULLET_LIFETIME;
     num_active += 1;
 }
 
