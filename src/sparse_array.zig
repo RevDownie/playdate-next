@@ -38,6 +38,16 @@ pub fn SparseArray(comptime T: type, comptime TKey: type) type {
             return s;
         }
 
+        /// Reset the array
+        ///
+        pub fn clear(self: *Self) void {
+            const capacity = @intCast(TKey, self.key_to_index.len);
+            for (self.key_to_index) |_, i| {
+                self.key_to_index[i] = capacity;
+            }
+            self.len = 0;
+        }
+
         /// Overwrite the value at the given key if it exists otherwise insert
         /// a new value mapped to the given key
         ///
@@ -354,4 +364,26 @@ test "[sparse_array] exists false" {
 
     try a.insertFirst(10, 12);
     try std.testing.expect(a.exists(12) == false);
+}
+
+test "[sparse_array] clear" {
+    const alloc = std.testing.allocator;
+    var a = try SparseArray(u32, u8).init(100, alloc);
+    defer a.deinit();
+
+    try a.insertFirst(10, 1);
+    try a.insertFirst(11, 1);
+    try a.insertFirst(12, 1);
+
+    a.clear();
+
+    try std.testing.expect(a.len == 0);
+    try std.testing.expect(a.exists(10) == false);
+    try std.testing.expect(a.exists(11) == false);
+    try std.testing.expect(a.exists(12) == false);
+
+    try a.insertFirst(10, 2);
+    try std.testing.expect(a.len == 1);
+    const v = try a.lookup(10);
+    try std.testing.expect(v == 2);
 }
