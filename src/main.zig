@@ -40,6 +40,7 @@ var enemy_healths: SparseArray(u8, u8) = undefined;
 var enemy_free_id_stack: [consts.MAX_ENEMIES]u8 = undefined;
 var enemy_free_id_head: u32 = undefined;
 var bullet_collision_info: [consts.MAX_ENEMIES]bullet_sys.CollisionInfo = undefined;
+var enemy_collision_info: [consts.MAX_ENEMIES]u8 = undefined;
 
 /// Exposed via the shared library to the Playdate runner which forwards on events
 ///
@@ -147,7 +148,7 @@ fn update() void {
     sys.getButtonState.?(&current, &pushed, &released);
 
     //Spawn any new enemies
-    const spawned = enemy_spawn_sys.update(dt, enemy_world_positions.len);
+    const spawned = enemy_spawn_sys.update(dt, enemy_world_positions.len, player_world_pos);
     for (spawned) |s| {
         const ent_id = enemy_free_id_stack[enemy_free_id_head];
         enemy_free_id_head -= 1;
@@ -189,6 +190,19 @@ fn update() void {
     }
 
     //Check for collisions with enemies and player and deduct damage
+    var num_hits_on_player: u8 = undefined;
+    checkPlayerCollision(player_world_pos, enemy_world_positions, enemy_collision_info[0..], &num_hits_on_player) catch @panic("playerCollision: Failed collision check");
+    const deduct_health = std.math.min(num_hits_on_player * 5, player_health);
+    player_health -= deduct_health;
+    if (player_health == 0) {
+        reset();
+        return;
+    }
+    for (enemy_collision_info[0..num_hits_on_player]) |enemy_id| {
+        const pos = enemy_world_positions.lookup(enemy_id) catch @panic("playerHit: failed to find pos");
+        const vel = enemy_velocities.lookup(enemy_id) catch @panic("playerHit: failed to find vel");
+        enemy_move_sys.startBumpBack(enemy_id, pos, vel * @splat(2, @as(f32, -1))) catch @panic("playerHit: Failed to bump back");
+    }
 
     //Now that the enemy positions have been updated - the player can re-evaluate the hottest one to target
     const target_dir = auto_target_sys.calculateHottestTargetDir(player_world_pos, enemy_world_positions.toDataSlice()) orelse if (maths.magnitudeSqrd(player_velocity) > 0) player_velocity else Vec2f{ 1, 0 };
@@ -255,6 +269,10 @@ fn render() void {
     const score_string = std.fmt.bufPrint(&score_buffer, "Score: {d}", .{player_score}) catch @panic("scorePrint: Failed to format");
     _ = graphics.drawText.?(score_string.ptr, score_string.len, pd.kASCIIEncoding, dispWidth - 100, 0);
 
+    var health_buffer: ["Health: ".len + 3]u8 = undefined;
+    const health_string = std.fmt.bufPrint(&health_buffer, "Health: {d}", .{player_health}) catch @panic("healthPrint: Failed to format");
+    _ = graphics.drawText.?(health_string.ptr, health_string.len, pd.kASCIIEncoding, @divTrunc(dispWidth, 2), 0);
+
     var bullet_buffer: ["Bullets: ".len + 3]u8 = undefined;
     const bullet_string = std.fmt.bufPrint(&bullet_buffer, "Bullets: {d}", .{bullet_sys.getRemainingBullets()}) catch @panic("bulletPrint: Failed to format");
     _ = graphics.drawText.?(bullet_string.ptr, bullet_string.len, pd.kASCIIEncoding, @divTrunc(dispWidth, 2), dispHeight - 30);
@@ -279,4 +297,18 @@ fn firingSystemUpdate(pushed: pd.PDButtons, sys: pd.playdate_sys) bool {
     }
 
     return false;
+}
+
+/// Check number of collisions between enemies and player
+///
+fn checkPlayerCollision(player_pos: Vec2f, enemy_positions: SparseArray(Vec2f, u8), collision_data: []u8, num_collisions: *u8) !void {
+    num_collisions.* = 0;
+
+    for (enemy_positions.toDataSlice()) |enemy_pos, enemy_idx| {
+        const delta = enemy_pos - player_pos;
+        if (maths.magnitudeSqrd(delta) <= 0.5 * 0.5) {
+            collision_data[num_collisions.*] = try enemy_positions.lookupKeyByIndex(enemy_idx);
+            num_collisions.* += 1;
+        }
+    }
 }
