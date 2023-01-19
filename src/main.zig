@@ -25,13 +25,15 @@ var bg_bitmap: *pd.LCDBitmap = undefined;
 var hero_bitmap_table: *pd.LCDBitmapTable = undefined;
 var enemy_bitmap_table: *pd.LCDBitmapTable = undefined;
 
-/// Entities
-var entity_memory: [1024 * 1024]u8 = undefined;
+/// Player
 var player_world_pos = Vec2f{ 0, 0 };
 var player_velocity = Vec2f{ 0, 0 };
 var player_facing_dir = Vec2f{ 0, 0 };
 var player_health: u8 = undefined;
+var player_score: u32 = undefined;
 
+/// Enemy entities
+var entity_memory: [1024 * 1024]u8 = undefined;
 var enemy_world_positions: SparseArray(Vec2f, u8) = undefined;
 var enemy_velocities: SparseArray(Vec2f, u8) = undefined;
 var enemy_healths: SparseArray(u8, u8) = undefined;
@@ -83,27 +85,27 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) !void {
     enemy_world_positions = try SparseArray(Vec2f, u8).init(consts.MAX_ENEMIES, fba.allocator());
     enemy_velocities = try SparseArray(Vec2f, u8).init(consts.MAX_ENEMIES, fba.allocator());
     enemy_healths = try SparseArray(u8, u8).init(consts.MAX_ENEMIES, fba.allocator());
-    player_health = 100;
 
     //Init the systems
     enemy_spawn_sys.init(consts.MAX_ENEMIES);
     try enemy_move_sys.init(consts.MAX_ENEMIES, fba.allocator());
 
     time_last_tick = sys.getCurrentTimeMilliseconds.?();
+    player_health = 100;
+    player_score = 0;
 }
 
 /// Ticks the main game update and render loops
-/// We wrap this to make error handling simpler as we cannot use try within this function
 ///
 fn gameUpdateWrapper(_: ?*anyopaque) callconv(.C) c_int {
-    update() catch @panic("UPDATE ERROR!");
-    render() catch @panic("RENDER ERROR!");
+    update();
+    render();
     return 1; //Inform the SDK we have stuff to render
 }
 
 /// The main update loop that drives the various systems
 ///
-fn update() !void {
+fn update() void {
     const sys = playdate_api.system.*;
 
     const time_this_tick = sys.getCurrentTimeMilliseconds.?();
@@ -121,37 +123,38 @@ fn update() !void {
         const ent_id = enemy_free_id_stack[enemy_free_id_head];
         enemy_free_id_head -= 1;
 
-        try enemy_world_positions.insertFirst(ent_id, s.world_pos);
-        try enemy_velocities.insertFirst(ent_id, Vec2f{ 0, 0 });
-        try enemy_healths.insertFirst(ent_id, 100);
-        try enemy_move_sys.startSeeking(ent_id);
+        enemy_world_positions.insertFirst(ent_id, s.world_pos) catch @panic("spawn: Failed to insert pos");
+        enemy_velocities.insertFirst(ent_id, Vec2f{ 0, 0 }) catch @panic("spawn: Failed to insert vel");
+        enemy_healths.insertFirst(ent_id, 100) catch @panic("spawn: Failed to insert health");
+        enemy_move_sys.startSeeking(ent_id) catch @panic("spawn: Failed to start seeking");
     }
 
     //Move the player based on input and move any enemies that are in the seeking or bumping back state
     player_move_sys.update(current, dt, &player_world_pos, &player_velocity);
-    try enemy_move_sys.update(player_world_pos, dt, enemy_world_positions, enemy_velocities);
+    enemy_move_sys.update(player_world_pos, dt, enemy_world_positions, enemy_velocities) catch @panic("enemyMove: Update error");
 
     //Move any fired projectiles and check for collisions
     var num_hits: u8 = 0;
-    try bullet_sys.update(dt, enemy_world_positions, bullet_collision_info[0..], &num_hits);
+    bullet_sys.update(dt, enemy_world_positions, bullet_collision_info[0..], &num_hits) catch @panic("bulletSys: Update error");
 
     //Apply any bullet -> Enemy collisions that push the enemy back, deduct health and ultimately destroy
     for (bullet_collision_info[0..num_hits]) |info| {
         if (enemy_healths.tryLookup(info.entity_id)) |current_health| {
             if (current_health <= consts.DMG_PER_HIT) {
                 //Enemy is dead - TODO: Graceful death and not just dissappear
-                try enemy_world_positions.remove(info.entity_id);
-                try enemy_velocities.remove(info.entity_id);
-                try enemy_healths.remove(info.entity_id);
-                try enemy_move_sys.remove(info.entity_id);
+                enemy_world_positions.remove(info.entity_id) catch @panic("enemyDestroy: Failed to remove pos");
+                enemy_velocities.remove(info.entity_id) catch @panic("enemyDestroy: Failed to remove vel");
+                enemy_healths.remove(info.entity_id) catch @panic("enemyDestroy: Failed to remove health");
+                enemy_move_sys.remove(info.entity_id) catch @panic("enemyDestroy: Failed to remove from move sys");
+                player_score += 10; //TODO add score streak based on not being hit
 
                 enemy_free_id_head += 1;
                 enemy_free_id_stack[enemy_free_id_head] = info.entity_id;
             } else {
                 const new_health = current_health - consts.DMG_PER_HIT;
-                try enemy_healths.insert(info.entity_id, new_health);
-                const pos = try enemy_world_positions.lookup(info.entity_id);
-                try enemy_move_sys.startBumpBack(info.entity_id, pos, info.impact_dir);
+                enemy_healths.insert(info.entity_id, new_health) catch @panic("enemyHit: Failed to update health");
+                const pos = enemy_world_positions.lookup(info.entity_id) catch @panic("enemyHit: failed to find pos");
+                enemy_move_sys.startBumpBack(info.entity_id, pos, info.impact_dir) catch @panic("enemyHit: Failed to bump back");
             }
         }
     }
@@ -173,7 +176,7 @@ fn update() !void {
 
 /// Perform the transformations from world to screen space and render the bitmaps
 ///
-fn render() !void {
+fn render() void {
     const sys = playdate_api.system.*;
     const disp = playdate_api.display.*;
     const graphics = playdate_api.graphics.*;
@@ -201,7 +204,7 @@ fn render() !void {
     //Enemies facing the way they are moving
     var enemy_bitmap_frames: [consts.MAX_ENEMIES]anim.BitmapFrame = undefined;
     for (enemy_velocities.toDataSlice()) |v, idx| {
-        const id = try enemy_velocities.lookupKeyByIndex(idx);
+        const id = enemy_velocities.lookupKeyByIndex(idx) catch @panic("render: Failed to find enemy velocity to determine facing dir");
         enemy_bitmap_frames[id] = anim.bitmapFrameForDir(v);
     }
 

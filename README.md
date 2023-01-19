@@ -19,7 +19,6 @@ Inspired by shooters like Minigore. This is a simple horde survival game where t
 
 ### P2 - Improvements
 * Combine sparse arrays for enemies
-* Centralise tweak constants
 * Handle centering the sprites
 * Culling - Test if we need to cull and handle the culling logic
 * Movement bounds
