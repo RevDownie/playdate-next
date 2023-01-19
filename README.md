@@ -10,8 +10,6 @@ Inspired by shooters like Minigore. This is a simple horde survival game where t
 
 ## TODO List
 ### P1 - Functional
-* Player health and death
-* Scoring
 * Add running on device to zig build (pdutil)
 * Music
 * SFX

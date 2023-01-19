@@ -31,6 +31,7 @@ var player_velocity: Vec2f = undefined;
 var player_facing_dir: Vec2f = undefined;
 var player_health: u8 = undefined;
 var player_score: u64 = undefined;
+var player_kill_streak: u32 = undefined;
 
 /// Enemy entities
 var entity_memory: [1024 * 1024]u8 = undefined;
@@ -110,6 +111,7 @@ fn reset() void {
     player_facing_dir = @splat(2, @as(f32, 0));
     player_health = 100;
     player_score = 0;
+    player_kill_streak = 0;
 
     camera_pos = @splat(2, @as(f32, 0));
 
@@ -176,7 +178,8 @@ fn update() void {
                 enemy_velocities.remove(info.entity_id) catch @panic("enemyDestroy: Failed to remove vel");
                 enemy_healths.remove(info.entity_id) catch @panic("enemyDestroy: Failed to remove health");
                 enemy_move_sys.remove(info.entity_id) catch @panic("enemyDestroy: Failed to remove from move sys");
-                player_score = std.math.min(player_score + 10, consts.MAX_SCORE); //TODO add score streak based on not being hit
+                player_kill_streak += 1;
+                player_score = std.math.min(player_score + 10 * player_kill_streak, consts.MAX_SCORE);
 
                 enemy_free_id_head += 1;
                 enemy_free_id_stack[enemy_free_id_head] = info.entity_id;
@@ -193,10 +196,13 @@ fn update() void {
     var num_hits_on_player: u8 = undefined;
     checkPlayerCollision(player_world_pos, enemy_world_positions, enemy_collision_info[0..], &num_hits_on_player) catch @panic("playerCollision: Failed collision check");
     const deduct_health = std.math.min(num_hits_on_player * 5, player_health);
-    player_health -= deduct_health;
-    if (player_health == 0) {
-        reset();
-        return;
+    if (deduct_health > 0) {
+        player_health -= deduct_health;
+        player_kill_streak = 0;
+        if (player_health == 0) {
+            reset();
+            return;
+        }
     }
     for (enemy_collision_info[0..num_hits_on_player]) |enemy_id| {
         const pos = enemy_world_positions.lookup(enemy_id) catch @panic("playerHit: failed to find pos");
