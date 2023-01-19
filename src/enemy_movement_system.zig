@@ -18,6 +18,11 @@ pub fn init(max_num_entities: u8, allocator: std.mem.Allocator) !void {
     entity_bump_data = try SparseArray(BumpData, u8).init(max_num_entities, allocator);
 }
 
+pub fn reset() void {
+    entity_seek_data.clear();
+    entity_bump_data.clear();
+}
+
 /// Register the entity with the system so that it gets animated
 ///
 pub fn startSeeking(entity_id: u8) !void {

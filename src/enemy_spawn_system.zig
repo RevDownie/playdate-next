@@ -6,14 +6,19 @@ pub const SpawnData = struct { world_pos: Vec2f };
 
 //TODO: Centralise consts for spawning
 var max_active_allowed: u8 = 0;
-var spawn_time: f32 = 10;
-var next_spawn_timer: f32 = 1;
+var spawn_time: f32 = 0;
+var next_spawn_timer: f32 = 0;
 var spawn_buffer: [5]SpawnData = undefined;
 var rand: std.rand.DefaultPrng = undefined;
 
 pub fn init(max_active: u8) void {
     max_active_allowed = max_active;
     rand = std.rand.DefaultPrng.init(42);
+}
+
+pub fn reset() void {
+    spawn_time = 10;
+    next_spawn_timer = 1;
 }
 
 /// Keep spawning up to the max number by dropping enemies in with increasing frequency

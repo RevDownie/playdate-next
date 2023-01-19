@@ -31,9 +31,10 @@ pub const CollisionInfo = struct {
 
 /// Initialise starting data
 ///
-pub fn init() void {
+pub fn reset() void {
     current_state = State.LOADED;
     bullets_remaining_in_mag = consts.BULLET_MAG_SIZE;
+    num_active = 0;
 }
 
 /// Spawn a new bullet that moves along the given trajectory

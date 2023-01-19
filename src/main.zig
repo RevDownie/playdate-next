@@ -26,9 +26,9 @@ var hero_bitmap_table: *pd.LCDBitmapTable = undefined;
 var enemy_bitmap_table: *pd.LCDBitmapTable = undefined;
 
 /// Player
-var player_world_pos = Vec2f{ 0, 0 };
-var player_velocity = Vec2f{ 0, 0 };
-var player_facing_dir = Vec2f{ 0, 0 };
+var player_world_pos: Vec2f = undefined;
+var player_velocity: Vec2f = undefined;
+var player_facing_dir: Vec2f = undefined;
 var player_health: u8 = undefined;
 var player_score: u64 = undefined;
 
@@ -37,15 +37,15 @@ var entity_memory: [1024 * 1024]u8 = undefined;
 var enemy_world_positions: SparseArray(Vec2f, u8) = undefined;
 var enemy_velocities: SparseArray(Vec2f, u8) = undefined;
 var enemy_healths: SparseArray(u8, u8) = undefined;
-var enemy_free_id_stack = createEnemyIds();
-var enemy_free_id_head = consts.MAX_ENEMIES - 1;
+var enemy_free_id_stack: [consts.MAX_ENEMIES]u8 = undefined;
+var enemy_free_id_head: u32 = undefined;
 var bullet_collision_info: [consts.MAX_ENEMIES]bullet_sys.CollisionInfo = undefined;
 
 /// Exposed via the shared library to the Playdate runner which forwards on events
 ///
 pub export fn eventHandler(playdate: [*c]pd.PlaydateAPI, event: pd.PDSystemEvent, _: c_ulong) callconv(.C) c_int {
     switch (event) {
-        pd.kEventInit => gameInit(playdate) catch unreachable,
+        pd.kEventInit => gameInit(playdate),
         else => {},
     }
     return 0;
@@ -65,7 +65,7 @@ fn createEnemyIds() [consts.MAX_ENEMIES]u8 {
 
 /// Upfront setup - allocates all the memory required and loads and initialises all assets and pools
 ///
-fn gameInit(playdate: [*c]pd.PlaydateAPI) !void {
+fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     playdate_api = playdate;
     const sys = playdate_api.system.*;
     const graphics = playdate_api.graphics.*;
@@ -82,18 +82,35 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) !void {
     //Create the entity pools
     var fba = std.heap.FixedBufferAllocator.init(&entity_memory);
     //TODO: No point having multiple lookups when they are shared across all arrays
-    enemy_world_positions = try SparseArray(Vec2f, u8).init(consts.MAX_ENEMIES, fba.allocator());
-    enemy_velocities = try SparseArray(Vec2f, u8).init(consts.MAX_ENEMIES, fba.allocator());
-    enemy_healths = try SparseArray(u8, u8).init(consts.MAX_ENEMIES, fba.allocator());
+    enemy_world_positions = SparseArray(Vec2f, u8).init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("init: Failed to init enemy pos");
+    enemy_velocities = SparseArray(Vec2f, u8).init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("init: Failed to init enemy vels");
+    enemy_healths = SparseArray(u8, u8).init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("init: Failed to init enemy healths");
 
     //Init the systems
     enemy_spawn_sys.init(consts.MAX_ENEMIES);
-    try enemy_move_sys.init(consts.MAX_ENEMIES, fba.allocator());
-    bullet_sys.init();
+    enemy_move_sys.init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("reinit: Failed to init enemy move sys");
 
     time_last_tick = sys.getCurrentTimeMilliseconds.?();
+    reset();
+}
+
+/// Reinit this on game restart
+///
+fn reset() void {
+    player_world_pos = @splat(2, @as(f32, 0));
+    player_velocity = @splat(2, @as(f32, 0));
+    player_facing_dir = @splat(2, @as(f32, 0));
     player_health = 100;
     player_score = 0;
+
+    camera_pos = @splat(2, @as(f32, 0));
+
+    enemy_spawn_sys.reset();
+    enemy_move_sys.reset();
+    bullet_sys.reset();
+
+    enemy_free_id_stack = createEnemyIds();
+    enemy_free_id_head = consts.MAX_ENEMIES - 1;
 }
 
 /// Ticks the main game update and render loops
