@@ -3,9 +3,9 @@ const Vec2f = @Vector(2, f32);
 
 /// Calculate normalised vector - components divided by magnitude
 ///
-pub fn normaliseSafe(v: Vec2f) Vec2f {
+pub fn normaliseSafe(v: Vec2f, fallback: Vec2f) Vec2f {
     if (v[0] == 0 and v[1] == 0) {
-        return v;
+        return fallback;
     }
 
     const m = magnitude(v);
@@ -14,9 +14,9 @@ pub fn normaliseSafe(v: Vec2f) Vec2f {
 
 /// Calculate normalised vector when you already have the magnitude
 ///
-pub fn normaliseSafeMag(v: Vec2f, m: f32) Vec2f {
+pub fn normaliseSafeMag(v: Vec2f, m: f32, fallback: Vec2f) Vec2f {
     if (m == 0) {
-        return v;
+        return fallback;
     }
 
     return v / @splat(2, m);
@@ -44,14 +44,14 @@ pub inline fn angleDegrees360(v1: Vec2f, v2: Vec2f) f32 {
 }
 
 test "[maths] normaliseSafe - regular" {
-    const n = normaliseSafe(Vec2f{ 10, 10 });
+    const n = normaliseSafe(Vec2f{ 10, 10 }, Vec2f{ 0, 0 });
     const expected = Vec2f{ 0.707, 0.707 };
     try std.testing.expectApproxEqRel(n[0], expected[0], 0.01);
     try std.testing.expectApproxEqRel(n[1], expected[1], 0.01);
 }
 
 test "[maths] normaliseSafe - zero" {
-    const n = normaliseSafe(Vec2f{ 0, 0 });
+    const n = normaliseSafe(Vec2f{ 0, 0 }, Vec2f{ 0, 0 });
     const expected = Vec2f{ 0, 0 };
     try std.testing.expect(n[0] == expected[0]);
     try std.testing.expect(n[1] == expected[1]);
@@ -59,7 +59,7 @@ test "[maths] normaliseSafe - zero" {
 
 test "[maths] normaliseSafeMag - regular" {
     const m = magnitude(Vec2f{ 10, 10 });
-    const n = normaliseSafeMag(Vec2f{ 10, 10 }, m);
+    const n = normaliseSafeMag(Vec2f{ 10, 10 }, m, Vec2f{ 0, 0 });
     const expected = Vec2f{ 0.707, 0.707 };
     try std.testing.expectApproxEqRel(n[0], expected[0], 0.01);
     try std.testing.expectApproxEqRel(n[1], expected[1], 0.01);

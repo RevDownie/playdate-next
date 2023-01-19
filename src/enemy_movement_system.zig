@@ -61,7 +61,7 @@ fn updateSeeking(player_world_pos: Vec2f, dt: f32, enemy_world_positions: Sparse
         const entity_pos_idx = try enemy_world_positions.lookupDataIndex(entity_id);
         const to_target = player_world_pos - enemy_world_positions.data[entity_pos_idx];
         const mag = maths.magnitude(to_target);
-        const dir_to_target = maths.normaliseSafeMag(to_target, mag);
+        const dir_to_target = maths.normaliseSafeMag(to_target, mag, enemy_velocities.data[entity_pos_idx]);
         const vel = dir_to_target * @splat(2, @min(consts.ENEMY_MAX_SPEED, mag));
         enemy_velocities.data[entity_pos_idx] = vel;
         enemy_world_positions.data[entity_pos_idx] += vel * @splat(2, dt);

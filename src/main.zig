@@ -256,8 +256,7 @@ fn render() void {
     //Enemies facing the way they are moving
     var enemy_bitmap_frames: [consts.MAX_ENEMIES]anim.BitmapFrame = undefined;
     for (enemy_velocities.toDataSlice()) |v, idx| {
-        const id = enemy_velocities.lookupKeyByIndex(idx) catch @panic("render: Failed to find enemy velocity to determine facing dir");
-        enemy_bitmap_frames[id] = anim.bitmapFrameForDir(v);
+        enemy_bitmap_frames[idx] = anim.bitmapFrameForDir(v);
     }
 
     for (enemy_world_positions.toDataSlice()) |_, i| {

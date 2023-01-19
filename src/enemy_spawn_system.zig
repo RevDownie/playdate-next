@@ -16,8 +16,8 @@ pub fn init(max_active: u8) void {
 }
 
 pub fn reset() void {
-    spawn_time = 10;
-    next_spawn_timer = 1;
+    spawn_time = 8;
+    next_spawn_timer = 0.25;
 }
 
 /// Keep spawning up to the max number by dropping enemies in with increasing frequency
@@ -34,11 +34,14 @@ pub fn update(dt: f32, num_active: usize, player_world_pos: Vec2f) []SpawnData {
         //Spawn
         next_spawn_timer = spawn_time;
         spawn_time -= 1.0;
-        const x = player_world_pos[0] + (rand.random().float(f32) * 2.0 - 1.0) * 10;
-        const y = player_world_pos[1] + (rand.random().float(f32) * 2.0 - 1.0) * 10;
-        const sd = SpawnData{ .world_pos = Vec2f{ x, y } };
-        spawn_buffer[0] = sd;
-        return spawn_buffer[0..1];
+        var i: u32 = 0;
+        while (i < 3) : (i += 1) {
+            const x = player_world_pos[0] + (rand.random().float(f32) * 2.0 - 1.0) * 10;
+            const y = player_world_pos[1] + (rand.random().float(f32) * 2.0 - 1.0) * 10;
+            const sd = SpawnData{ .world_pos = Vec2f{ x, y } };
+            spawn_buffer[i] = sd;
+        }
+        return spawn_buffer[0..3];
     }
 
     return spawn_buffer[0..0];

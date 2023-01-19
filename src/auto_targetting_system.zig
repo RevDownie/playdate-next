@@ -18,5 +18,5 @@ pub fn calculateHottestTargetDir(player_world_pos: Vec2f, enemy_world_positions:
         }
     }
 
-    return maths.normaliseSafe(closest_pos - player_world_pos);
+    return maths.normaliseSafe(closest_pos - player_world_pos, Vec2f{ 1, 0 });
 }
