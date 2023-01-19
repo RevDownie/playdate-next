@@ -187,7 +187,7 @@ fn update() void {
                 const new_health = current_health - consts.DMG_PER_HIT;
                 enemy_healths.insert(info.entity_id, new_health) catch @panic("enemyHit: Failed to update health");
                 const pos = enemy_world_positions.lookup(info.entity_id) catch @panic("enemyHit: failed to find pos");
-                enemy_move_sys.startBumpBack(info.entity_id, pos, info.impact_dir) catch @panic("enemyHit: Failed to bump back");
+                enemy_move_sys.startBumpBack(info.entity_id, pos, info.impact_dir, consts.BUMP_DISTANCE) catch @panic("enemyHit: Failed to bump back");
             }
         }
     }
@@ -207,7 +207,7 @@ fn update() void {
     for (enemy_collision_info[0..num_hits_on_player]) |enemy_id| {
         const pos = enemy_world_positions.lookup(enemy_id) catch @panic("playerHit: failed to find pos");
         const vel = enemy_velocities.lookup(enemy_id) catch @panic("playerHit: failed to find vel");
-        enemy_move_sys.startBumpBack(enemy_id, pos, vel * @splat(2, @as(f32, -1))) catch @panic("playerHit: Failed to bump back");
+        enemy_move_sys.startBumpBack(enemy_id, pos, maths.normaliseSafe(vel, Vec2f{ 1, 0 }) * @splat(2, @as(f32, -1)), consts.BUMP_DISTANCE_SMALL) catch @panic("playerHit: Failed to bump back");
     }
 
     //Now that the enemy positions have been updated - the player can re-evaluate the hottest one to target
@@ -246,7 +246,7 @@ fn render() void {
     var player_screen_pos: [1]Vec2i = undefined;
     const player_bitmap_frame = anim.bitmapFrameForDir(player_facing_dir);
     graphics_coords.worldSpaceToScreenSpace(camera_pos, player_world_pos_tmp[0..], player_screen_pos[0..], dispWidth, dispHeight);
-    graphics.drawBitmap.?(graphics.getTableBitmap.?(hero_bitmap_table, player_bitmap_frame.index).?, player_screen_pos[0][0] - 32, player_screen_pos[0][1] - 64, player_bitmap_frame.flip);
+    graphics.drawBitmap.?(graphics.getTableBitmap.?(hero_bitmap_table, player_bitmap_frame.index).?, player_screen_pos[0][0] - 24, player_screen_pos[0][1] - 48, player_bitmap_frame.flip);
 
     //---Render the enemies
     var enemy_screen_pos: [consts.MAX_ENEMIES]Vec2i = undefined;
@@ -262,7 +262,7 @@ fn render() void {
     for (enemy_world_positions.toDataSlice()) |_, i| {
         //TODO Culling (in a pass or just in time?)
         //TODO: Handle centering the sprite at the ground better
-        graphics.drawBitmap.?(graphics.getTableBitmap.?(enemy_bitmap_table, enemy_bitmap_frames[i].index).?, enemy_screen_pos[i][0] - 32, enemy_screen_pos[i][1] - 64, enemy_bitmap_frames[i].flip);
+        graphics.drawBitmap.?(graphics.getTableBitmap.?(enemy_bitmap_table, enemy_bitmap_frames[i].index).?, enemy_screen_pos[i][0] - 24, enemy_screen_pos[i][1] - 48, enemy_bitmap_frames[i].flip);
     }
 
     bullet_sys.render(graphics, disp, camera_pos);
@@ -311,7 +311,7 @@ fn checkPlayerCollision(player_pos: Vec2f, enemy_positions: SparseArray(Vec2f, u
 
     for (enemy_positions.toDataSlice()) |enemy_pos, enemy_idx| {
         const delta = enemy_pos - player_pos;
-        if (maths.magnitudeSqrd(delta) <= 0.5 * 0.5) {
+        if (maths.magnitudeSqrd(delta) <= 0.25 * 0.25) {
             collision_data[num_collisions.*] = try enemy_positions.lookupKeyByIndex(enemy_idx);
             num_collisions.* += 1;
         }

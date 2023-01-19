@@ -13,6 +13,7 @@ Inspired by shooters like Minigore. This is a simple horde survival game where t
 * Add running on device to zig build (pdutil)
 * Music
 * SFX
+* Crash bug
 
 ### P2 - Improvements
 * Combine sparse arrays for enemies

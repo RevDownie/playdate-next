@@ -6,7 +6,7 @@ const consts = @import("tweak_constants.zig");
 const Vec2f = @Vector(2, f32);
 
 const SeekData = struct { entity_id: u8 };
-const BumpData = struct { entity_id: u8, start_world_pos: Vec2f, bump_dir: Vec2f, timer: f32 };
+const BumpData = struct { entity_id: u8, start_world_pos: Vec2f, bump_dir: Vec2f, bump_dist: f32, timer: f32 };
 
 var entity_seek_data: SparseArray(SeekData, u8) = undefined;
 var entity_bump_data: SparseArray(BumpData, u8) = undefined;
@@ -32,9 +32,9 @@ pub fn startSeeking(entity_id: u8) !void {
 
 /// Register the entity with the system so that it gets animated
 ///
-pub fn startBumpBack(entity_id: u8, world_pos: Vec2f, bump_dir: Vec2f) !void {
+pub fn startBumpBack(entity_id: u8, world_pos: Vec2f, bump_dir: Vec2f, bump_dist: f32) !void {
     try entity_seek_data.removeIfExists(entity_id);
-    try entity_bump_data.insert(entity_id, BumpData{ .entity_id = entity_id, .start_world_pos = world_pos, .bump_dir = bump_dir, .timer = 0 });
+    try entity_bump_data.insert(entity_id, BumpData{ .entity_id = entity_id, .start_world_pos = world_pos, .bump_dir = bump_dir, .bump_dist = bump_dist, .timer = 0 });
 }
 
 /// Remove the entity from the system
@@ -76,7 +76,7 @@ fn updateBumpBack(dt: f32, enemy_world_positions: SparseArray(Vec2f, u8)) !void 
         const x = @min(ent.*.timer / consts.BUMP_TIME, 1.0);
         const y = easeOutBack(x);
         const entity_pos_idx = try enemy_world_positions.lookupDataIndex(ent.*.entity_id);
-        enemy_world_positions.data[entity_pos_idx] = ent.*.start_world_pos + ent.*.bump_dir * @splat(2, consts.BUMP_DISTANCE * y);
+        enemy_world_positions.data[entity_pos_idx] = ent.*.start_world_pos + ent.*.bump_dir * @splat(2, ent.*.bump_dist * y);
 
         if (x >= 1.0) {
             //Done bumping so put back to seeking
