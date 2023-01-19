@@ -30,7 +30,7 @@ var player_world_pos = Vec2f{ 0, 0 };
 var player_velocity = Vec2f{ 0, 0 };
 var player_facing_dir = Vec2f{ 0, 0 };
 var player_health: u8 = undefined;
-var player_score: u32 = undefined;
+var player_score: u64 = undefined;
 
 /// Enemy entities
 var entity_memory: [1024 * 1024]u8 = undefined;
@@ -146,7 +146,7 @@ fn update() void {
                 enemy_velocities.remove(info.entity_id) catch @panic("enemyDestroy: Failed to remove vel");
                 enemy_healths.remove(info.entity_id) catch @panic("enemyDestroy: Failed to remove health");
                 enemy_move_sys.remove(info.entity_id) catch @panic("enemyDestroy: Failed to remove from move sys");
-                player_score += 10; //TODO add score streak based on not being hit
+                player_score = std.math.min(player_score + 10, consts.MAX_SCORE); //TODO add score streak based on not being hit
 
                 enemy_free_id_head += 1;
                 enemy_free_id_stack[enemy_free_id_head] = info.entity_id;
@@ -181,24 +181,27 @@ fn render() void {
     const disp = playdate_api.display.*;
     const graphics = playdate_api.graphics.*;
 
+    const dispWidth = disp.getWidth.?();
+    const dispHeight = disp.getHeight.?();
+
     graphics.clear.?(pd.kColorWhite);
 
     //---Render the BG
     const bg_world_pos = [_]Vec2f{Vec2f{ 0, 0 }};
     var bg_screen_pos: [1]Vec2i = undefined;
-    graphics_coords.worldSpaceToScreenSpace(camera_pos, bg_world_pos[0..], bg_screen_pos[0..], disp.getWidth.?(), disp.getHeight.?());
+    graphics_coords.worldSpaceToScreenSpace(camera_pos, bg_world_pos[0..], bg_screen_pos[0..], dispWidth, dispHeight);
     graphics.tileBitmap.?(bg_bitmap, bg_screen_pos[0][0] - 1000, bg_screen_pos[0][1] - 1000, 2000, 2000, pd.kBitmapUnflipped);
 
     //---Render the player
     const player_world_pos_tmp = [_]Vec2f{player_world_pos};
     var player_screen_pos: [1]Vec2i = undefined;
     const player_bitmap_frame = anim.bitmapFrameForDir(player_facing_dir);
-    graphics_coords.worldSpaceToScreenSpace(camera_pos, player_world_pos_tmp[0..], player_screen_pos[0..], disp.getWidth.?(), disp.getHeight.?());
+    graphics_coords.worldSpaceToScreenSpace(camera_pos, player_world_pos_tmp[0..], player_screen_pos[0..], dispWidth, dispHeight);
     graphics.drawBitmap.?(graphics.getTableBitmap.?(hero_bitmap_table, player_bitmap_frame.index).?, player_screen_pos[0][0] - 32, player_screen_pos[0][1] - 64, player_bitmap_frame.flip);
 
     //---Render the enemies
     var enemy_screen_pos: [consts.MAX_ENEMIES]Vec2i = undefined;
-    graphics_coords.worldSpaceToScreenSpace(camera_pos, enemy_world_positions.toDataSlice(), enemy_screen_pos[0..], disp.getWidth.?(), disp.getHeight.?());
+    graphics_coords.worldSpaceToScreenSpace(camera_pos, enemy_world_positions.toDataSlice(), enemy_screen_pos[0..], dispWidth, dispHeight);
 
     //TODO: Interpolation
     //Enemies facing the way they are moving
@@ -217,6 +220,11 @@ fn render() void {
     bullet_sys.render(graphics, disp, camera_pos);
 
     sys.drawFPS.?(0, 0);
+
+    //TODO: Replace with bitmap font
+    var score_buffer: ["Score: ".len + 10]u8 = undefined;
+    const score_string = std.fmt.bufPrint(&score_buffer, "Score: {d}", .{player_score}) catch @panic("scorePrint: Failed to format score");
+    _ = graphics.drawText.?(score_string.ptr, score_string.len, pd.kASCIIEncoding, dispWidth - 100, 0);
 }
 
 /// Fire everytime the crank moves through 60 degrees (6 bullets per revolution)

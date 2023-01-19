@@ -29,6 +29,8 @@ Inspired by shooters like Minigore. This is a simple horde survival game where t
 * Violence warning
 * Bullet system refactor so it doesn't have outlier rendering pattern
 * Cooldown on firing when clip spent (reloading)
+* Replace text with custom bitmap font
+* Stop the enemies bunching up
 
 
 ### P3 - Polish
@@ -42,6 +44,7 @@ Inspired by shooters like Minigore. This is a simple horde survival game where t
 * Player fire anim
 * Better BG
 * Rotation interpolation for new target
+* Obstacles
 
 ### P4 - Future
 * Levels

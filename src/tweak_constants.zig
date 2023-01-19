@@ -9,3 +9,4 @@ pub const BUMP_DISTANCE = 0.2;
 pub const BUMP_TIME = 0.5;
 pub const BULLET_MAX_SPEED: f32 = 10;
 pub const BULLET_LIFETIME = 3;
+pub const MAX_SCORE: u64 = 9999999999;
