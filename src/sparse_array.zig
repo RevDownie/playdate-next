@@ -45,6 +45,11 @@ pub fn SparseArray(comptime T: type, comptime TKey: type) type {
             for (self.key_to_index) |_, i| {
                 self.key_to_index[i] = capacity;
             }
+
+            for (self.index_to_key) |_, i| {
+                self.index_to_key[i] = capacity;
+            }
+
             self.len = 0;
         }
 

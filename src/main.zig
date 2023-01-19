@@ -71,6 +71,7 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     const graphics = playdate_api.graphics.*;
 
     sys.setUpdateCallback.?(gameUpdateWrapper, null);
+    _ = sys.addMenuItem.?("Restart Level", restartLevel, null);
 
     playdate_api.display.*.setRefreshRate.?(0); //Temp unleashing the frame limit to measure performance
 
@@ -94,6 +95,12 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     reset();
 }
 
+/// Called from the system menu by the user if they want to restart
+///
+fn restartLevel(_: ?*anyopaque) callconv(.C) void {
+    reset();
+}
+
 /// Reinit this on game restart
 ///
 fn reset() void {
@@ -108,6 +115,10 @@ fn reset() void {
     enemy_spawn_sys.reset();
     enemy_move_sys.reset();
     bullet_sys.reset();
+
+    enemy_world_positions.clear();
+    enemy_velocities.clear();
+    enemy_healths.clear();
 
     enemy_free_id_stack = createEnemyIds();
     enemy_free_id_head = consts.MAX_ENEMIES - 1;
