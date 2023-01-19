@@ -162,10 +162,10 @@ fn update() void {
     //Check for collisions with enemies and player and deduct damage
 
     //Now that the enemy positions have been updated - the player can re-evaluate the hottest one to target
-    const target_dir = auto_target_sys.calculateHottestTargetDir(player_world_pos, enemy_world_positions.toDataSlice()) orelse player_velocity;
+    const target_dir = auto_target_sys.calculateHottestTargetDir(player_world_pos, enemy_world_positions.toDataSlice()) orelse if (maths.magnitudeSqrd(player_velocity) > 0) player_velocity else Vec2f{ 1, 0 };
 
     //Fire
-    const should_fire = firingSystemUpdate(current, sys);
+    const should_fire = firingSystemUpdate(pushed, sys);
     if (should_fire) {
         bullet_sys.fire(player_world_pos, target_dir);
     }
@@ -222,8 +222,8 @@ fn render() void {
 /// Fire everytime the crank moves through 60 degrees (6 bullets per revolution)
 ///
 var crank_angle_since_fire: f32 = 0.0;
-fn firingSystemUpdate(current: pd.PDButtons, sys: pd.playdate_sys) bool {
-    if ((current & pd.kButtonB) > 0) {
+fn firingSystemUpdate(pushed: pd.PDButtons, sys: pd.playdate_sys) bool {
+    if ((pushed & pd.kButtonB) > 0) {
         return true;
     }
 

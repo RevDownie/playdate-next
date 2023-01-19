@@ -24,11 +24,11 @@ pub const CollisionInfo = struct {
 /// Spawn a new bullet that moves along the given trajectory
 ///
 pub fn fire(world_pos: Vec2f, world_dir: Vec2f) void {
-    //TODO: Handle circling round to avoid running out
-    bullet_world_pos_pool[num_active] = world_pos;
-    bullet_dir_pool[num_active] = world_dir;
-    bullet_lifetime_pool[num_active] = consts.BULLET_LIFETIME;
-    num_active += 1;
+    num_active = std.math.min(num_active + 1, BULLET_POOL_SIZE);
+    const idx = num_active - 1;
+    bullet_world_pos_pool[idx] = world_pos;
+    bullet_dir_pool[idx] = world_dir;
+    bullet_lifetime_pool[idx] = consts.BULLET_LIFETIME;
 }
 
 /// Move any spawned bullets along their trajectories
@@ -60,8 +60,8 @@ pub fn update(dt: f32, entity_world_positions: SparseArray(Vec2f, u8), collision
 ///
 pub fn render(graphics: pd.playdate_graphics, disp: pd.playdate_display, camera_pos: Vec2f) void {
     const active = bullet_world_pos_pool[0..num_active];
-    var bullet_screen_pos = [_]Vec2i{Vec2i{ 0, 0 }} ** BULLET_POOL_SIZE;
-    graphics_coords.worldSpaceToScreenSpace(camera_pos, active, bullet_screen_pos[0..], disp.getWidth.?(), disp.getHeight.?());
+    var bullet_screen_pos: [BULLET_POOL_SIZE]Vec2i = undefined;
+    graphics_coords.worldSpaceToScreenSpace(camera_pos, active, bullet_screen_pos[0..num_active], disp.getWidth.?(), disp.getHeight.?());
 
     for (active) |_, i| {
         graphics.drawRect.?(bullet_screen_pos[i][0], bullet_screen_pos[i][1], 4, 4, pd.kColorBlack);

@@ -11,7 +11,6 @@ Inspired by shooters like Minigore. This is a simple horde survival game where t
 ## TODO List
 ### P1 - Functional
 * Player health and death
-* Bullet pooling
 * Scoring
 * Add running on device to zig build (pdutil)
 * Music
@@ -29,6 +28,7 @@ Inspired by shooters like Minigore. This is a simple horde survival game where t
 * Launcher and card images
 * Violence warning
 * Bullet system refactor so it doesn't have outlier rendering pattern
+* Cooldown on firing when clip spent (reloading)
 
 
 ### P3 - Polish
