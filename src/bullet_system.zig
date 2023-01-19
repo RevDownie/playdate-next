@@ -8,8 +8,16 @@ const consts = @import("tweak_constants.zig");
 const Vec2f = @Vector(2, f32);
 const Vec2i = @Vector(2, i32);
 
-const BULLET_POOL_SIZE = 100; //TODO: Calculate better approx based on fire rate and lifetime
+const BULLET_POOL_SIZE = consts.BULLET_MAG_SIZE + 10; //TODO: Calculate better approx based on fire rate and lifetime
 const BULLET_MAX_SPEED_V = @splat(2, consts.BULLET_MAX_SPEED);
+
+const State = enum {
+    RELOADING,
+    LOADED,
+};
+var current_state = State.LOADED;
+var bullets_remaining_in_mag: u32 = 0;
+var reload_timer: f32 = 0.0;
 
 var num_active: usize = 0;
 var bullet_world_pos_pool: [BULLET_POOL_SIZE]Vec2f = undefined;
@@ -21,21 +29,48 @@ pub const CollisionInfo = struct {
     impact_dir: Vec2f,
 };
 
+/// Initialise starting data
+///
+pub fn init() void {
+    current_state = State.LOADED;
+    bullets_remaining_in_mag = consts.BULLET_MAG_SIZE;
+}
+
 /// Spawn a new bullet that moves along the given trajectory
 ///
 pub fn fire(world_pos: Vec2f, world_dir: Vec2f) void {
-    num_active = std.math.min(num_active + 1, BULLET_POOL_SIZE);
-    const idx = num_active - 1;
-    bullet_world_pos_pool[idx] = world_pos;
-    bullet_dir_pool[idx] = world_dir;
-    bullet_lifetime_pool[idx] = consts.BULLET_LIFETIME;
+    switch (current_state) {
+        State.LOADED => {
+            if (bullets_remaining_in_mag == 0) {
+                current_state = State.RELOADING;
+                reload_timer = consts.RELOAD_TIME;
+                return;
+            }
+
+            bullet_world_pos_pool[num_active] = world_pos;
+            bullet_dir_pool[num_active] = world_dir;
+            bullet_lifetime_pool[num_active] = consts.BULLET_LIFETIME;
+            bullets_remaining_in_mag -= 1;
+            num_active += 1;
+        },
+        State.RELOADING => {},
+    }
 }
 
 /// Move any spawned bullets along their trajectories
 /// Recycle any that time out
+/// Reload
 /// Return any collisions
 ///
 pub fn update(dt: f32, entity_world_positions: SparseArray(Vec2f, u8), collision_data: []CollisionInfo, num_collisions: *u8) !void {
+    if (current_state == State.RELOADING) {
+        reload_timer -= dt;
+        if (reload_timer <= 0) {
+            current_state = State.LOADED;
+            bullets_remaining_in_mag = consts.BULLET_MAG_SIZE;
+        }
+    }
+
     var i: usize = 0;
     while (i < num_active) : (i += 1) {
         bullet_lifetime_pool[i] -= dt;
@@ -66,6 +101,10 @@ pub fn render(graphics: pd.playdate_graphics, disp: pd.playdate_display, camera_
     for (active) |_, i| {
         graphics.drawRect.?(bullet_screen_pos[i][0], bullet_screen_pos[i][1], 4, 4, pd.kColorBlack);
     }
+}
+
+pub fn getRemainingBullets() u32 {
+    return bullets_remaining_in_mag;
 }
 
 /// Check for collision between the bullets and the given entities

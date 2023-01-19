@@ -89,6 +89,7 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) !void {
     //Init the systems
     enemy_spawn_sys.init(consts.MAX_ENEMIES);
     try enemy_move_sys.init(consts.MAX_ENEMIES, fba.allocator());
+    bullet_sys.init();
 
     time_last_tick = sys.getCurrentTimeMilliseconds.?();
     player_health = 100;
@@ -223,8 +224,12 @@ fn render() void {
 
     //TODO: Replace with bitmap font
     var score_buffer: ["Score: ".len + 10]u8 = undefined;
-    const score_string = std.fmt.bufPrint(&score_buffer, "Score: {d}", .{player_score}) catch @panic("scorePrint: Failed to format score");
+    const score_string = std.fmt.bufPrint(&score_buffer, "Score: {d}", .{player_score}) catch @panic("scorePrint: Failed to format");
     _ = graphics.drawText.?(score_string.ptr, score_string.len, pd.kASCIIEncoding, dispWidth - 100, 0);
+
+    var bullet_buffer: ["Bullets: ".len + 3]u8 = undefined;
+    const bullet_string = std.fmt.bufPrint(&bullet_buffer, "Bullets: {d}", .{bullet_sys.getRemainingBullets()}) catch @panic("bulletPrint: Failed to format");
+    _ = graphics.drawText.?(bullet_string.ptr, bullet_string.len, pd.kASCIIEncoding, @divTrunc(dispWidth, 2), dispHeight - 30);
 }
 
 /// Fire everytime the crank moves through 60 degrees (6 bullets per revolution)
