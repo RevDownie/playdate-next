@@ -1,4 +1,5 @@
 const std = @import("std");
+const consts = @import("tweak_constants.zig");
 
 const Vec2f = @Vector(2, f32);
 
@@ -16,7 +17,7 @@ pub fn init(max_active: u8) void {
 }
 
 pub fn reset() void {
-    spawn_time = 8;
+    spawn_time = consts.INIT_SPAWN_TIME;
     next_spawn_timer = 0.25;
 }
 
@@ -33,15 +34,16 @@ pub fn update(dt: f32, num_active: usize, player_world_pos: Vec2f) []SpawnData {
     if (next_spawn_timer <= 0.0) {
         //Spawn
         next_spawn_timer = spawn_time;
-        spawn_time -= 1.0;
+        spawn_time -= consts.SPAWN_TIME_REDUCTION;
+        const to_spawn = std.math.min(consts.ENEMIES_PER_SPAWN, max_active_allowed - num_active);
         var i: u32 = 0;
-        while (i < 3) : (i += 1) {
+        while (i < to_spawn) : (i += 1) {
             const x = player_world_pos[0] + (rand.random().float(f32) * 2.0 - 1.0) * 10;
             const y = player_world_pos[1] + (rand.random().float(f32) * 2.0 - 1.0) * 10;
             const sd = SpawnData{ .world_pos = Vec2f{ x, y } };
             spawn_buffer[i] = sd;
         }
-        return spawn_buffer[0..3];
+        return spawn_buffer[0..to_spawn];
     }
 
     return spawn_buffer[0..0];
