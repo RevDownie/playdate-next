@@ -20,6 +20,10 @@ var playdate_api: *pd.PlaydateAPI = undefined;
 var camera_pos = Vec2f{ 0, 0 };
 var time_last_tick: u32 = undefined;
 
+/// Input state
+var crank_angle_since_fire: f32 = 0.0;
+var last_fire_time_ms: u32 = 0;
+
 /// Assets
 var bg_bitmap: *pd.LCDBitmap = undefined;
 var hero_bitmap_table: *pd.LCDBitmapTable = undefined;
@@ -85,7 +89,7 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     //Create the entity pools
     var fba = std.heap.FixedBufferAllocator.init(&entity_memory);
     //TODO: No point having multiple lookups when they are shared across all arrays
-    enemy_world_positions = SparseArray(Vec2f, u8).init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("init: Failed to init enemy pos");
+    enemy_world_positions = SparseArray(Vec2f, u8).init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("init: Failed to init enemy pos"); //todo @errorName
     enemy_velocities = SparseArray(Vec2f, u8).init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("init: Failed to init enemy vels");
     enemy_healths = SparseArray(u8, u8).init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("init: Failed to init enemy healths");
 
@@ -214,7 +218,7 @@ fn update() void {
     const target_dir = auto_target_sys.calculateHottestTargetDir(player_world_pos, enemy_world_positions.toDataSlice()) orelse if (maths.magnitudeSqrd(player_velocity) > 0) player_velocity else Vec2f{ 1, 0 };
 
     //Fire
-    const should_fire = firingSystemUpdate(pushed, sys);
+    const should_fire = firingSystemUpdate(current, sys);
     if (should_fire) {
         bullet_sys.fire(player_world_pos, target_dir);
     }
@@ -284,11 +288,16 @@ fn render() void {
 }
 
 /// Fire everytime the crank moves through 60 degrees (6 bullets per revolution)
+/// Alternatively fire once the buttons have been held down long enough
 ///
-var crank_angle_since_fire: f32 = 0.0;
-fn firingSystemUpdate(pushed: pd.PDButtons, sys: pd.playdate_sys) bool {
-    if ((pushed & pd.kButtonB) > 0) {
-        return true;
+fn firingSystemUpdate(current_input: pd.PDButtons, sys: pd.playdate_sys) bool {
+    if ((current_input & pd.kButtonA) > 0 or (current_input & pd.kButtonB) > 0) {
+        const now_ms = sys.getCurrentTimeMilliseconds.?();
+        const dt = now_ms - last_fire_time_ms;
+        if (dt >= consts.FIRE_BUTTON_DELAY_MS) {
+            last_fire_time_ms = now_ms;
+            return true;
+        }
     }
 
     const crank_delta = sys.getCrankChange.?();
