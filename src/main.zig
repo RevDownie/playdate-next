@@ -250,7 +250,8 @@ fn render() void {
     var player_screen_pos: [1]Vec2i = undefined;
     const player_bitmap_frame = anim.bitmapFrameForDir(player_facing_dir);
     graphics_coords.worldSpaceToScreenSpace(camera_pos, player_world_pos_tmp[0..], player_screen_pos[0..], dispWidth, dispHeight);
-    graphics.drawBitmap.?(graphics.getTableBitmap.?(hero_bitmap_table, player_bitmap_frame.index).?, player_screen_pos[0][0] - 24, player_screen_pos[0][1] - 48, player_bitmap_frame.flip);
+    const player_h_offset = anim.walkBobAnim(player_world_pos);
+    graphics.drawBitmap.?(graphics.getTableBitmap.?(hero_bitmap_table, player_bitmap_frame.index).?, player_screen_pos[0][0] - 24, player_screen_pos[0][1] - 48 - player_h_offset, player_bitmap_frame.flip);
 
     //---Render the enemies
     var enemy_screen_pos: [consts.MAX_ENEMIES]Vec2i = undefined;
@@ -263,10 +264,11 @@ fn render() void {
         enemy_bitmap_frames[idx] = anim.bitmapFrameForDir(v);
     }
 
-    for (enemy_world_positions.toDataSlice()) |_, i| {
+    for (enemy_world_positions.toDataSlice()) |p, i| {
         //TODO Culling (in a pass or just in time?)
         //TODO: Handle centering the sprite at the ground better
-        graphics.drawBitmap.?(graphics.getTableBitmap.?(enemy_bitmap_table, enemy_bitmap_frames[i].index).?, enemy_screen_pos[i][0] - 24, enemy_screen_pos[i][1] - 48, enemy_bitmap_frames[i].flip);
+        const h = anim.walkBobAnim(p);
+        graphics.drawBitmap.?(graphics.getTableBitmap.?(enemy_bitmap_table, enemy_bitmap_frames[i].index).?, enemy_screen_pos[i][0] - 24, enemy_screen_pos[i][1] - 48 - h, enemy_bitmap_frames[i].flip);
     }
 
     bullet_sys.render(graphics, disp, camera_pos);

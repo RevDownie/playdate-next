@@ -1,5 +1,8 @@
+const std = @import("std");
 const pd = @import("playdate.zig").api;
 const maths = @import("maths.zig");
+
+const Vec2f = @Vector(2, f32);
 
 pub const BitmapFrame = struct { index: i32, flip: pd.LCDBitmapFlip };
 
@@ -24,8 +27,20 @@ fn buildLookupTable() [36]BitmapFrame {
 
 /// Convert the given direction vector to a bitmap frame that best matches
 ///
-pub fn bitmapFrameForDir(dir: @Vector(2, f32)) BitmapFrame {
+pub fn bitmapFrameForDir(dir: Vec2f) BitmapFrame {
     const deg = maths.angleDegrees360(@Vector(2, f32){ 0, -1 }, dir);
     const index = @floatToInt(usize, deg * 0.1);
     return BITMAP_INDEX_MAP[index];
+}
+
+/// Given the world pos calculate a screen height offset do have the charater bob
+///
+pub fn walkBobAnim(world_pos: Vec2f) i32 {
+    const freq: f32 = 24.0;
+    const amp: f32 = 10.0;
+    const t1 = world_pos[0];
+    const x = (std.math.sin(t1 * freq) + 1.0) * 0.5;
+    const t2 = world_pos[1];
+    const y = (std.math.sin(t2 * freq) + 1.0) * 0.5;
+    return @floatToInt(i32, (x * 0.5 + y * 0.5) * amp);
 }
