@@ -101,7 +101,7 @@ pub fn render(graphics: pd.playdate_graphics, disp: pd.playdate_display, camera_
     graphics_coords.worldSpaceToScreenSpace(camera_pos, active, bullet_screen_pos[0..num_active], disp.getWidth.?(), disp.getHeight.?());
 
     for (active) |_, i| {
-        graphics.drawRect.?(bullet_screen_pos[i][0], bullet_screen_pos[i][1], 4, 4, pd.kColorBlack);
+        graphics.fillRect.?(bullet_screen_pos[i][0], bullet_screen_pos[i][1], 6, 6, pd.kColorBlack);
     }
 }
 
