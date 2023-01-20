@@ -10,6 +10,7 @@ const Vec2i = @Vector(2, i32);
 
 const BULLET_POOL_SIZE = consts.BULLET_MAG_SIZE + 10; //TODO: Calculate better approx based on fire rate and lifetime
 const BULLET_MAX_SPEED_V = @splat(2, consts.BULLET_MAX_SPEED);
+const CHAR_BULLET_COLL_RADIUS_SQRD = consts.CHAR_BULLET_COLL_RADIUS * consts.CHAR_BULLET_COLL_RADIUS;
 
 const State = enum {
     RELOADING,
@@ -119,7 +120,7 @@ fn checkForCollisions(entity_world_positions: SparseArray(Vec2f, u8), collision_
     for (bullet_world_pos_pool[0..num_active]) |bullet_pos, bullet_idx| {
         for (entity_world_positions.toDataSlice()) |entity_pos, entity_idx| {
             const delta = entity_pos - bullet_pos;
-            if (maths.magnitudeSqrd(delta) <= 0.18 * 0.18) {
+            if (maths.magnitudeSqrd(delta) <= CHAR_BULLET_COLL_RADIUS_SQRD) {
                 collision_data[out_idx] = CollisionInfo{ .entity_id = try entity_world_positions.lookupKeyByIndex(entity_idx), .impact_dir = bullet_dir_pool[bullet_idx] };
                 out_idx += 1;
 

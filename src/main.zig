@@ -15,6 +15,8 @@ const Vec2i = @Vector(2, i32);
 const Vec2f = @Vector(2, f32);
 const SparseArray = sparse_array.SparseArray;
 
+const CHAR_ENEMY_COLL_RADIUS_SQRD = consts.CHAR_ENEMY_COLL_RADIUS * consts.CHAR_ENEMY_COLL_RADIUS;
+
 /// Common game state
 var playdate_api: *pd.PlaydateAPI = undefined;
 var camera_pos = Vec2f{ 0, 0 };
@@ -251,7 +253,7 @@ fn render() void {
     const player_bitmap_frame = anim.bitmapFrameForDir(player_facing_dir);
     graphics_coords.worldSpaceToScreenSpace(camera_pos, player_world_pos_tmp[0..], player_screen_pos[0..], dispWidth, dispHeight);
     const player_h_offset = anim.walkBobAnim(player_world_pos);
-    graphics.drawBitmap.?(graphics.getTableBitmap.?(hero_bitmap_table, player_bitmap_frame.index).?, player_screen_pos[0][0] - 24, player_screen_pos[0][1] - 48 - player_h_offset, player_bitmap_frame.flip);
+    graphics.drawBitmap.?(graphics.getTableBitmap.?(hero_bitmap_table, player_bitmap_frame.index).?, player_screen_pos[0][0] - consts.CHAR_DIMS / 2, player_screen_pos[0][1] - consts.CHAR_DIMS - player_h_offset, player_bitmap_frame.flip);
 
     //---Render the enemies
     var enemy_screen_pos: [consts.MAX_ENEMIES]Vec2i = undefined;
@@ -266,9 +268,8 @@ fn render() void {
 
     for (enemy_world_positions.toDataSlice()) |p, i| {
         //TODO Culling (in a pass or just in time?)
-        //TODO: Handle centering the sprite at the ground better
         const h = anim.walkBobAnim(p);
-        graphics.drawBitmap.?(graphics.getTableBitmap.?(enemy_bitmap_table, enemy_bitmap_frames[i].index).?, enemy_screen_pos[i][0] - 24, enemy_screen_pos[i][1] - 48 - h, enemy_bitmap_frames[i].flip);
+        graphics.drawBitmap.?(graphics.getTableBitmap.?(enemy_bitmap_table, enemy_bitmap_frames[i].index).?, enemy_screen_pos[i][0] - consts.CHAR_DIMS / 2, enemy_screen_pos[i][1] - consts.CHAR_DIMS - h, enemy_bitmap_frames[i].flip);
     }
 
     bullet_sys.render(graphics, disp, camera_pos);
@@ -322,7 +323,7 @@ fn checkPlayerCollision(player_pos: Vec2f, enemy_positions: SparseArray(Vec2f, u
 
     for (enemy_positions.toDataSlice()) |enemy_pos, enemy_idx| {
         const delta = enemy_pos - player_pos;
-        if (maths.magnitudeSqrd(delta) <= 0.25 * 0.25) {
+        if (maths.magnitudeSqrd(delta) <= CHAR_ENEMY_COLL_RADIUS_SQRD) {
             collision_data[num_collisions.*] = try enemy_positions.lookupKeyByIndex(enemy_idx);
             num_collisions.* += 1;
         }

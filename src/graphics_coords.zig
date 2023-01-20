@@ -1,9 +1,11 @@
 const std = @import("std");
+const consts = @import("tweak_constants.zig");
+
 const Vec2i = @Vector(2, i32);
 const Vec2f = @Vector(2, f32);
 
 /// Convert the list of world space coords through camera space and then to screen space ready for rendering
-/// 1m = 128 pixels
+/// 1m = 128 pixels (consts.METRES_TO_PIXELS)
 ///
 pub fn worldSpaceToScreenSpace(camera_pos: Vec2f, world_pos: []const Vec2f, screen_pos: []Vec2i, screen_width: i32, screen_height: i32) void {
     const half_width = screen_width >> 1;
@@ -15,7 +17,7 @@ pub fn worldSpaceToScreenSpace(camera_pos: Vec2f, world_pos: []const Vec2f, scre
         const cam_space = world_pos[i] - camera_pos;
 
         //Camera to Screen
-        const screen_posf = Vec2f{ cam_space[0] * 128.0 + @intToFloat(f32, half_width), (cam_space[1] * 128.0 - @intToFloat(f32, half_height)) * -1 };
+        const screen_posf = Vec2f{ cam_space[0] * consts.METRES_TO_PIXELS + @intToFloat(f32, half_width), (cam_space[1] * consts.METRES_TO_PIXELS - @intToFloat(f32, half_height)) * -1 };
         screen_pos[i] = Vec2i{ @floatToInt(i32, screen_posf[0]), @floatToInt(i32, screen_posf[1]) };
     }
 }

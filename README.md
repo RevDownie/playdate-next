@@ -17,17 +17,16 @@ Inspired by shooters like Minigore. This is a simple horde survival game where t
 
 ### P2 - Improvements
 * Combine sparse arrays for enemies
-* Handle centering the sprites
 * Culling - Test if we need to cull and handle the culling logic
 * Movement bounds
-* Enemy visuals - Have enemies look different than player
+* New characters
 * Better auto targetting
 * Enemies spawning in waves and at better locations
 * Leaderboard
 * Launcher and card images
 * Violence warning
 * Bullet system refactor so it doesn't have outlier rendering pattern
-* Cooldown on firing when clip spent (reloading)
+* Reloading bar
 * Replace text with custom bitmap font
 * Stop the enemies bunching up
 
