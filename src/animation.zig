@@ -37,7 +37,7 @@ pub fn bitmapFrameForDir(dir: Vec2f) BitmapFrame {
 ///
 pub fn walkBobAnim(world_pos: Vec2f) i32 {
     const freq: f32 = 24.0;
-    const amp: f32 = 10.0;
+    const amp: f32 = 8.0;
     const t1 = world_pos[0];
     const x = (std.math.sin(t1 * freq) + 1.0) * 0.5;
     const t2 = world_pos[1];
