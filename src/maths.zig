@@ -1,6 +1,9 @@
 const std = @import("std");
 const Vec2f = @Vector(2, f32);
 
+pub const PI: f32 = 3.14159265;
+pub const PI_2 = PI * 2.0;
+
 /// Calculate normalised vector - components divided by magnitude
 ///
 pub fn normaliseSafe(v: Vec2f, fallback: Vec2f) Vec2f {
@@ -22,6 +25,19 @@ pub fn normaliseSafeMag(v: Vec2f, m: f32, fallback: Vec2f) Vec2f {
     return v / @splat(2, m);
 }
 
+/// Calculate normalised vector - components divided by magnitude
+///
+pub fn normalise(v: Vec2f) Vec2f {
+    const m = magnitude(v);
+    return v / @splat(2, m);
+}
+
+/// Calculate normalised vector when you already have the magnitude
+///
+pub fn normaliseMag(v: Vec2f, m: f32) Vec2f {
+    return v / @splat(2, m);
+}
+
 /// Calculate the length of the vector
 ///
 pub inline fn magnitude(v: Vec2f) f32 {
@@ -38,7 +54,7 @@ pub inline fn magnitudeSqrd(v: Vec2f) f32 {
 ///
 pub inline fn angleDegrees360(v1: Vec2f, v2: Vec2f) f32 {
     const atan2 = std.math.atan2;
-    const deg = (atan2(f32, v2[1], v2[0]) - atan2(f32, v1[1], v1[0])) * 180.0 / 3.14159265;
+    const deg = (atan2(f32, v2[1], v2[0]) - atan2(f32, v1[1], v1[0])) * 180.0 / PI;
     const cw = 360 - deg;
     return if (cw < 360) cw else cw - 360;
 }
