@@ -17,10 +17,16 @@ const SparseArray = sparse_array.SparseArray;
 
 const CHAR_ENEMY_COLL_RADIUS_SQRD = consts.CHAR_ENEMY_COLL_RADIUS * consts.CHAR_ENEMY_COLL_RADIUS;
 
+const MapRenderData = struct {
+    bitmap_idx: c_int,
+    world_pos: Vec2f,
+};
+
 /// Common game state
 var playdate_api: *pd.PlaydateAPI = undefined;
 var camera_pos = Vec2f{ 0, 0 };
 var time_last_tick: u32 = undefined;
+var fixed_mem_buffer: [1024 * 1024]u8 = undefined;
 
 /// Input state
 var crank_angle_since_fire: f32 = 0.0;
@@ -30,6 +36,8 @@ var last_fire_time_ms: u32 = 0;
 var bg_bitmap: *pd.LCDBitmap = undefined;
 var hero_bitmap_table: *pd.LCDBitmapTable = undefined;
 var enemy_bitmap_table: *pd.LCDBitmapTable = undefined;
+var lvl_bitmap_table: *pd.LCDBitmapTable = undefined;
+var lvl_render_data: []MapRenderData = undefined;
 
 /// Player
 var player_world_pos: Vec2f = undefined;
@@ -40,7 +48,6 @@ var player_score: u64 = undefined;
 var player_kill_streak: u32 = undefined;
 
 /// Enemy entities
-var entity_memory: [1024 * 1024]u8 = undefined;
 var enemy_world_positions: SparseArray(Vec2f, u8) = undefined;
 var enemy_velocities: SparseArray(Vec2f, u8) = undefined;
 var enemy_healths: SparseArray(u8, u8) = undefined;
@@ -78,6 +85,8 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     const sys = playdate_api.system.*;
     const graphics = playdate_api.graphics.*;
 
+    var fba = std.heap.FixedBufferAllocator.init(&fixed_mem_buffer);
+
     sys.setUpdateCallback.?(gameUpdateWrapper, null);
     _ = sys.addMenuItem.?("Restart Level", restartLevel, null);
 
@@ -87,9 +96,13 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     bg_bitmap = graphics.loadBitmap.?("bg", null).?;
     hero_bitmap_table = graphics.loadBitmapTable.?("hero1", null).?;
     enemy_bitmap_table = graphics.loadBitmapTable.?("enemy1", null).?;
+    lvl_bitmap_table = graphics.loadBitmapTable.?("lvl1", null).?;
+
+    var map_data = std.ArrayList(MapRenderData).init(fba.allocator());
+    loadMap(&map_data);
+    lvl_render_data = map_data.items;
 
     //Create the entity pools
-    var fba = std.heap.FixedBufferAllocator.init(&entity_memory);
     //TODO: No point having multiple lookups when they are shared across all arrays
     enemy_world_positions = SparseArray(Vec2f, u8).init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("init: Failed to init enemy pos"); //todo @errorName
     enemy_velocities = SparseArray(Vec2f, u8).init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("init: Failed to init enemy vels");
@@ -247,6 +260,14 @@ fn render() void {
     graphics_coords.worldSpaceToScreenSpace(camera_pos, bg_world_pos[0..], bg_screen_pos[0..], dispWidth, dispHeight);
     graphics.tileBitmap.?(bg_bitmap, bg_screen_pos[0][0] - 1000, bg_screen_pos[0][1] - 1000, 2000, 2000, pd.kBitmapUnflipped);
 
+    //---Render the map obstacles
+    for (lvl_render_data) |ld| {
+        const map_world_pos = [_]Vec2f{ld.world_pos};
+        var map_screen_pos: [1]Vec2i = undefined;
+        graphics_coords.worldSpaceToScreenSpace(camera_pos, map_world_pos[0..], map_screen_pos[0..], dispWidth, dispHeight);
+        graphics.drawBitmap.?(graphics.getTableBitmap.?(lvl_bitmap_table, ld.bitmap_idx).?, map_screen_pos[0][0] - (consts.ENV_DIMS_W / 2), map_screen_pos[0][1] - consts.ENV_DIMS_H, pd.kBitmapUnflipped);
+    }
+
     //---Render the player
     const player_world_pos_tmp = [_]Vec2f{player_world_pos};
     var player_screen_pos: [1]Vec2i = undefined;
@@ -327,5 +348,44 @@ fn checkPlayerCollision(player_pos: Vec2f, enemy_positions: SparseArray(Vec2f, u
             collision_data[num_collisions.*] = try enemy_positions.lookupKeyByIndex(enemy_idx);
             num_collisions.* += 1;
         }
+    }
+}
+
+/// TODO: Extract
+/// load the render data for the level map converting the co-ords
+/// into isometric world positions
+///
+fn loadMap(map_render_data: *std.ArrayList(MapRenderData)) void {
+    const file = playdate_api.file.*;
+
+    var lvl_file = file.open.?("lvl1.bin", pd.kFileRead);
+    defer _ = file.close.?(lvl_file);
+
+    var buffer: [1024]u8 = undefined;
+    const data_len = file.read.?(lvl_file, &buffer, 1024);
+    std.debug.assert(data_len < 1024);
+
+    var i: usize = 0;
+    const grid_width = buffer[i];
+    const grid_width_half = grid_width / 2;
+    i += 1;
+    const grid_height_half = buffer[i] / 2;
+    i += 1;
+    const cell_width_half = buffer[i] / 2;
+    i += 1;
+    const cell_height_half = buffer[i] / 2;
+    i += 1;
+
+    while (i < data_len) {
+        const idx = std.mem.readIntSliceNative(u16, buffer[i .. i + 2]);
+        const x = @intCast(i32, idx % grid_width) - grid_width_half;
+        const y = @intCast(i32, idx / grid_width) - grid_height_half;
+        const world_pos = Vec2f{ @intToFloat(f32, (x - y) * cell_width_half), @intToFloat(f32, (x + y) * cell_height_half * -1) } / @splat(2, consts.METRES_TO_PIXELS);
+        i += 2;
+
+        const sprite_id = buffer[i];
+        i += 1;
+
+        map_render_data.append(MapRenderData{ .bitmap_idx = sprite_id - 1, .world_pos = world_pos }) catch @panic("loadMap: Failed to append map data");
     }
 }

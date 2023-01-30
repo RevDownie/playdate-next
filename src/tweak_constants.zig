@@ -29,3 +29,5 @@ pub const CHAR_DIMS: u32 = 48;
 pub const CHAR_DIMS_M: f32 = @intToFloat(f32, CHAR_DIMS) / METRES_TO_PIXELS;
 pub const CHAR_BULLET_COLL_RADIUS: f32 = CHAR_DIMS_M * 0.5;
 pub const CHAR_ENEMY_COLL_RADIUS: f32 = CHAR_DIMS_M * 0.5 * 1.25;
+pub const ENV_DIMS_W: u32 = 64;
+pub const ENV_DIMS_H: u32 = 88;

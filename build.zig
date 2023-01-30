@@ -53,7 +53,7 @@ pub fn build(b: *Builder) !void {
     b.getInstallStep().dependOn(copy_assets_step);
 
     //pdc step to create pdx package
-    const pdc_step = b.addSystemCommand(&.{ "pdc", "-k", "zig-out/lib", b.fmt("zig-out/{s}.pdx", .{game_name}) });
+    const pdc_step = b.addSystemCommand(&.{ "pdc", "zig-out/lib", b.fmt("zig-out/{s}.pdx", .{game_name}) });
     pdc_step.step.dependOn(copy_assets_step);
     b.getInstallStep().dependOn(&pdc_step.step);
 
@@ -101,11 +101,24 @@ fn copyAssets(_: *std.build.Step) !void {
     var image_dir = try std.fs.cwd().openIterableDir("images", .{});
     defer image_dir.close();
 
-    var iter = image_dir.iterate();
-    while (try iter.next()) |entry| {
+    var iter_img = image_dir.iterate();
+    while (try iter_img.next()) |entry| {
         if (entry.kind == .File) {
             std.debug.print("Copying image: {s}\n", .{entry.name});
             const path = try std.fs.path.join(allocator, &[_]string{ "images", entry.name });
+            try std.fs.cwd().copyFile(path, output_dir, entry.name, .{});
+        }
+    }
+
+    //Levels
+    var levels_dir = try std.fs.cwd().openIterableDir("levels", .{});
+    defer levels_dir.close();
+
+    var iter_lvl = levels_dir.iterate();
+    while (try iter_lvl.next()) |entry| {
+        if (entry.kind == .File) {
+            std.debug.print("Copying level: {s}\n", .{entry.name});
+            const path = try std.fs.path.join(allocator, &[_]string{ "levels", entry.name });
             try std.fs.cwd().copyFile(path, output_dir, entry.name, .{});
         }
     }
