@@ -9,7 +9,9 @@ const consts = @import("tweak_constants.zig");
 const Vec2i = @Vector(2, i32);
 const Vec2f = @Vector(2, f32);
 
-pub const RenderData = struct {
+const MAX_ENTITIES: u32 = 200;
+
+pub const RenderCommandData = struct {
     bitmap_table: *pd.LCDBitmapTable,
     bitmap_idx: c_int,
     width_offset: i32,
@@ -17,16 +19,13 @@ pub const RenderData = struct {
     flip: pd.LCDBitmapFlip,
 };
 
-pub const MapRenderData = struct {
-    bitmap_idx: c_int,
-    world_pos: Vec2f,
-};
-
 var bg_bitmap: *pd.LCDBitmap = undefined;
-var hero_bitmap_table: *pd.LCDBitmapTable = undefined;
+var player_bitmap_table: *pd.LCDBitmapTable = undefined;
 var enemy_bitmap_table: *pd.LCDBitmapTable = undefined;
-var lvl_bitmap_table: *pd.LCDBitmapTable = undefined;
-pub var lvl_render_data: []MapRenderData = undefined;
+var env_obj_bitmap_table: *pd.LCDBitmapTable = undefined;
+
+var render_command_sort_order: [MAX_ENTITIES]u8 = undefined;
+var render_command_data_buffer: [MAX_ENTITIES]RenderCommandData = undefined;
 
 /// Load the rendering assets - bitmaps and bitmap tables
 ///
@@ -34,15 +33,28 @@ pub fn loadAssets(playdate_api: *pd.PlaydateAPI) void {
     const graphics = playdate_api.graphics.*;
 
     bg_bitmap = graphics.loadBitmap.?("bg", null).?;
-    hero_bitmap_table = graphics.loadBitmapTable.?("hero1", null).?;
+    player_bitmap_table = graphics.loadBitmapTable.?("hero1", null).?;
     enemy_bitmap_table = graphics.loadBitmapTable.?("enemy1", null).?;
-    lvl_bitmap_table = graphics.loadBitmapTable.?("lvl1", null).?;
+    env_obj_bitmap_table = graphics.loadBitmapTable.?("lvl1", null).?;
 }
 
 /// Perform the transformations from world to screen space and render the bitmaps
 /// Sorting them by "depth order"
+/// TODO: Build the render command data elsewhere?
 ///
-pub fn render(playdate_api: *pd.PlaydateAPI, camera_pos: Vec2f, player_world_pos: Vec2f, player_facing_dir: Vec2f, enemy_world_positions: []const Vec2f, enemy_velocities: []const Vec2f, player_score: u64, player_health: u8, bullets_remaining: u32) void {
+pub fn render(
+    playdate_api: *pd.PlaydateAPI,
+    camera_pos: Vec2f,
+    player_world_pos: Vec2f,
+    player_facing_dir: Vec2f,
+    enemy_world_positions: []const Vec2f,
+    enemy_velocities: []const Vec2f,
+    env_obj_world_positions: []const Vec2f,
+    env_obj_bitmap_indices: []const u8,
+    player_score: u64,
+    player_health: u8,
+    bullets_remaining: u32,
+) void {
     const sys = playdate_api.system.*;
     const disp = playdate_api.display.*;
     const graphics = playdate_api.graphics.*;
@@ -58,59 +70,72 @@ pub fn render(playdate_api: *pd.PlaydateAPI, camera_pos: Vec2f, player_world_pos
     graphics_coords.worldSpaceToScreenSpace(camera_pos, bg_world_pos[0..], bg_screen_pos[0..], dispWidth, dispHeight);
     graphics.tileBitmap.?(bg_bitmap, bg_screen_pos[0][0] - 1000, bg_screen_pos[0][1] - 1000, 2000, 2000, pd.kBitmapUnflipped);
 
-    //---Render the map obstacles and characters interleaved based on "depth"
-    // var entity_screen_pos: [200]Vec2i = undefined;
-    // var buffer_start: u32 = 0;
-    // var buffer_end = enemy_world_positions.len;
-    // graphics_coords.worldSpaceToScreenSpace(camera_pos, enemy_world_positions.toDataSlice(), entity_screen_pos[buffer_start..buffer_end], dispWidth, dispHeight);
-    // buffer_start = buffer_end;
-    // buffer_end += map_world_pos.len;
-    // graphics_coords.worldSpaceToScreenSpace(camera_pos, map_world_pos[0..], entity_screen_pos[buffer_start..buffer_end], dispWidth, dispHeight);
-    // buffer_start = buffer_end;
-    // buffer_end += 1;
-    // const player_world_pos_tmp = [_]Vec2f{player_world_pos};
-    // graphics_coords.worldSpaceToScreenSpace(camera_pos, player_world_pos_tmp[0..], entity_screen_pos[buffer_start..buffer_end], dispWidth, dispHeight);
+    //---Transform the entities to screen space
+    var entity_screen_pos: [MAX_ENTITIES]Vec2i = undefined;
+    var buffer_start: usize = 0;
+    var buffer_end: usize = 1;
 
-    // for() |rd| {
-    //     graphics.drawBitmap.?(graphics.getTableBitmap.?(rd.bitmap_table, rd.bitmap_idx).?, entity_screen_pos[i][0] - rd.width_offset, entity_screen_pos[i][1] - rd.height_offset, rd.flip);
-    // }
+    const player_world_positions = [_]Vec2f{player_world_pos};
+    graphics_coords.worldSpaceToScreenSpace(camera_pos, player_world_positions[0..], entity_screen_pos[buffer_start..buffer_end], dispWidth, dispHeight);
+    buffer_start = buffer_end;
+    buffer_end += enemy_world_positions.len;
 
-    //---Render the map obstacles
-    for (lvl_render_data) |ld| {
-        const map_world_pos = [_]Vec2f{ld.world_pos};
-        var map_screen_pos: [1]Vec2i = undefined;
-        graphics_coords.worldSpaceToScreenSpace(camera_pos, map_world_pos[0..], map_screen_pos[0..], dispWidth, dispHeight);
-        graphics.drawBitmap.?(graphics.getTableBitmap.?(lvl_bitmap_table, ld.bitmap_idx).?, map_screen_pos[0][0] - (bitmap_descs.ENV_OBJ_W / 2), map_screen_pos[0][1] - bitmap_descs.ENV_OBJ_H, pd.kBitmapUnflipped);
-    }
+    graphics_coords.worldSpaceToScreenSpace(camera_pos, enemy_world_positions[0..], entity_screen_pos[buffer_start..buffer_end], dispWidth, dispHeight);
+    buffer_start = buffer_end;
+    buffer_end += env_obj_world_positions.len;
 
-    //---Render the player
-    const player_world_pos_tmp = [_]Vec2f{player_world_pos};
-    var player_screen_pos: [1]Vec2i = undefined;
+    graphics_coords.worldSpaceToScreenSpace(camera_pos, env_obj_world_positions[0..], entity_screen_pos[buffer_start..buffer_end], dispWidth, dispHeight);
+
+    //---Build the render commands for the player and enemies
     const player_bitmap_frame = anim.bitmapFrameForDir(player_facing_dir);
-    graphics_coords.worldSpaceToScreenSpace(camera_pos, player_world_pos_tmp[0..], player_screen_pos[0..], dispWidth, dispHeight);
-    const player_h_offset = anim.walkBobAnim(player_world_pos);
-    graphics.drawBitmap.?(graphics.getTableBitmap.?(hero_bitmap_table, player_bitmap_frame.index).?, player_screen_pos[0][0] - bitmap_descs.CHAR_W / 2, player_screen_pos[0][1] - bitmap_descs.CHAR_H - player_h_offset, player_bitmap_frame.flip);
+    render_command_data_buffer[0] = RenderCommandData{
+        .bitmap_table = player_bitmap_table,
+        .bitmap_idx = player_bitmap_frame.index,
+        .flip = player_bitmap_frame.flip,
+        .width_offset = bitmap_descs.CHAR_W / 2,
+        .height_offset = @intCast(i32, bitmap_descs.CHAR_H) - anim.walkBobAnim(player_world_pos),
+    };
 
-    //---Render the enemies
-    var enemy_screen_pos: [consts.MAX_ENEMIES]Vec2i = undefined;
-    graphics_coords.worldSpaceToScreenSpace(camera_pos, enemy_world_positions, enemy_screen_pos[0..], dispWidth, dispHeight);
-
-    //TODO: Interpolation
-    //Enemies facing the way they are moving
-    var enemy_bitmap_frames: [consts.MAX_ENEMIES]anim.BitmapFrame = undefined;
-    for (enemy_velocities) |v, idx| {
-        enemy_bitmap_frames[idx] = anim.bitmapFrameForDir(v);
+    var enemy_bitmap_frames: [consts.MAX_ENEMIES]anim.BitmapFrame = undefined; //Enemies facing the way they are moving
+    for (enemy_velocities) |v, i| {
+        enemy_bitmap_frames[i] = anim.bitmapFrameForDir(v);
     }
-
     for (enemy_world_positions) |p, i| {
-        //TODO Culling (in a pass or just in time?)
-        const h = anim.walkBobAnim(p);
-        graphics.drawBitmap.?(graphics.getTableBitmap.?(enemy_bitmap_table, enemy_bitmap_frames[i].index).?, enemy_screen_pos[i][0] - bitmap_descs.CHAR_W / 2, enemy_screen_pos[i][1] - bitmap_descs.CHAR_H - h, enemy_bitmap_frames[i].flip);
+        render_command_data_buffer[i + 1] = RenderCommandData{
+            .bitmap_table = enemy_bitmap_table,
+            .bitmap_idx = enemy_bitmap_frames[i].index,
+            .flip = enemy_bitmap_frames[i].flip,
+            .width_offset = bitmap_descs.CHAR_W / 2,
+            .height_offset = @intCast(i32, bitmap_descs.CHAR_H) - anim.walkBobAnim(p),
+        };
     }
 
-    bullet_sys.render(graphics, disp, camera_pos);
+    const offset = enemy_world_positions.len + 1;
+    for (env_obj_bitmap_indices) |bi, i| {
+        render_command_data_buffer[i + offset] = RenderCommandData{
+            .bitmap_table = env_obj_bitmap_table,
+            .bitmap_idx = bi,
+            .flip = pd.kBitmapUnflipped,
+            .width_offset = bitmap_descs.ENV_OBJ_W / 2,
+            .height_offset = bitmap_descs.ENV_OBJ_H,
+        };
+    }
 
-    sys.drawFPS.?(0, 0);
+    //---Sort by "depth", really the y-axis. To keep sorting fast we sort indices rather than render data
+    var sorted_indices = render_command_sort_order[0..buffer_end];
+    for (sorted_indices) |_, i| {
+        sorted_indices[i] = @intCast(u8, i);
+    }
+    std.sort.sort(u8, sorted_indices, entity_screen_pos[0..buffer_end], compareBackToFront);
+
+    //---Render the entities
+    for (sorted_indices) |idx| {
+        const rd = render_command_data_buffer[idx];
+        graphics.drawBitmap.?(graphics.getTableBitmap.?(rd.bitmap_table, rd.bitmap_idx).?, entity_screen_pos[idx][0] - rd.width_offset, entity_screen_pos[idx][1] - rd.height_offset, rd.flip);
+    }
+
+    //TODO: Interleave bullets
+    bullet_sys.render(graphics, disp, camera_pos);
 
     //TODO: Replace with bitmap font
     var score_buffer: ["Score: ".len + 10]u8 = undefined;
@@ -124,4 +149,12 @@ pub fn render(playdate_api: *pd.PlaydateAPI, camera_pos: Vec2f, player_world_pos
     var bullet_buffer: ["Bullets: ".len + 3]u8 = undefined;
     const bullet_string = std.fmt.bufPrint(&bullet_buffer, "Bullets: {d}", .{bullets_remaining}) catch @panic("bulletPrint: Failed to format");
     _ = graphics.drawText.?(bullet_string.ptr, bullet_string.len, pd.kASCIIEncoding, @divTrunc(dispWidth, 2), dispHeight - 30);
+
+    sys.drawFPS.?(0, 0);
+}
+
+/// Used for depth sorting of an index list against the screen positions
+///
+fn compareBackToFront(screen_positions: []const Vec2i, a: u8, b: u8) bool {
+    return screen_positions[a][1] <= screen_positions[b][1];
 }

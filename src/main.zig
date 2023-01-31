@@ -46,6 +46,10 @@ var enemy_free_id_head: u32 = undefined;
 var bullet_collision_info: [consts.MAX_ENEMIES]bullet_sys.CollisionInfo = undefined;
 var enemy_collision_info: [consts.MAX_ENEMIES]u8 = undefined;
 
+/// Environment
+var env_obj_world_positions: std.ArrayList(Vec2f) = undefined;
+var env_obj_bitmap_indices: std.ArrayList(u8) = undefined;
+
 /// Exposed via the shared library to the Playdate runner which forwards on events
 ///
 pub export fn eventHandler(playdate: [*c]pd.PlaydateAPI, event: pd.PDSystemEvent, _: c_ulong) callconv(.C) c_int {
@@ -84,9 +88,9 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     //Load the assets
     renderer.loadAssets(playdate_api);
 
-    var map_data = std.ArrayList(renderer.MapRenderData).init(fba.allocator());
-    loadMap(&map_data);
-    renderer.lvl_render_data = map_data.items;
+    env_obj_world_positions = std.ArrayList(Vec2f).init(fba.allocator());
+    env_obj_bitmap_indices = std.ArrayList(u8).init(fba.allocator());
+    loadMap(&env_obj_world_positions, &env_obj_bitmap_indices);
 
     //Create the entity pools
     //TODO: No point having multiple lookups when they are shared across all arrays
@@ -136,7 +140,7 @@ fn reset() void {
 ///
 fn gameUpdateWrapper(_: ?*anyopaque) callconv(.C) c_int {
     update();
-    renderer.render(playdate_api, camera_pos, player_world_pos, player_facing_dir, enemy_world_positions.toDataSlice(), enemy_velocities.toDataSlice(), player_score, player_health, bullet_sys.getRemainingBullets());
+    renderer.render(playdate_api, camera_pos, player_world_pos, player_facing_dir, enemy_world_positions.toDataSlice(), enemy_velocities.toDataSlice(), env_obj_world_positions.items, env_obj_bitmap_indices.items, player_score, player_health, bullet_sys.getRemainingBullets());
     return 1; //Inform the SDK we have stuff to render
 }
 
@@ -272,7 +276,7 @@ fn checkPlayerCollision(player_pos: Vec2f, enemy_positions: SparseArray(Vec2f, u
 /// load the render data for the level map converting the co-ords
 /// into isometric world positions
 ///
-fn loadMap(map_render_data: *std.ArrayList(renderer.MapRenderData)) void {
+fn loadMap(world_positions: *std.ArrayList(Vec2f), bitmap_indices: *std.ArrayList(u8)) void {
     const file = playdate_api.file.*;
 
     var lvl_file = file.open.?("lvl1.bin", pd.kFileRead);
@@ -298,11 +302,11 @@ fn loadMap(map_render_data: *std.ArrayList(renderer.MapRenderData)) void {
         const x = @intCast(i32, idx % grid_width) - grid_width_half;
         const y = @intCast(i32, idx / grid_width) - grid_height_half;
         const world_pos = Vec2f{ @intToFloat(f32, (x - y) * cell_width_half), @intToFloat(f32, (x + y) * cell_height_half * -1) } / @splat(2, consts.METRES_TO_PIXELS);
+        world_positions.append(world_pos) catch @panic("loadMap: Failed to append world pos");
         i += 2;
 
         const sprite_id = buffer[i];
+        bitmap_indices.append(sprite_id - 1) catch @panic("loadMap: Failed to append bitmap idx");
         i += 1;
-
-        map_render_data.append(renderer.MapRenderData{ .bitmap_idx = sprite_id - 1, .world_pos = world_pos }) catch @panic("loadMap: Failed to append map data");
     }
 }
