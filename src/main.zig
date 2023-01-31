@@ -85,9 +85,6 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
 
     playdate_api.display.*.setRefreshRate.?(0); //Temp unleashing the frame limit to measure performance
 
-    //Load the assets
-    renderer.loadAssets(playdate_api);
-
     env_obj_world_positions = std.ArrayList(Vec2f).init(fba.allocator());
     env_obj_bitmap_indices = std.ArrayList(u8).init(fba.allocator());
     loadMap(&env_obj_world_positions, &env_obj_bitmap_indices);
@@ -99,8 +96,12 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     enemy_healths = SparseArray(u8, u8).init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("init: Failed to init enemy healths");
 
     //Init the systems
+    renderer.init(playdate_api);
     enemy_spawn_sys.init(consts.MAX_ENEMIES);
     enemy_move_sys.init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("reinit: Failed to init enemy move sys");
+
+    //Load the assets
+    renderer.loadAssets();
 
     time_last_tick = sys.getCurrentTimeMilliseconds.?();
     reset();
@@ -124,6 +125,7 @@ fn reset() void {
 
     camera_pos = @splat(2, @as(f32, 0));
 
+    renderer.reset();
     enemy_spawn_sys.reset();
     enemy_move_sys.reset();
     bullet_sys.reset();
@@ -140,7 +142,7 @@ fn reset() void {
 ///
 fn gameUpdateWrapper(_: ?*anyopaque) callconv(.C) c_int {
     update();
-    renderer.render(playdate_api, camera_pos, player_world_pos, player_facing_dir, enemy_world_positions.toDataSlice(), enemy_velocities.toDataSlice(), env_obj_world_positions.items, env_obj_bitmap_indices.items, player_score, player_health, bullet_sys.getRemainingBullets());
+    renderer.render(camera_pos, player_world_pos, player_facing_dir, enemy_world_positions.toDataSlice(), enemy_velocities.toDataSlice(), env_obj_world_positions.items, env_obj_bitmap_indices.items, player_score, player_health, bullet_sys.getRemainingBullets());
     return 1; //Inform the SDK we have stuff to render
 }
 
@@ -208,6 +210,7 @@ fn update() void {
     if (deduct_health > 0) {
         player_health -= deduct_health;
         player_kill_streak = 0;
+        renderer.playerHitFlash(consts.FLASH_HIT_EFFECT_DURATION);
         if (player_health == 0) {
             reset();
             return;
@@ -230,6 +233,8 @@ fn update() void {
 
     camera_pos = player_world_pos; //Follow the player directly for now
     player_facing_dir = target_dir; //Player facing the way they are firing
+
+    renderer.update(dt);
 }
 
 /// Fire everytime the crank moves through 60 degrees (6 bullets per revolution)

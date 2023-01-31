@@ -24,6 +24,8 @@ pub const BULLET_MAX_SPEED: f32 = 10;
 pub const BULLET_LIFETIME = 3;
 pub const RELOAD_TIME = 3.0;
 
+pub const FLASH_HIT_EFFECT_DURATION: f32 = 0.3;
+
 pub const MAX_SCORE: u64 = 9999999999;
 
 pub const METRES_TO_PIXELS: f32 = 128.0;

@@ -19,6 +19,8 @@ pub const RenderCommandData = struct {
     flip: pd.LCDBitmapFlip,
 };
 
+var playdate_api: *pd.PlaydateAPI = undefined;
+
 var bg_bitmap: *pd.LCDBitmap = undefined;
 var player_bitmap_table: *pd.LCDBitmapTable = undefined;
 var enemy_bitmap_table: *pd.LCDBitmapTable = undefined;
@@ -27,9 +29,24 @@ var env_obj_bitmap_table: *pd.LCDBitmapTable = undefined;
 var render_command_sort_order: [MAX_ENTITIES]u8 = undefined;
 var render_command_data_buffer: [MAX_ENTITIES]RenderCommandData = undefined;
 
+var player_hit_flash_timer: ?f32 = null;
+
+/// Setup
+///
+pub fn init(pd_api: *pd.PlaydateAPI) void {
+    playdate_api = pd_api;
+}
+
+/// Called on restart
+///
+pub fn reset() void {
+    player_hit_flash_timer = null;
+    playdate_api.graphics.*.setDrawMode.?(pd.kDrawModeCopy);
+}
+
 /// Load the rendering assets - bitmaps and bitmap tables
 ///
-pub fn loadAssets(playdate_api: *pd.PlaydateAPI) void {
+pub fn loadAssets() void {
     const graphics = playdate_api.graphics.*;
 
     bg_bitmap = graphics.loadBitmap.?("bg", null).?;
@@ -38,12 +55,30 @@ pub fn loadAssets(playdate_api: *pd.PlaydateAPI) void {
     env_obj_bitmap_table = graphics.loadBitmapTable.?("lvl1", null).?;
 }
 
+/// Toggle on the hit flash effect for the given duration
+///
+pub fn playerHitFlash(duration: f32) void {
+    player_hit_flash_timer = duration;
+    playdate_api.graphics.*.setDrawMode.?(pd.kDrawModeInverted);
+}
+
+/// Run any time based effects
+///
+pub fn update(dt: f32) void {
+    if (player_hit_flash_timer) |*timer| {
+        timer.* -= dt;
+        if (timer.* <= 0.0) {
+            player_hit_flash_timer = null;
+            playdate_api.graphics.*.setDrawMode.?(pd.kDrawModeCopy);
+        }
+    }
+}
+
 /// Perform the transformations from world to screen space and render the bitmaps
 /// Sorting them by "depth order"
 /// TODO: Build the render command data elsewhere?
 ///
 pub fn render(
-    playdate_api: *pd.PlaydateAPI,
     camera_pos: Vec2f,
     player_world_pos: Vec2f,
     player_facing_dir: Vec2f,
