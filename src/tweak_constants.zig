@@ -1,3 +1,5 @@
+const bitmap_descs = @import("bitmap_descs.zig");
+
 /// Main constants that impact on gameplay and feel
 pub const MAX_ENEMIES: u8 = 100;
 
@@ -25,9 +27,6 @@ pub const RELOAD_TIME = 3.0;
 pub const MAX_SCORE: u64 = 9999999999;
 
 pub const METRES_TO_PIXELS: f32 = 128.0;
-pub const CHAR_DIMS: u32 = 48;
-pub const CHAR_DIMS_M: f32 = @intToFloat(f32, CHAR_DIMS) / METRES_TO_PIXELS;
-pub const CHAR_BULLET_COLL_RADIUS: f32 = CHAR_DIMS_M * 0.5;
-pub const CHAR_ENEMY_COLL_RADIUS: f32 = CHAR_DIMS_M * 0.5 * 1.25;
-pub const ENV_DIMS_W: u32 = 64;
-pub const ENV_DIMS_H: u32 = 88;
+pub const CHAR_WIDTH_M: f32 = @intToFloat(f32, bitmap_descs.CHAR_W) / METRES_TO_PIXELS;
+pub const CHAR_BULLET_COLL_RADIUS: f32 = CHAR_WIDTH_M * 0.5;
+pub const CHAR_ENEMY_COLL_RADIUS: f32 = CHAR_WIDTH_M * 0.5 * 1.25;

@@ -10,6 +10,7 @@ const enemy_spawn_sys = @import("enemy_spawn_system.zig");
 const auto_target_sys = @import("auto_targetting_system.zig");
 const player_move_sys = @import("player_movement_system.zig");
 const consts = @import("tweak_constants.zig");
+const bitmap_descs = @import("bitmap_descs.zig");
 
 const Vec2i = @Vector(2, i32);
 const Vec2f = @Vector(2, f32);
@@ -265,7 +266,7 @@ fn render() void {
         const map_world_pos = [_]Vec2f{ld.world_pos};
         var map_screen_pos: [1]Vec2i = undefined;
         graphics_coords.worldSpaceToScreenSpace(camera_pos, map_world_pos[0..], map_screen_pos[0..], dispWidth, dispHeight);
-        graphics.drawBitmap.?(graphics.getTableBitmap.?(lvl_bitmap_table, ld.bitmap_idx).?, map_screen_pos[0][0] - (consts.ENV_DIMS_W / 2), map_screen_pos[0][1] - consts.ENV_DIMS_H, pd.kBitmapUnflipped);
+        graphics.drawBitmap.?(graphics.getTableBitmap.?(lvl_bitmap_table, ld.bitmap_idx).?, map_screen_pos[0][0] - (bitmap_descs.ENV_OBJ_W / 2), map_screen_pos[0][1] - bitmap_descs.ENV_OBJ_H, pd.kBitmapUnflipped);
     }
 
     //---Render the player
@@ -274,7 +275,7 @@ fn render() void {
     const player_bitmap_frame = anim.bitmapFrameForDir(player_facing_dir);
     graphics_coords.worldSpaceToScreenSpace(camera_pos, player_world_pos_tmp[0..], player_screen_pos[0..], dispWidth, dispHeight);
     const player_h_offset = anim.walkBobAnim(player_world_pos);
-    graphics.drawBitmap.?(graphics.getTableBitmap.?(hero_bitmap_table, player_bitmap_frame.index).?, player_screen_pos[0][0] - consts.CHAR_DIMS / 2, player_screen_pos[0][1] - consts.CHAR_DIMS - player_h_offset, player_bitmap_frame.flip);
+    graphics.drawBitmap.?(graphics.getTableBitmap.?(hero_bitmap_table, player_bitmap_frame.index).?, player_screen_pos[0][0] - bitmap_descs.CHAR_W / 2, player_screen_pos[0][1] - bitmap_descs.CHAR_H - player_h_offset, player_bitmap_frame.flip);
 
     //---Render the enemies
     var enemy_screen_pos: [consts.MAX_ENEMIES]Vec2i = undefined;
@@ -290,7 +291,7 @@ fn render() void {
     for (enemy_world_positions.toDataSlice()) |p, i| {
         //TODO Culling (in a pass or just in time?)
         const h = anim.walkBobAnim(p);
-        graphics.drawBitmap.?(graphics.getTableBitmap.?(enemy_bitmap_table, enemy_bitmap_frames[i].index).?, enemy_screen_pos[i][0] - consts.CHAR_DIMS / 2, enemy_screen_pos[i][1] - consts.CHAR_DIMS - h, enemy_bitmap_frames[i].flip);
+        graphics.drawBitmap.?(graphics.getTableBitmap.?(enemy_bitmap_table, enemy_bitmap_frames[i].index).?, enemy_screen_pos[i][0] - bitmap_descs.CHAR_W / 2, enemy_screen_pos[i][1] - bitmap_descs.CHAR_H - h, enemy_bitmap_frames[i].flip);
     }
 
     bullet_sys.render(graphics, disp, camera_pos);
