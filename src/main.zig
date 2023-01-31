@@ -12,6 +12,7 @@ const auto_target_sys = @import("auto_targetting_system.zig");
 const player_move_sys = @import("player_movement_system.zig");
 const consts = @import("tweak_constants.zig");
 const bitmap_descs = @import("bitmap_descs.zig");
+const level_loader = @import("level_loader.zig");
 
 const Vec2i = @Vector(2, i32);
 const Vec2f = @Vector(2, f32);
@@ -87,7 +88,8 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
 
     env_obj_world_positions = std.ArrayList(Vec2f).init(fba.allocator());
     env_obj_bitmap_indices = std.ArrayList(u8).init(fba.allocator());
-    loadMap(&env_obj_world_positions, &env_obj_bitmap_indices);
+    //TODO: Decide if we change level on restart and also decide if we have shared bitmap atlas
+    level_loader.loadLevelMap(playdate_api, "lvl1.bin", &env_obj_world_positions, &env_obj_bitmap_indices);
 
     //Create the entity pools
     //TODO: No point having multiple lookups when they are shared across all arrays
@@ -101,7 +103,7 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     enemy_move_sys.init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("reinit: Failed to init enemy move sys");
 
     //Load the assets
-    renderer.loadAssets();
+    renderer.loadAssets("lvl1");
 
     time_last_tick = sys.getCurrentTimeMilliseconds.?();
     reset();
@@ -274,44 +276,5 @@ fn checkPlayerCollision(player_pos: Vec2f, enemy_positions: SparseArray(Vec2f, u
             collision_data[num_collisions.*] = try enemy_positions.lookupKeyByIndex(enemy_idx);
             num_collisions.* += 1;
         }
-    }
-}
-
-/// TODO: Extract
-/// load the render data for the level map converting the co-ords
-/// into isometric world positions
-///
-fn loadMap(world_positions: *std.ArrayList(Vec2f), bitmap_indices: *std.ArrayList(u8)) void {
-    const file = playdate_api.file.*;
-
-    var lvl_file = file.open.?("lvl1.bin", pd.kFileRead);
-    defer _ = file.close.?(lvl_file);
-
-    var buffer: [1024]u8 = undefined;
-    const data_len = file.read.?(lvl_file, &buffer, 1024);
-    std.debug.assert(data_len < 1024);
-
-    var i: usize = 0;
-    const grid_width = buffer[i];
-    const grid_width_half = grid_width / 2;
-    i += 1;
-    const grid_height_half = buffer[i] / 2;
-    i += 1;
-    const cell_width_half = buffer[i] / 2;
-    i += 1;
-    const cell_height_half = buffer[i] / 2;
-    i += 1;
-
-    while (i < data_len) {
-        const idx = std.mem.readIntSliceNative(u16, buffer[i .. i + 2]);
-        const x = @intCast(i32, idx % grid_width) - grid_width_half;
-        const y = @intCast(i32, idx / grid_width) - grid_height_half;
-        const world_pos = Vec2f{ @intToFloat(f32, (x - y) * cell_width_half), @intToFloat(f32, (x + y) * cell_height_half * -1) } / @splat(2, consts.METRES_TO_PIXELS);
-        world_positions.append(world_pos) catch @panic("loadMap: Failed to append world pos");
-        i += 2;
-
-        const sprite_id = buffer[i];
-        bitmap_indices.append(sprite_id - 1) catch @panic("loadMap: Failed to append bitmap idx");
-        i += 1;
     }
 }

@@ -46,13 +46,13 @@ pub fn reset() void {
 
 /// Load the rendering assets - bitmaps and bitmap tables
 ///
-pub fn loadAssets() void {
+pub fn loadAssets(level_bitmap_name: [*c]const u8) void {
     const graphics = playdate_api.graphics.*;
 
     bg_bitmap = graphics.loadBitmap.?("bg", null).?;
     player_bitmap_table = graphics.loadBitmapTable.?("hero1", null).?;
     enemy_bitmap_table = graphics.loadBitmapTable.?("enemy1", null).?;
-    env_obj_bitmap_table = graphics.loadBitmapTable.?("lvl1", null).?;
+    env_obj_bitmap_table = graphics.loadBitmapTable.?(level_bitmap_name, null).?;
 }
 
 /// Toggle on the hit flash effect for the given duration

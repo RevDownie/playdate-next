@@ -10,24 +10,29 @@ Inspired by shooters like Minigore. This is a simple horde survival game where t
 
 ## TODO List
 ### P1 - Functional
-* Add running on device to zig build (pdutil)
 * Music
 * SFX
+* Player obstacle collision
+* Enemy obstacle avoidance???
+* Bullet sorting and rendering refactor
+* Health crates
+* Ammo crates
 
 ### P2 - Improvements
 * Combine sparse arrays for enemies
 * Culling - Test if we need to cull and handle the culling logic
 * Movement bounds
-* New characters
+* New character models
 * Better auto targetting
 * Enemies spawning in waves and at better locations
-* Leaderboard
+* Trophy Room (artefacts and high score)
 * Launcher and card images
 * Violence warning
-* Bullet system refactor so it doesn't have outlier rendering pattern
-* Reloading bar
 * Replace text with custom bitmap font
 * Stop the enemies bunching up
+* Randomised level selection
+* Add running on device to zig build (pdutil)
+* Tweak constants editing in realtime on simulator via file read
 
 
 ### P3 - Polish
@@ -41,9 +46,7 @@ Inspired by shooters like Minigore. This is a simple horde survival game where t
 * Player fire anim
 * Better BG
 * Rotation interpolation for new target
-* Obstacles
 
 ### P4 - Future
-* Levels
 * Enemy types
 * Gun types
