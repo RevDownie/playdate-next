@@ -3,3 +3,4 @@ zig-out/
 *.pdx
 raw-images/
 raw-levels/
+map-tiles/*.json
