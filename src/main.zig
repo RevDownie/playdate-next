@@ -2,6 +2,7 @@ const std = @import("std");
 const pd = @import("playdate.zig").api;
 const sparse_array = @import("sparse_array.zig");
 const graphics_coords = @import("graphics_coords.zig");
+const renderer = @import("renderer.zig");
 const maths = @import("maths.zig");
 const bullet_sys = @import("bullet_system.zig");
 const anim = @import("animation.zig");
@@ -18,11 +19,6 @@ const SparseArray = sparse_array.SparseArray;
 
 const CHAR_ENEMY_COLL_RADIUS_SQRD = consts.CHAR_ENEMY_COLL_RADIUS * consts.CHAR_ENEMY_COLL_RADIUS;
 
-const MapRenderData = struct {
-    bitmap_idx: c_int,
-    world_pos: Vec2f,
-};
-
 /// Common game state
 var playdate_api: *pd.PlaydateAPI = undefined;
 var camera_pos = Vec2f{ 0, 0 };
@@ -32,13 +28,6 @@ var fixed_mem_buffer: [1024 * 1024]u8 = undefined;
 /// Input state
 var crank_angle_since_fire: f32 = 0.0;
 var last_fire_time_ms: u32 = 0;
-
-/// Assets
-var bg_bitmap: *pd.LCDBitmap = undefined;
-var hero_bitmap_table: *pd.LCDBitmapTable = undefined;
-var enemy_bitmap_table: *pd.LCDBitmapTable = undefined;
-var lvl_bitmap_table: *pd.LCDBitmapTable = undefined;
-var lvl_render_data: []MapRenderData = undefined;
 
 /// Player
 var player_world_pos: Vec2f = undefined;
@@ -84,7 +73,6 @@ fn createEnemyIds() [consts.MAX_ENEMIES]u8 {
 fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     playdate_api = playdate;
     const sys = playdate_api.system.*;
-    const graphics = playdate_api.graphics.*;
 
     var fba = std.heap.FixedBufferAllocator.init(&fixed_mem_buffer);
 
@@ -94,14 +82,11 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     playdate_api.display.*.setRefreshRate.?(0); //Temp unleashing the frame limit to measure performance
 
     //Load the assets
-    bg_bitmap = graphics.loadBitmap.?("bg", null).?;
-    hero_bitmap_table = graphics.loadBitmapTable.?("hero1", null).?;
-    enemy_bitmap_table = graphics.loadBitmapTable.?("enemy1", null).?;
-    lvl_bitmap_table = graphics.loadBitmapTable.?("lvl1", null).?;
+    renderer.loadAssets(playdate_api);
 
-    var map_data = std.ArrayList(MapRenderData).init(fba.allocator());
+    var map_data = std.ArrayList(renderer.MapRenderData).init(fba.allocator());
     loadMap(&map_data);
-    lvl_render_data = map_data.items;
+    renderer.lvl_render_data = map_data.items;
 
     //Create the entity pools
     //TODO: No point having multiple lookups when they are shared across all arrays
@@ -151,7 +136,7 @@ fn reset() void {
 ///
 fn gameUpdateWrapper(_: ?*anyopaque) callconv(.C) c_int {
     update();
-    render();
+    renderer.render(playdate_api, camera_pos, player_world_pos, player_facing_dir, enemy_world_positions.toDataSlice(), enemy_velocities.toDataSlice(), player_score, player_health, bullet_sys.getRemainingBullets());
     return 1; //Inform the SDK we have stuff to render
 }
 
@@ -243,75 +228,6 @@ fn update() void {
     player_facing_dir = target_dir; //Player facing the way they are firing
 }
 
-/// Perform the transformations from world to screen space and render the bitmaps
-///
-fn render() void {
-    const sys = playdate_api.system.*;
-    const disp = playdate_api.display.*;
-    const graphics = playdate_api.graphics.*;
-
-    const dispWidth = disp.getWidth.?();
-    const dispHeight = disp.getHeight.?();
-
-    graphics.clear.?(pd.kColorWhite);
-
-    //---Render the BG
-    const bg_world_pos = [_]Vec2f{Vec2f{ 0, 0 }};
-    var bg_screen_pos: [1]Vec2i = undefined;
-    graphics_coords.worldSpaceToScreenSpace(camera_pos, bg_world_pos[0..], bg_screen_pos[0..], dispWidth, dispHeight);
-    graphics.tileBitmap.?(bg_bitmap, bg_screen_pos[0][0] - 1000, bg_screen_pos[0][1] - 1000, 2000, 2000, pd.kBitmapUnflipped);
-
-    //---Render the map obstacles
-    for (lvl_render_data) |ld| {
-        const map_world_pos = [_]Vec2f{ld.world_pos};
-        var map_screen_pos: [1]Vec2i = undefined;
-        graphics_coords.worldSpaceToScreenSpace(camera_pos, map_world_pos[0..], map_screen_pos[0..], dispWidth, dispHeight);
-        graphics.drawBitmap.?(graphics.getTableBitmap.?(lvl_bitmap_table, ld.bitmap_idx).?, map_screen_pos[0][0] - (bitmap_descs.ENV_OBJ_W / 2), map_screen_pos[0][1] - bitmap_descs.ENV_OBJ_H, pd.kBitmapUnflipped);
-    }
-
-    //---Render the player
-    const player_world_pos_tmp = [_]Vec2f{player_world_pos};
-    var player_screen_pos: [1]Vec2i = undefined;
-    const player_bitmap_frame = anim.bitmapFrameForDir(player_facing_dir);
-    graphics_coords.worldSpaceToScreenSpace(camera_pos, player_world_pos_tmp[0..], player_screen_pos[0..], dispWidth, dispHeight);
-    const player_h_offset = anim.walkBobAnim(player_world_pos);
-    graphics.drawBitmap.?(graphics.getTableBitmap.?(hero_bitmap_table, player_bitmap_frame.index).?, player_screen_pos[0][0] - bitmap_descs.CHAR_W / 2, player_screen_pos[0][1] - bitmap_descs.CHAR_H - player_h_offset, player_bitmap_frame.flip);
-
-    //---Render the enemies
-    var enemy_screen_pos: [consts.MAX_ENEMIES]Vec2i = undefined;
-    graphics_coords.worldSpaceToScreenSpace(camera_pos, enemy_world_positions.toDataSlice(), enemy_screen_pos[0..], dispWidth, dispHeight);
-
-    //TODO: Interpolation
-    //Enemies facing the way they are moving
-    var enemy_bitmap_frames: [consts.MAX_ENEMIES]anim.BitmapFrame = undefined;
-    for (enemy_velocities.toDataSlice()) |v, idx| {
-        enemy_bitmap_frames[idx] = anim.bitmapFrameForDir(v);
-    }
-
-    for (enemy_world_positions.toDataSlice()) |p, i| {
-        //TODO Culling (in a pass or just in time?)
-        const h = anim.walkBobAnim(p);
-        graphics.drawBitmap.?(graphics.getTableBitmap.?(enemy_bitmap_table, enemy_bitmap_frames[i].index).?, enemy_screen_pos[i][0] - bitmap_descs.CHAR_W / 2, enemy_screen_pos[i][1] - bitmap_descs.CHAR_H - h, enemy_bitmap_frames[i].flip);
-    }
-
-    bullet_sys.render(graphics, disp, camera_pos);
-
-    sys.drawFPS.?(0, 0);
-
-    //TODO: Replace with bitmap font
-    var score_buffer: ["Score: ".len + 10]u8 = undefined;
-    const score_string = std.fmt.bufPrint(&score_buffer, "Score: {d}", .{player_score}) catch @panic("scorePrint: Failed to format");
-    _ = graphics.drawText.?(score_string.ptr, score_string.len, pd.kASCIIEncoding, dispWidth - 100, 0);
-
-    var health_buffer: ["Health: ".len + 3]u8 = undefined;
-    const health_string = std.fmt.bufPrint(&health_buffer, "Health: {d}", .{player_health}) catch @panic("healthPrint: Failed to format");
-    _ = graphics.drawText.?(health_string.ptr, health_string.len, pd.kASCIIEncoding, @divTrunc(dispWidth, 2), 0);
-
-    var bullet_buffer: ["Bullets: ".len + 3]u8 = undefined;
-    const bullet_string = std.fmt.bufPrint(&bullet_buffer, "Bullets: {d}", .{bullet_sys.getRemainingBullets()}) catch @panic("bulletPrint: Failed to format");
-    _ = graphics.drawText.?(bullet_string.ptr, bullet_string.len, pd.kASCIIEncoding, @divTrunc(dispWidth, 2), dispHeight - 30);
-}
-
 /// Fire everytime the crank moves through 60 degrees (6 bullets per revolution)
 /// Alternatively fire once the buttons have been held down long enough
 ///
@@ -356,7 +272,7 @@ fn checkPlayerCollision(player_pos: Vec2f, enemy_positions: SparseArray(Vec2f, u
 /// load the render data for the level map converting the co-ords
 /// into isometric world positions
 ///
-fn loadMap(map_render_data: *std.ArrayList(MapRenderData)) void {
+fn loadMap(map_render_data: *std.ArrayList(renderer.MapRenderData)) void {
     const file = playdate_api.file.*;
 
     var lvl_file = file.open.?("lvl1.bin", pd.kFileRead);
@@ -387,6 +303,6 @@ fn loadMap(map_render_data: *std.ArrayList(MapRenderData)) void {
         const sprite_id = buffer[i];
         i += 1;
 
-        map_render_data.append(MapRenderData{ .bitmap_idx = sprite_id - 1, .world_pos = world_pos }) catch @panic("loadMap: Failed to append map data");
+        map_render_data.append(renderer.MapRenderData{ .bitmap_idx = sprite_id - 1, .world_pos = world_pos }) catch @panic("loadMap: Failed to append map data");
     }
 }
