@@ -48,8 +48,8 @@ var bullet_collision_info: [consts.MAX_ENEMIES]bullet_sys.CollisionInfo = undefi
 var enemy_collision_info: [consts.MAX_ENEMIES]u8 = undefined;
 
 /// Environment
-var env_obj_world_positions: std.ArrayList(Vec2f) = undefined;
-var env_obj_bitmap_indices: std.ArrayList(u8) = undefined;
+var env_obj_world_positions: []Vec2f = undefined;
+var env_obj_bitmap_indices: []u8 = undefined;
 
 /// Exposed via the shared library to the Playdate runner which forwards on events
 ///
@@ -86,10 +86,10 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
 
     playdate_api.display.*.setRefreshRate.?(0); //Temp unleashing the frame limit to measure performance
 
-    env_obj_world_positions = std.ArrayList(Vec2f).init(fba.allocator());
-    env_obj_bitmap_indices = std.ArrayList(u8).init(fba.allocator());
     //TODO: Decide if we change level on restart and also decide if we have shared bitmap atlas
-    level_loader.loadLevelMap(playdate_api, "lvl1.bin", &env_obj_world_positions, &env_obj_bitmap_indices);
+    const levelMapData = level_loader.loadLevelMap(playdate_api, "lvl1.bin", fba.allocator());
+    env_obj_world_positions = levelMapData.obj_world_positions;
+    env_obj_bitmap_indices = levelMapData.obj_bitmap_indices;
 
     //Create the entity pools
     //TODO: No point having multiple lookups when they are shared across all arrays
@@ -144,7 +144,7 @@ fn reset() void {
 ///
 fn gameUpdateWrapper(_: ?*anyopaque) callconv(.C) c_int {
     update();
-    renderer.render(camera_pos, player_world_pos, player_facing_dir, enemy_world_positions.toDataSlice(), enemy_velocities.toDataSlice(), env_obj_world_positions.items, env_obj_bitmap_indices.items, player_score, player_health, bullet_sys.getRemainingBullets());
+    renderer.render(camera_pos, player_world_pos, player_facing_dir, enemy_world_positions.toDataSlice(), enemy_velocities.toDataSlice(), env_obj_world_positions, env_obj_bitmap_indices, player_score, player_health, bullet_sys.getRemainingBullets());
     return 1; //Inform the SDK we have stuff to render
 }
 
