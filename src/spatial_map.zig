@@ -6,7 +6,7 @@ const Vec2f = @Vector(2, f32);
 const SparseArray = sparse_array.SparseArray;
 const BucketList = std.SinglyLinkedList(Bucket);
 
-const BUCKET_LEN: u8 = 10;
+const BUCKET_LEN: u8 = 20;
 const SPACE_SIZE = 100;
 const CHUNK_SIZE: u32 = 10;
 const NUM_CHUNKS_W = (SPACE_SIZE / CHUNK_SIZE);
@@ -36,6 +36,7 @@ pub fn groupIntoChunks(entity_world_positions: SparseArray(Vec2f, u8)) void {
     for (chunks) |*chunk| {
         chunk.* = BucketList{};
     }
+    bucket_node_head = 0;
 
     for (entity_world_positions.toDataSlice()) |entity_pos, entity_idx| {
         const id = entity_world_positions.lookupKeyByIndex(entity_idx) catch @panic("spatial_map groupIntoChunks: Cannot lookup key");
@@ -320,7 +321,7 @@ test "[spatial_map] checkForPointCollisions - stress test" {
     var rand: std.rand.DefaultPrng = undefined;
     rand = std.rand.DefaultPrng.init(42);
 
-    const COUNT_A: u8 = 10;
+    const COUNT_A: u8 = 36;
     const COUNT_B: u8 = 255;
 
     var positions_a: [COUNT_A]Vec2f = undefined;
@@ -337,17 +338,22 @@ test "[spatial_map] checkForPointCollisions - stress test" {
         try positions_b.insert(i, Vec2f{ rand.random().float(f32) * 49.0, rand.random().float(f32) * 49.0 });
     }
 
-    groupIntoChunks(positions_b);
-
     const r: f32 = 1.0;
     var info: [3000]CollisionInfo = undefined;
     var num_collisions: u32 = 0;
 
-    var t = try timer.start();
-    checkForPointCollisions(positions_a[0..], r, info[0..], &num_collisions);
-    std.debug.print("\nms: {d:.5} num_collisions: {}\n", .{ @intToFloat(f64, t.read()) / 1000000.0, num_collisions });
+    var n: usize = 0;
+    while (n < 10) : (n += 1) {
+        var t = try timer.start();
+        groupIntoChunks(positions_b);
+        checkForPointCollisions(positions_a[0..], r, info[0..], &num_collisions);
+        std.debug.print("\nms: {d:.5} num_collisions: {}\n", .{ @intToFloat(f64, t.read()) / 1000000.0, num_collisions });
+    }
 
-    t.reset();
-    try oldCollisionCheck(positions_a[0..], r, positions_b, info[0..], &num_collisions);
-    std.debug.print("\nOLD: ms: {d:.5} num_collisions: {}\n", .{ @intToFloat(f64, t.read()) / 1000000.0, num_collisions });
+    n = 0;
+    while (n < 10) : (n += 1) {
+        var t = try timer.start();
+        try oldCollisionCheck(positions_a[0..], r, positions_b, info[0..], &num_collisions);
+        std.debug.print("\nOLD: ms: {d:.5} num_collisions: {}\n", .{ @intToFloat(f64, t.read()) / 1000000.0, num_collisions });
+    }
 }
