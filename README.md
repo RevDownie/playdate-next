@@ -13,11 +13,11 @@ Inspired by shooters like Minigore. This is a simple horde survival game where t
 ### P1 - Functional
 * Music
 * SFX
-* Player obstacle collision
 * Enemy obstacle avoidance???
 * Bullet sorting and rendering refactor
 * Health crates
 * Ammo crates
+* Level artefacts
 
 ### P2 - Improvements
 * Combine sparse arrays for enemies
