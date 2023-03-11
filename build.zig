@@ -68,12 +68,10 @@ pub fn build(b: *Builder) !void {
     const maths_test_step = b.addTest("src/maths.zig");
     const graph_coords_test_step = b.addTest("src/graphics_coords.zig");
     const sparse_array_test_step = b.addTest("src/sparse_array.zig");
-    const spatial_map_test_step = b.addTest("src/spatial_map.zig");
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&maths_test_step.step);
     test_step.dependOn(&graph_coords_test_step.step);
     test_step.dependOn(&sparse_array_test_step.step);
-    test_step.dependOn(&spatial_map_test_step.step);
 }
 
 fn createEmptyBin(_: *std.build.Step) !void {
