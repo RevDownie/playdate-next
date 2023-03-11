@@ -13,6 +13,7 @@ const player_move_sys = @import("player_movement_system.zig");
 const consts = @import("tweak_constants.zig");
 const bitmap_descs = @import("bitmap_descs.zig");
 const level_loader = @import("level_loader.zig");
+const cgrid = @import("collision_grid.zig");
 
 const Vec2i = @Vector(2, i32);
 const Vec2f = @Vector(2, f32);
@@ -48,8 +49,7 @@ var bullet_collision_info: [consts.MAX_ENEMIES]bullet_sys.CollisionInfo = undefi
 var enemy_collision_info: [consts.MAX_ENEMIES]u8 = undefined;
 
 /// Environment
-var env_obj_world_positions: []Vec2f = undefined;
-var env_obj_bitmap_indices: []u8 = undefined;
+var level_map_data: level_loader.LevelMapData = undefined;
 
 /// Exposed via the shared library to the Playdate runner which forwards on events
 ///
@@ -87,9 +87,7 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     playdate_api.display.*.setRefreshRate.?(0); //Temp unleashing the frame limit to measure performance
 
     //TODO: Decide if we change level on restart and also decide if we have shared bitmap atlas
-    const levelMapData = level_loader.loadLevelMap(playdate_api, "lvl1.bin", fba.allocator());
-    env_obj_world_positions = levelMapData.obj_world_positions;
-    env_obj_bitmap_indices = levelMapData.obj_bitmap_indices;
+    level_map_data = level_loader.loadLevelMap(playdate_api, "lvl1.bin", fba.allocator());
 
     //Create the entity pools
     //TODO: No point having multiple lookups when they are shared across all arrays
@@ -98,7 +96,7 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     enemy_healths = SparseArray(u8, u8).init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("init: Failed to init enemy healths");
 
     //Init the systems
-    renderer.init(playdate_api);
+    renderer.init(playdate_api, level_map_data.bg_size_pixels);
     enemy_spawn_sys.init(consts.MAX_ENEMIES);
     enemy_move_sys.init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("reinit: Failed to init enemy move sys");
 
@@ -144,7 +142,8 @@ fn reset() void {
 ///
 fn gameUpdateWrapper(_: ?*anyopaque) callconv(.C) c_int {
     update();
-    renderer.render(camera_pos, player_world_pos, player_facing_dir, enemy_world_positions.toDataSlice(), enemy_velocities.toDataSlice(), env_obj_world_positions, env_obj_bitmap_indices, player_score, player_health, bullet_sys.getRemainingBullets());
+    renderer.render(camera_pos, player_world_pos, player_facing_dir, enemy_world_positions.toDataSlice(), enemy_velocities.toDataSlice(), level_map_data.obj_world_positions, level_map_data.obj_bitmap_indices, player_score, player_health, bullet_sys.getRemainingBullets());
+    renderer.debugDrawCollisionGrid(level_map_data.collision_grid, camera_pos);
     return 1; //Inform the SDK we have stuff to render
 }
 
@@ -163,19 +162,19 @@ fn update() void {
     sys.getButtonState.?(&current, &pushed, &released);
 
     //Spawn any new enemies
-    const spawned = enemy_spawn_sys.update(dt, enemy_world_positions.len, player_world_pos);
-    for (spawned) |s| {
-        const ent_id = enemy_free_id_stack[enemy_free_id_head];
-        enemy_free_id_head -= 1;
+    // const spawned = enemy_spawn_sys.update(dt, enemy_world_positions.len, player_world_pos);
+    // for (spawned) |s| {
+    //     const ent_id = enemy_free_id_stack[enemy_free_id_head];
+    //     enemy_free_id_head -= 1;
 
-        enemy_world_positions.insertFirst(ent_id, s.world_pos) catch @panic("spawn: Failed to insert pos");
-        enemy_velocities.insertFirst(ent_id, Vec2f{ 0, 0 }) catch @panic("spawn: Failed to insert vel");
-        enemy_healths.insertFirst(ent_id, 100) catch @panic("spawn: Failed to insert health");
-        enemy_move_sys.startSeeking(ent_id) catch @panic("spawn: Failed to start seeking");
-    }
+    //     enemy_world_positions.insertFirst(ent_id, s.world_pos) catch @panic("spawn: Failed to insert pos");
+    //     enemy_velocities.insertFirst(ent_id, Vec2f{ 0, 0 }) catch @panic("spawn: Failed to insert vel");
+    //     enemy_healths.insertFirst(ent_id, 100) catch @panic("spawn: Failed to insert health");
+    //     enemy_move_sys.startSeeking(ent_id) catch @panic("spawn: Failed to start seeking");
+    // }
 
     //Move the player based on input and move any enemies that are in the seeking or bumping back state
-    player_move_sys.update(current, dt, &player_world_pos, &player_velocity);
+    player_move_sys.update(current, level_map_data.collision_grid, dt, &player_world_pos, &player_velocity);
     enemy_move_sys.update(player_world_pos, dt, enemy_world_positions, enemy_velocities) catch @panic("enemyMove: Update error");
 
     //Move any fired projectiles and check for collisions

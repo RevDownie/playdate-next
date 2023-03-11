@@ -5,6 +5,7 @@ const bullet_sys = @import("bullet_system.zig");
 const anim = @import("animation.zig");
 const bitmap_descs = @import("bitmap_descs.zig");
 const consts = @import("tweak_constants.zig");
+const cg = @import("collision_grid.zig");
 
 const Vec2i = @Vector(2, i32);
 const Vec2f = @Vector(2, f32);
@@ -29,12 +30,15 @@ var env_obj_bitmap_table: *pd.LCDBitmapTable = undefined;
 var render_command_sort_order: [MAX_ENTITIES]u8 = undefined;
 var render_command_data_buffer: [MAX_ENTITIES]RenderCommandData = undefined;
 
+var background_size_pixels: Vec2i = undefined;
+
 var player_hit_flash_timer: ?f32 = null;
 
 /// Setup
 ///
-pub fn init(pd_api: *pd.PlaydateAPI) void {
+pub fn init(pd_api: *pd.PlaydateAPI, bg_size_pixels: Vec2i) void {
     playdate_api = pd_api;
+    background_size_pixels = bg_size_pixels;
 }
 
 /// Called on restart
@@ -97,13 +101,13 @@ pub fn render(
     const dispWidth = disp.getWidth.?();
     const dispHeight = disp.getHeight.?();
 
-    graphics.clear.?(pd.kColorWhite);
+    //graphics.clear.?(pd.kColorWhite);
 
     //---Render the BG
     const bg_world_pos = [_]Vec2f{Vec2f{ 0, 0 }};
     var bg_screen_pos: [1]Vec2i = undefined;
     graphics_coords.worldSpaceToScreenSpace(camera_pos, bg_world_pos[0..], bg_screen_pos[0..], dispWidth, dispHeight);
-    graphics.tileBitmap.?(bg_bitmap, bg_screen_pos[0][0] - 1000, bg_screen_pos[0][1] - 1000, 2000, 2000, pd.kBitmapUnflipped);
+    graphics.tileBitmap.?(bg_bitmap, bg_screen_pos[0][0] - @divTrunc(background_size_pixels[0], 2), bg_screen_pos[0][1] - @divTrunc(background_size_pixels[1], 2), background_size_pixels[0], background_size_pixels[1], pd.kBitmapUnflipped);
 
     //---Transform the entities to screen space
     var entity_screen_pos: [MAX_ENTITIES]Vec2i = undefined;
@@ -192,4 +196,34 @@ pub fn render(
 ///
 fn compareBackToFront(screen_positions: []const Vec2i, a: u8, b: u8) bool {
     return screen_positions[a][1] <= screen_positions[b][1];
+}
+
+pub fn debugDrawCollisionGrid(collision_grid: cg.CollisionGrid, camera_pos: Vec2f) void {
+    const graphics = playdate_api.graphics.*;
+    const disp = playdate_api.display.*;
+    const grid_width_half = collision_grid.width / 2;
+    const grid_height_half = collision_grid.height / 2;
+
+    const num = collision_grid.width * collision_grid.height;
+
+    var world_positions: [30 * 30]Vec2f = undefined;
+
+    var idx: usize = 0;
+    while (idx < num) : (idx += 1) {
+        const x = @intCast(i32, idx % collision_grid.width) - grid_width_half;
+        const y = @intCast(i32, idx / collision_grid.width) - grid_height_half;
+        world_positions[idx] = Vec2f{ @intToFloat(f32, x * collision_grid.cell_width), @intToFloat(f32, y * collision_grid.cell_height * -1) } / @splat(2, consts.METRES_TO_PIXELS);
+    }
+
+    var screen_positions: [30 * 30]Vec2i = undefined;
+    graphics_coords.worldSpaceToScreenSpace(camera_pos, world_positions[0..], screen_positions[0..], disp.getWidth.?(), disp.getHeight.?());
+
+    const width_offset = bitmap_descs.ENV_OBJ_W / 2;
+    const height_offset = bitmap_descs.ENV_OBJ_H;
+    for (screen_positions) |s, i| {
+        if (collision_grid.isOccupied(world_positions[i])) {
+            graphics.drawRect.?(s[0] - width_offset, s[1] - height_offset, bitmap_descs.ENV_OBJ_W, bitmap_descs.ENV_OBJ_H, pd.kColorBlack);
+            //graphics.drawBitmap.?(graphics.getTableBitmap.?(env_obj_bitmap_table, 0).?, s[0] - width_offset, s[1] - height_offset, pd.kBitmapUnflipped);
+        }
+    }
 }
