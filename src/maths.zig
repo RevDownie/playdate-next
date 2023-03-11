@@ -59,6 +59,12 @@ pub inline fn angleDegrees360(v1: Vec2f, v2: Vec2f) f32 {
     return if (cw < 360) cw else cw - 360;
 }
 
+/// Makes the vector positive
+///
+pub inline fn abs(v: Vec2f) Vec2f {
+    return Vec2f{ if (v[0] >= 0) v[0] else -v[0], if (v[1] >= 0) v[1] else -v[1] };
+}
+
 test "[maths] normaliseSafe - regular" {
     const n = normaliseSafe(Vec2f{ 10, 10 }, Vec2f{ 0, 0 });
     const expected = Vec2f{ 0.707, 0.707 };
@@ -129,4 +135,16 @@ test "[maths] angleDegrees360 - all quadrants" {
     const d = angleDegrees360(Vec2f{ 0, 1 }, Vec2f{ -0.5, 0.5 });
     const expectedd = 315;
     try std.testing.expect(d == expectedd);
+}
+
+test "[maths] abs - all positive" {
+    const v = abs(Vec2f{ 10, 11 });
+    try std.testing.expect(v[0] == 10);
+    try std.testing.expect(v[1] == 11);
+}
+
+test "[maths] abs - all negative" {
+    const v = abs(Vec2f{ -10, -11 });
+    try std.testing.expect(v[0] == 10);
+    try std.testing.expect(v[1] == 11);
 }
