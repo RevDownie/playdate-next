@@ -143,7 +143,6 @@ fn reset() void {
 fn gameUpdateWrapper(_: ?*anyopaque) callconv(.C) c_int {
     update();
     renderer.render(camera_pos, player_world_pos, player_facing_dir, enemy_world_positions.toDataSlice(), enemy_velocities.toDataSlice(), level_map_data.obj_world_positions, level_map_data.obj_bitmap_indices, player_score, player_health, bullet_sys.getRemainingBullets());
-    renderer.debugDrawCollisionGrid(level_map_data.collision_grid, camera_pos);
     return 1; //Inform the SDK we have stuff to render
 }
 
@@ -162,16 +161,16 @@ fn update() void {
     sys.getButtonState.?(&current, &pushed, &released);
 
     //Spawn any new enemies
-    // const spawned = enemy_spawn_sys.update(dt, enemy_world_positions.len, player_world_pos);
-    // for (spawned) |s| {
-    //     const ent_id = enemy_free_id_stack[enemy_free_id_head];
-    //     enemy_free_id_head -= 1;
+    const spawned = enemy_spawn_sys.update(dt, enemy_world_positions.len, player_world_pos);
+    for (spawned) |s| {
+        const ent_id = enemy_free_id_stack[enemy_free_id_head];
+        enemy_free_id_head -= 1;
 
-    //     enemy_world_positions.insertFirst(ent_id, s.world_pos) catch @panic("spawn: Failed to insert pos");
-    //     enemy_velocities.insertFirst(ent_id, Vec2f{ 0, 0 }) catch @panic("spawn: Failed to insert vel");
-    //     enemy_healths.insertFirst(ent_id, 100) catch @panic("spawn: Failed to insert health");
-    //     enemy_move_sys.startSeeking(ent_id) catch @panic("spawn: Failed to start seeking");
-    // }
+        enemy_world_positions.insertFirst(ent_id, s.world_pos) catch @panic("spawn: Failed to insert pos");
+        enemy_velocities.insertFirst(ent_id, Vec2f{ 0, 0 }) catch @panic("spawn: Failed to insert vel");
+        enemy_healths.insertFirst(ent_id, 100) catch @panic("spawn: Failed to insert health");
+        enemy_move_sys.startSeeking(ent_id) catch @panic("spawn: Failed to start seeking");
+    }
 
     //Move the player based on input and move any enemies that are in the seeking or bumping back state
     player_move_sys.update(current, level_map_data.collision_grid, dt, &player_world_pos, &player_velocity);
