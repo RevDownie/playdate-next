@@ -225,7 +225,7 @@ fn update() void {
     }
 
     //Now that the enemy positions have been updated - the player can re-evaluate the hottest one to target
-    const target_dir = auto_target_sys.calculateHottestTargetDir(player_world_pos, enemy_world_positions.toDataSlice()) orelse if (maths.magnitudeSqrd(player_velocity) > 0) player_velocity else Vec2f{ 1, 0 };
+    const target_dir = auto_target_sys.calculateHottestTargetDir(player_world_pos, enemy_world_positions.toDataSlice()) orelse maths.normaliseSafe(player_velocity, Vec2f{ 1, 0 });
 
     //Fire
     const should_fire = firingSystemUpdate(current, sys);
