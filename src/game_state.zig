@@ -43,7 +43,6 @@ pub const Enemies = struct {
     health: [capacity]u8 align(memory.CACHE_LINE_SIZE) = undefined,
     bump_timer: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined, //Seeking resumes when this reaches BUMP_TIME
     //Cold: only read while an enemy is bumping back
-    bump_start: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined,
     bump_offset: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined, //Direction * distance of the full bump
 
     pub fn add(self: *Enemies, world_pos: Vec2f) void {
@@ -53,7 +52,6 @@ pub const Enemies = struct {
         self.vel[i] = @splat(0);
         self.health[i] = consts.ENEMY_MAX_HEALTH;
         self.bump_timer[i] = consts.BUMP_TIME;
-        self.bump_start[i] = world_pos;
         self.bump_offset[i] = @splat(0);
         self.len += 1;
     }
@@ -70,7 +68,6 @@ pub const Enemies = struct {
     ///
     pub fn startBumpBack(self: *Enemies, i: usize, dir: Vec2f, dist: f32) void {
         self.bump_timer[i] = 0;
-        self.bump_start[i] = self.pos[i];
         self.bump_offset[i] = dir * @as(Vec2f, @splat(dist));
     }
 
@@ -89,7 +86,6 @@ pub const Enemies = struct {
             self.vel[i] = self.vel[last];
             self.health[i] = self.health[last];
             self.bump_timer[i] = self.bump_timer[last];
-            self.bump_start[i] = self.bump_start[last];
             self.bump_offset[i] = self.bump_offset[last];
             self.len = last;
         }

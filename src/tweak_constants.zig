@@ -6,6 +6,11 @@ pub const MAX_ENEMIES: u8 = 100;
 pub const PLAYER_ACC: f32 = 2.0;
 pub const PLAYER_MAX_SPEED: f32 = 1.5;
 pub const ENEMY_MAX_SPEED: f32 = 1.2;
+pub const ENEMY_TURN_RATE: f32 = 6.0; //How quickly enemies steer onto a new heading (fraction of the change per second)
+
+/// Flow field cells settled per frame while it is being rebuilt. Bounds the pathfinding cost of any one frame;
+/// a 30x30 level takes about 3 frames to rebuild
+pub const FLOW_FIELD_CELLS_PER_FRAME: u32 = 300;
 
 pub const PLAYER_MAX_HEALTH: u8 = 100;
 pub const ENEMY_MAX_HEALTH: u8 = 100;
@@ -17,7 +22,9 @@ pub const INIT_SPAWN_TIME: f32 = 8.0;
 pub const SPAWN_TIME_REDUCTION: f32 = 1.0;
 pub const MIN_SPAWN_TIME: f32 = 1.0; //Spawn interval never drops below this (it used to reach 0 and spawn every frame)
 pub const ENEMIES_PER_SPAWN: u8 = 3;
-pub const SPAWN_RADIUS: f32 = 10.0; //Enemies drop in within this many metres of the player on each axis
+pub const SPAWN_EDGE_BAND: f32 = 1.0; //Enemies drop in on free cells within this many metres of the map's edge
+pub const SPAWN_MIN_PLAYER_DIST: f32 = 3.0; //...but never closer than this to the player
+pub const SPAWN_ATTEMPTS: u8 = 4; //Random spawn cells tried per enemy before giving up (they must be reachable and far enough away)
 pub const RNG_SEED: u64 = 42;
 
 pub const FIRE_ANGLE_DELTA: f32 = 60;

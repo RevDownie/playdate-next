@@ -4,6 +4,7 @@ const consts = @import("tweak_constants.zig");
 const state = @import("game_state.zig");
 const Arena = @import("memory.zig").Arena;
 const Level = @import("level_loader.zig").Level;
+const flow_field = @import("flow_field.zig");
 const player_move_sys = @import("player_movement_system.zig");
 const enemy_spawn_sys = @import("enemy_spawn_system.zig");
 const enemy_move_sys = @import("enemy_movement_system.zig");
@@ -19,14 +20,18 @@ pub const TickResult = enum { playing, player_died };
 /// The orchestrator: advances the simulation one frame by running every system in a fixed order.
 /// Systems only see the data they are handed; per frame scratch comes from `frame_arena`.
 /// Platform independent (no Playdate API) so it can be driven from tests.
+/// `field` is the enemies' path to the player; it is level-sized so it lives in the level arena, not `game`.
 ///
-pub fn tick(game: *state.GameState, level: *const Level, input: state.Input, dt: f32, frame_arena: *Arena) TickResult {
-    //1. Spawn new enemies around the player
-    enemy_spawn_sys.update(&game.spawner, &game.enemies, game.rng.random(), game.player.pos, dt);
+pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.FlowField, input: state.Input, dt: f32, frame_arena: *Arena) TickResult {
+    const grid = &level.collision_grid;
 
-    //2. Movement
-    player_move_sys.update(&game.player, input, &level.collision_grid, dt);
-    enemy_move_sys.update(&game.enemies, game.player.pos, dt);
+    //1. Spawn new enemies around the player
+    enemy_spawn_sys.update(&game.spawner, &game.enemies, game.rng.random(), game.player.pos, level.spawn_cells, field, grid, dt);
+
+    //2. Movement. The flow field follows the player, a bounded slice of a rebuild per frame
+    player_move_sys.update(&game.player, input, grid, dt);
+    flow_field.update(field, grid, grid.cellIndex(game.player.pos), consts.FLOW_FIELD_CELLS_PER_FRAME);
+    enemy_move_sys.update(&game.enemies, field, grid, game.player.pos, dt);
 
     //3. Move projectiles and resolve bullet -> enemy hits (kills are flagged then compacted out)
     bullet_sys.update(&game.bullets, dt);

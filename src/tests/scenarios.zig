@@ -8,51 +8,98 @@ const state = @import("../game_state.zig");
 const game_mod = @import("../game.zig");
 const Arena = @import("../memory.zig").Arena;
 const Level = @import("../level_loader.zig").Level;
+const FlowField = @import("../flow_field.zig").FlowField;
+const level_loader = @import("../level_loader.zig");
 
-/// Open level used by the tests: a 30x30 grid of 64px cells with nothing in it
+/// Level used by the tests: a 30x30 grid of 64px (0.5m) cells, centred on the origin. With `walls` there is
+/// a vertical wall at column 19 (x = 2m) from row 5 to 24 and a horizontal one along row 8 (y = 3.5m) from
+/// column 3 to 12, so enemies have something to path around; the player at the origin is in the open
 ///
-fn testLevel(cells: []bool) Level {
-    @memset(cells, false);
-    return .{
-        .obj_world_positions = &.{},
-        .obj_bitmap_indices = &.{},
-        .collision_grid = .{ .cells = cells, .width = 30, .height = 30, .cell_width = 64, .cell_height = 64 },
-        .bg_size_pixels = .{ 0, 0 },
-    };
-}
+const TestLevel = struct {
+    cells: [30 * 30]bool = undefined,
+    level_buffer: [16 * 1024]u8 = undefined,
+    frame_buffer: [16 * 1024]u8 = undefined,
+    level_arena: Arena = undefined,
+    frame_arena: Arena = undefined,
+    level: Level = undefined,
+    field: FlowField = undefined,
 
-test "[scenario] worst case: max enemies and bullets fit the frame arena and pools" {
-    var cells: [30 * 30]bool = undefined;
-    const level = testLevel(&cells);
-    var frame_buffer: [16 * 1024]u8 = undefined;
-    var frame_arena = Arena.init("frame", &frame_buffer);
+    fn init(self: *TestLevel, walls: bool) void {
+        @memset(&self.cells, false);
+        if (walls) {
+            for (5..25) |row| self.cells[row * 30 + 19] = true;
+            for (3..13) |col| self.cells[8 * 30 + col] = true;
+        }
+        self.level = .{
+            .obj_world_positions = &.{},
+            .obj_bitmap_indices = &.{},
+            .collision_grid = .{ .cells = &self.cells, .width = 30, .height = 30, .cell_width = 64, .cell_height = 64 },
+            .spawn_cells = &.{},
+            .bg_size_pixels = .{ 0, 0 },
+        };
+        self.level_arena = Arena.init("level", &self.level_buffer);
+        self.level.spawn_cells = level_loader.findSpawnCells(&self.level.collision_grid, &self.level_arena);
+        self.frame_arena = Arena.init("frame", &self.frame_buffer);
+        self.field = FlowField.init(&self.level_arena, &self.level.collision_grid, self.level.collision_grid.cellIndex(@splat(0)));
+    }
+
+    fn tick(self: *TestLevel, game: *state.GameState, input: state.Input) game_mod.TickResult {
+        self.frame_arena.reset();
+        return game_mod.tick(game, &self.level, &self.field, input, 1.0 / 60.0, &self.frame_arena);
+    }
+};
+
+test "[scenario] worst case: max enemies and bullets fit the frame arena and pools, and stay out of the walls" {
+    var t: TestLevel = .{};
+    t.init(true);
+    const grid = &t.level.collision_grid;
     var game = state.GameState{};
 
-    //Spin the crank flat out with an endless magazine while the horde builds up
+    //Hold fire until the horde is full (the gun otherwise keeps the count low), then spin the crank flat out
+    //with an endless magazine. The player walks a loop the whole time so the flow field keeps rebuilding
     var frames: usize = 0;
+    var max_enemies: usize = 0;
     while (frames < 60 * 120) : (frames += 1) {
-        frame_arena.reset();
         game.bullets.magazine = consts.BULLET_MAG_SIZE;
         game.player.health = consts.PLAYER_MAX_HEALTH;
-        _ = game_mod.tick(&game, &level, .{ .crank_delta = consts.FIRE_ANGLE_DELTA }, 1.0 / 60.0, &frame_arena);
+        const phase = (frames / 120) % 4;
+        const firing = max_enemies == state.Enemies.capacity;
+        _ = t.tick(&game, .{ .crank_delta = if (firing) consts.FIRE_ANGLE_DELTA else 0, .left = phase == 0, .up = phase == 1, .right = phase == 2, .down = phase == 3 });
         try std.testing.expect(game.enemies.len <= state.Enemies.capacity);
         try std.testing.expect(game.bullets.len <= state.Bullets.capacity);
+        for (game.enemies.positions()) |p| try std.testing.expect(!grid.isOccupied(p));
+        max_enemies = @max(max_enemies, game.enemies.len);
     }
     try std.testing.expect(game.player.score > 0);
+    try std.testing.expect(max_enemies == state.Enemies.capacity);
+}
+
+test "[scenario] an enemy behind a wall paths around it and reaches the player" {
+    var t: TestLevel = .{};
+    t.init(true);
+    var game = state.GameState{};
+    game.spawner.next_spawn_timer = std.math.inf(f32); //Just the one enemy
+    game.enemies.add(.{ 4, 0 }); //Behind the vertical wall at x = 2m
+
+    var frames: usize = 0;
+    while (game.player.health == consts.PLAYER_MAX_HEALTH and frames < 60 * 30) : (frames += 1) {
+        _ = t.tick(&game, .{});
+        try std.testing.expect(!t.level.collision_grid.isOccupied(game.enemies.pos[0]));
+    }
+    try std.testing.expect(game.player.health < consts.PLAYER_MAX_HEALTH);
+    //Going round the wall's end (y = -2.5m) is about 9m, not the 4m straight line
+    try std.testing.expect(@as(f32, @floatFromInt(frames)) / 60.0 * consts.ENEMY_MAX_SPEED > 6);
 }
 
 test "[scenario] the player dies if left alone" {
-    var cells: [30 * 30]bool = undefined;
-    const level = testLevel(&cells);
-    var frame_buffer: [16 * 1024]u8 = undefined;
-    var frame_arena = Arena.init("frame", &frame_buffer);
+    var t: TestLevel = .{};
+    t.init(false);
     var game = state.GameState{};
 
     var result = game_mod.TickResult.playing;
     var frames: usize = 0;
     while (result == .playing and frames < 60 * 600) : (frames += 1) {
-        frame_arena.reset();
-        result = game_mod.tick(&game, &level, .{}, 1.0 / 60.0, &frame_arena);
+        result = t.tick(&game, .{});
     }
     try std.testing.expect(result == .player_died);
 }

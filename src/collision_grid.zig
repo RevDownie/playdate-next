@@ -14,6 +14,14 @@ pub const CollisionGrid = struct {
     cell_height: u8,
 
     pub fn isOccupied(self: *const CollisionGrid, world_pos: Vec2f) bool {
+        const idx = self.cellIndex(world_pos) orelse return true;
+        return self.cells[idx];
+    }
+
+    /// Index of the cell containing `world_pos`, or null outside the grid. Cell centres sit on multiples
+    /// of the cell size with the grid centred on the world origin
+    ///
+    pub fn cellIndex(self: *const CollisionGrid, world_pos: Vec2f) ?u16 {
         const screen = world_pos * @as(Vec2f, @splat(consts.METRES_TO_PIXELS));
         const cellx = @round(screen[0] / @as(f32, @floatFromInt(self.cell_width)));
         const celly = @round(screen[1] / @as(f32, @floatFromInt(self.cell_height)));
@@ -21,11 +29,18 @@ pub const CollisionGrid = struct {
         const y = -celly + @as(f32, @floatFromInt(self.height / 2));
         //Range check in float space so huge or NaN positions can't overflow the int conversion
         if (!(x >= 0 and y >= 0 and x < @as(f32, @floatFromInt(self.width)) and y < @as(f32, @floatFromInt(self.height)))) {
-            return true;
+            return null;
         }
+        return @intCast(@as(u32, @intFromFloat(x)) + @as(u32, self.width) * @as(u32, @intFromFloat(y)));
+    }
 
-        const idx = @as(usize, @intFromFloat(x)) + @as(usize, self.width) * @as(usize, @intFromFloat(y));
-        return self.cells[idx];
+    /// World position of the centre of cell `idx` (the inverse of `cellIndex`)
+    ///
+    pub fn cellCentre(self: *const CollisionGrid, idx: u16) Vec2f {
+        const x = @as(i32, idx % self.width) - self.width / 2;
+        const y = @as(i32, idx / self.width) - self.height / 2;
+        const px = Vec2f{ @floatFromInt(x * @as(i32, self.cell_width)), @floatFromInt(-y * @as(i32, self.cell_height)) };
+        return px / @as(Vec2f, @splat(consts.METRES_TO_PIXELS));
     }
 };
 
@@ -41,4 +56,19 @@ test "[collision_grid] occupied cells and out of bounds" {
     try std.testing.expect(grid.isOccupied(Vec2f{ -2, 0 }));
     try std.testing.expect(grid.isOccupied(Vec2f{ 0, 1000000 }));
     try std.testing.expect(grid.isOccupied(Vec2f{ std.math.nan(f32), 0 }));
+}
+
+test "[collision_grid] cell index and centre round trip with non-square cells and odd width" {
+    var cells: [5 * 4]bool = @splat(false);
+    const grid = CollisionGrid{ .cells = &cells, .width = 5, .height = 4, .cell_width = 57, .cell_height = 27 };
+
+    for (0..cells.len) |i| {
+        const idx: u16 = @intCast(i);
+        try std.testing.expect(grid.cellIndex(grid.cellCentre(idx)).? == idx);
+    }
+    //Row 0 is the top of the map, so moving one cell up in the world is one row back
+    const centre = grid.cellIndex(Vec2f{ 0, 0 }).?;
+    try std.testing.expect(grid.cellIndex(Vec2f{ 0, 27.0 / 128.0 }).? == centre - 5);
+    try std.testing.expect(grid.cellIndex(Vec2f{ 57.0 / 128.0, 0 }).? == centre + 1);
+    try std.testing.expect(grid.cellIndex(Vec2f{ 100, 0 }) == null);
 }

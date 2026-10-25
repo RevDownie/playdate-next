@@ -6,6 +6,7 @@ const state = @import("game_state.zig");
 const game = @import("game.zig");
 const renderer = @import("renderer.zig");
 const level_loader = @import("level_loader.zig");
+const FlowField = @import("flow_field.zig").FlowField;
 const memory = @import("memory.zig");
 const Arena = memory.Arena;
 
@@ -26,6 +27,7 @@ var frame_arena: Arena = undefined;
 var playdate_api: *pd.PlaydateAPI = undefined;
 var assets: renderer.Assets = undefined;
 var level: level_loader.Level = undefined;
+var flow_field: FlowField = undefined; //The enemies' path to the player, sized to the level
 var game_state: state.GameState = .{};
 
 /// Frame timing and requests from outside the frame loop
@@ -36,6 +38,7 @@ var restart_requested = false;
 const debug_logging = builtin.mode == .debug;
 var last_log_time_ms: u32 = 0;
 var last_render_stats: renderer.RenderStats = .{ .drawn = 0 };
+var sim_ms_max: f32 = 0; //Slowest game.tick since the last status line
 
 /// Exposed via the shared library to the Playdate runner which forwards on events
 ///
@@ -74,7 +77,8 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
 
     game_state.reset();
     resetFrameTimer();
-    debugLog("init complete: level arena {d}/{d} bytes, L1 hot set budget {d} bytes (collision {d}, {d} per sprite drawn)", .{ level_arena.used(), level_arena.capacity(), memory.HOT_SET_BUDGET, state.COLLISION_HOT_SET_BYTES, renderer.BYTES_PER_DRAW_ITEM });
+    debugLog("init complete: level arena {d}/{d} bytes, L1 hot set budget {d} bytes (collision {d}, flow field {d}, {d} per sprite drawn), {d} spawn cells", .{ level_arena.used(), level_arena.capacity(), memory.HOT_SET_BUDGET, state.COLLISION_HOT_SET_BYTES, flow_field.hotSetBytes(), renderer.BYTES_PER_DRAW_ITEM, level.spawn_cells.len });
+    if (flow_field.hotSetBytes() > memory.HOT_SET_BUDGET) debugLog("WARNING: flow field ({d} bytes) is larger than the L1 hot set budget, enemy movement will miss the cache", .{flow_field.hotSetBytes()});
 }
 
 /// Replace the current level, releasing everything the previous one allocated
@@ -82,6 +86,7 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
 fn loadLevel(file_name: [*:0]const u8) void {
     level_arena.reset();
     level = level_loader.load(playdate_api, file_name, &level_arena) catch |err| std.debug.panic("loadLevel: {s}", .{@errorName(err)});
+    flow_field = FlowField.init(&level_arena, &level.collision_grid, level.collision_grid.cellIndex(game_state.player.pos));
 }
 
 /// Called from the system menu by the user if they want to restart. Handled at the start of the next frame
@@ -109,7 +114,10 @@ fn gameUpdateWrapper(_: ?*anyopaque) callconv(.c) c_int {
     const dt = @min(@as(f32, @floatFromInt(now_ms -% time_last_tick_ms)) * 0.001, consts.MAX_FRAME_DT);
     time_last_tick_ms = now_ms;
 
-    if (game.tick(&game_state, &level, readInput(), dt, &frame_arena) == .player_died) {
+    if (debug_logging) sys.resetElapsedTime.?();
+    const result = game.tick(&game_state, &level, &flow_field, readInput(), dt, &frame_arena);
+    if (debug_logging) sim_ms_max = @max(sim_ms_max, sys.getElapsedTime.?() * 1000);
+    if (result == .player_died) {
         game_state.reset();
     }
     last_render_stats = renderer.render(playdate_api, &assets, &game_state, &level, &frame_arena);
@@ -144,7 +152,8 @@ fn logStatus(now_ms: u32) void {
     last_log_time_ms = now_ms;
 
     const p = game_state.player;
-    debugLog("t={d}ms enemies={d} health={d} score={d} pos=({d:.2},{d:.2}) bullets={d} crank={d:.1} frame_mem={d} drawn={d}", .{ now_ms, game_state.enemies.len, p.health, p.score, p.pos[0], p.pos[1], game_state.bullets.magazine, playdate_api.system.*.getCrankAngle.?(), frame_arena.high_water, last_render_stats.drawn });
+    debugLog("t={d}ms enemies={d} health={d} score={d} pos=({d:.2},{d:.2}) bullets={d} crank={d:.1} frame_mem={d} drawn={d} sim_ms_max={d:.2}", .{ now_ms, game_state.enemies.len, p.health, p.score, p.pos[0], p.pos[1], game_state.bullets.magazine, playdate_api.system.*.getCrankAngle.?(), frame_arena.high_water, last_render_stats.drawn, sim_ms_max });
+    sim_ms_max = 0;
 }
 
 /// Debug builds only: write to the Playdate console and append to `log.txt` in the game's data folder.
@@ -153,7 +162,7 @@ fn logStatus(now_ms: u32) void {
 fn debugLog(comptime fmt: []const u8, args: anytype) void {
     if (!debug_logging) return;
 
-    var buf: [192]u8 = undefined;
+    var buf: [256]u8 = undefined;
     const msg = std.mem.printSentinel(&buf, "until-none: " ++ fmt, args, 0) catch return;
     playdate_api.system.*.logToConsole.?("%s", msg.ptr);
 
