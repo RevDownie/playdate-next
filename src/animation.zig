@@ -1,10 +1,10 @@
 const std = @import("std");
-const pd = @import("playdate.zig").api;
 const maths = @import("maths.zig");
 
 const Vec2f = @Vector(2, f32);
 
-pub const BitmapFrame = struct { index: i32, flip: pd.LCDBitmapFlip };
+/// Two bytes so the lookup table and the per frame draw lists stay small
+pub const BitmapFrame = struct { index: u8, flipped: bool };
 
 const BITMAP_INDEX_MAP = buildLookupTable();
 
@@ -17,10 +17,10 @@ fn buildLookupTable() [36]BitmapFrame {
 
     var i: usize = 0;
     while (i <= 18) : (i += 1) {
-        table[i] = BitmapFrame{ .index = @intCast(i), .flip = pd.kBitmapUnflipped };
+        table[i] = BitmapFrame{ .index = @intCast(i), .flipped = false };
     }
     while (i < 36) : (i += 1) {
-        table[i] = BitmapFrame{ .index = @intCast(36 - i), .flip = pd.kBitmapFlippedX };
+        table[i] = BitmapFrame{ .index = @intCast(36 - i), .flipped = true };
     }
     return table;
 }
@@ -29,7 +29,8 @@ fn buildLookupTable() [36]BitmapFrame {
 ///
 pub fn bitmapFrameForDir(dir: Vec2f) BitmapFrame {
     const deg = maths.angleDegrees360(@Vector(2, f32){ 0, -1 }, dir);
-    const index: usize = @intFromFloat(deg * 0.1);
+    //Clamp in float space - rounding can land exactly on 360, and @min/@max drop a NaN so the cast is always safe
+    const index: usize = @intFromFloat(std.math.clamp(deg * 0.1, 0, @as(f32, BITMAP_INDEX_MAP.len - 1)));
     return BITMAP_INDEX_MAP[index];
 }
 
@@ -43,4 +44,14 @@ pub fn walkBobAnim(world_pos: Vec2f) i32 {
     const t2 = world_pos[1];
     const y = (std.math.sin(t2 * freq) + 1.0) * 0.5;
     return @intFromFloat((x * 0.5 + y * 0.5) * amp);
+}
+
+test "[animation] bitmapFrameForDir covers every direction" {
+    try std.testing.expect(bitmapFrameForDir(Vec2f{ 0, -1 }).index == 0); //Facing the screen
+    try std.testing.expect(bitmapFrameForDir(Vec2f{ 0, 1 }).index == 18); //Facing away
+    const left = bitmapFrameForDir(Vec2f{ -1, 0 });
+    const right = bitmapFrameForDir(Vec2f{ 1, 0 });
+    try std.testing.expect(left.index == right.index and left.flipped != right.flipped);
+    _ = bitmapFrameForDir(Vec2f{ 0, 0 });
+    _ = bitmapFrameForDir(Vec2f{ std.math.nan(f32), 0 });
 }

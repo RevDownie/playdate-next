@@ -105,7 +105,7 @@ pub fn build(b: *std.Build) void {
 
     //Tests
     const test_step = b.step("test", "Run tests");
-    for ([_][]const u8{ "src/maths.zig", "src/graphics_coords.zig", "src/sparse_array.zig" }) |test_file| {
+    for ([_][]const u8{ "src/maths.zig", "src/graphics_coords.zig", "src/memory.zig", "src/animation.zig", "src/game_state.zig", "src/collision_grid.zig", "src/level_loader.zig", "src/bullet_system.zig", "src/enemy_movement_system.zig", "src/enemy_spawn_system.zig", "src/combat_system.zig", "src/firing_system.zig", "src/game.zig" }) |test_file| {
         const unit_tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(test_file),

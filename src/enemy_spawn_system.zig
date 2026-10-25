@@ -1,50 +1,32 @@
 const std = @import("std");
 const consts = @import("tweak_constants.zig");
+const state = @import("game_state.zig");
 
 const Vec2f = @Vector(2, f32);
 
-pub const SpawnData = struct { world_pos: Vec2f };
-
-var max_active_allowed: u8 = 0;
-var spawn_time: f32 = 0;
-var next_spawn_timer: f32 = 0;
-var spawn_buffer: [5]SpawnData = undefined;
-var rand: std.Random.DefaultPrng = undefined;
-
-pub fn init(max_active: u8) void {
-    max_active_allowed = max_active;
-    rand = std.Random.DefaultPrng.init(42);
-}
-
-pub fn reset() void {
-    spawn_time = consts.INIT_SPAWN_TIME;
-    next_spawn_timer = 0.25;
-}
-
-/// Keep spawning up to the max number by dropping enemies in with increasing frequency
-/// Returned data only lasts for a frame before being stomped
+/// Keep spawning up to the max number by dropping enemies in around the player with increasing frequency
 ///
-pub fn update(dt: f32, num_active: usize, player_world_pos: Vec2f) []SpawnData {
-    if (num_active >= max_active_allowed) {
-        return spawn_buffer[0..0];
+pub fn update(spawner: *state.Spawner, enemies: *state.Enemies, rand: std.Random, player_world_pos: Vec2f, dt: f32) void {
+    if (enemies.isFull()) return;
+
+    spawner.next_spawn_timer -= dt;
+    if (spawner.next_spawn_timer > 0.0) return;
+
+    spawner.next_spawn_timer = spawner.spawn_interval;
+    spawner.spawn_interval = @max(spawner.spawn_interval - consts.SPAWN_TIME_REDUCTION, consts.MIN_SPAWN_TIME);
+
+    const to_spawn = @min(consts.ENEMIES_PER_SPAWN, state.Enemies.capacity - enemies.len);
+    for (0..to_spawn) |_| {
+        const x = player_world_pos[0] + (rand.float(f32) * 2.0 - 1.0) * consts.SPAWN_RADIUS;
+        const y = player_world_pos[1] + (rand.float(f32) * 2.0 - 1.0) * consts.SPAWN_RADIUS;
+        enemies.add(Vec2f{ x, y });
     }
+}
 
-    next_spawn_timer -= dt;
-
-    if (next_spawn_timer <= 0.0) {
-        //Spawn
-        next_spawn_timer = spawn_time;
-        spawn_time = @max(spawn_time - consts.SPAWN_TIME_REDUCTION, consts.MIN_SPAWN_TIME);
-        const to_spawn = @min(consts.ENEMIES_PER_SPAWN, max_active_allowed - num_active);
-        var i: u32 = 0;
-        while (i < to_spawn) : (i += 1) {
-            const x = player_world_pos[0] + (rand.random().float(f32) * 2.0 - 1.0) * 10;
-            const y = player_world_pos[1] + (rand.random().float(f32) * 2.0 - 1.0) * 10;
-            const sd = SpawnData{ .world_pos = Vec2f{ x, y } };
-            spawn_buffer[i] = sd;
-        }
-        return spawn_buffer[0..to_spawn];
-    }
-
-    return spawn_buffer[0..0];
+test "[enemy_spawn_system] never spawns past capacity" {
+    var spawner = state.Spawner{};
+    var enemies = state.Enemies{};
+    var prng = std.Random.DefaultPrng.init(1);
+    for (0..1000) |_| update(&spawner, &enemies, prng.random(), @splat(0), 1.0);
+    try std.testing.expect(enemies.len == state.Enemies.capacity);
 }

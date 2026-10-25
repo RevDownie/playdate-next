@@ -1,203 +1,170 @@
 const std = @import("std");
 const pd = @import("playdate.zig").api;
 const graphics_coords = @import("graphics_coords.zig");
-const bullet_sys = @import("bullet_system.zig");
 const anim = @import("animation.zig");
 const bitmap_descs = @import("bitmap_descs.zig");
 const consts = @import("tweak_constants.zig");
+const memory = @import("memory.zig");
+const GameState = @import("game_state.zig").GameState;
+const Level = @import("level_loader.zig").Level;
+const Arena = memory.Arena;
 
 const Vec2i = @Vector(2, i32);
 const Vec2f = @Vector(2, f32);
 
-pub const RenderCommandData = struct {
-    bitmap_table: *pd.LCDBitmapTable,
-    bitmap_idx: c_int,
-    width_offset: i32,
-    height_offset: i32,
-    flip: pd.LCDBitmapFlip,
+/// Which bitmap table a sprite is drawn from
+///
+const Sheet = enum(u8) { player, enemy, env };
+
+/// Bitmaps owned by the Playdate runtime, loaded once up front
+///
+pub const Assets = struct {
+    bg_bitmap: *pd.LCDBitmap,
+    tables: [std.enums.values(Sheet).len]*pd.LCDBitmapTable, //Indexed by Sheet
 };
 
-var playdate_api: *pd.PlaydateAPI = undefined;
-
-var bg_bitmap: *pd.LCDBitmap = undefined;
-var player_bitmap_table: *pd.LCDBitmapTable = undefined;
-var enemy_bitmap_table: *pd.LCDBitmapTable = undefined;
-var env_obj_bitmap_table: *pd.LCDBitmapTable = undefined;
-
-//Sized once in init to hold the player, the maximum number of enemies and every environment object
-var render_command_sort_order: []u16 = undefined;
-var render_command_data_buffer: []RenderCommandData = undefined;
-var entity_screen_pos: []Vec2i = undefined;
-
-var background_size_pixels: Vec2i = undefined;
-
-var player_hit_flash_timer: ?f32 = null;
-
-/// Setup - allocates the per frame render buffers up front so nothing is allocated in the frame loop
+/// One entry in the per frame draw list, already in screen space with the sprite's anchor applied.
+/// Kept to 8 bytes (no pointers, sizes or offsets - those come from the Sheet) so the whole list plus its
+/// sort keys stays inside the L1 hot set budget while it is sorted and then read back in depth order
 ///
-pub fn init(pd_api: *pd.PlaydateAPI, bg_size_pixels: Vec2i, num_env_objs: usize, allocator: std.mem.Allocator) !void {
-    playdate_api = pd_api;
-    background_size_pixels = bg_size_pixels;
+const DrawItem = extern struct {
+    x: i16,
+    y: i16,
+    frame: u8,
+    sheet: Sheet,
+    flipped: bool,
+    _pad: u8 = 0,
+};
 
-    const max_entities = 1 + consts.MAX_ENEMIES + num_env_objs; //Player + enemies + environment
-    std.debug.assert(max_entities <= std.math.maxInt(u16));
-    render_command_sort_order = try allocator.alloc(u16, max_entities);
-    render_command_data_buffer = try allocator.alloc(RenderCommandData, max_entities);
-    entity_screen_pos = try allocator.alloc(Vec2i, max_entities);
+/// Sort key: depth (screen y of the sprite's feet, biased to unsigned) in the high half and the draw item's
+/// index in the low half. Sorting plain u32s needs no indirection, and as keys are unique the order is stable
+const SortKey = u32;
+
+pub const BYTES_PER_DRAW_ITEM = @sizeOf(DrawItem) + @sizeOf(SortKey);
+comptime {
+    std.debug.assert(@sizeOf(DrawItem) == 8);
+    //Every character on screen at once must fit, leaving room for the environment objects in view
+    if ((1 + @as(usize, consts.MAX_ENEMIES)) * BYTES_PER_DRAW_ITEM > memory.HOT_SET_BUDGET * 3 / 4) @compileError("Character draw list no longer fits the L1 hot set budget");
 }
 
-/// Called on restart
-///
-pub fn reset() void {
-    player_hit_flash_timer = null;
-    _ = playdate_api.graphics.*.setDrawMode.?(pd.kDrawModeCopy);
-}
+pub const RenderStats = struct {
+    drawn: u16, //Sprites that survived culling this frame
+};
 
 /// Load the rendering assets - bitmaps and bitmap tables
 ///
-pub fn loadAssets(level_bitmap_name: [*c]const u8) void {
+pub fn loadAssets(playdate_api: *pd.PlaydateAPI, level_bitmap_name: [*:0]const u8) Assets {
     const graphics = playdate_api.graphics.*;
-
-    bg_bitmap = graphics.loadBitmap.?("bg", null).?;
-    player_bitmap_table = graphics.loadBitmapTable.?("hero1", null).?;
-    enemy_bitmap_table = graphics.loadBitmapTable.?("enemy1", null).?;
-    env_obj_bitmap_table = graphics.loadBitmapTable.?(level_bitmap_name, null).?;
+    var assets: Assets = undefined;
+    assets.bg_bitmap = graphics.loadBitmap.?("bg", null) orelse @panic("loadAssets: Failed to load bg");
+    assets.tables[@intFromEnum(Sheet.player)] = graphics.loadBitmapTable.?("hero1", null) orelse @panic("loadAssets: Failed to load hero1");
+    assets.tables[@intFromEnum(Sheet.enemy)] = graphics.loadBitmapTable.?("enemy1", null) orelse @panic("loadAssets: Failed to load enemy1");
+    assets.tables[@intFromEnum(Sheet.env)] = graphics.loadBitmapTable.?(level_bitmap_name, null) orelse @panic("loadAssets: Failed to load level bitmaps");
+    return assets;
 }
 
-/// Toggle on the hit flash effect for the given duration
+/// Build a draw list of everything on screen, sort it by "depth order" and draw it, then the bullets and HUD.
+/// Per frame buffers come from the frame arena
 ///
-pub fn playerHitFlash(duration: f32) void {
-    player_hit_flash_timer = duration;
-    _ = playdate_api.graphics.*.setDrawMode.?(pd.kDrawModeInverted);
-}
-
-/// Run any time based effects
-///
-pub fn update(dt: f32) void {
-    if (player_hit_flash_timer) |*timer| {
-        timer.* -= dt;
-        if (timer.* <= 0.0) {
-            player_hit_flash_timer = null;
-            _ = playdate_api.graphics.*.setDrawMode.?(pd.kDrawModeCopy);
-        }
-    }
-}
-
-/// Perform the transformations from world to screen space and render the bitmaps
-/// Sorting them by "depth order"
-/// TODO: Build the render command data elsewhere?
-///
-pub fn render(
-    camera_pos: Vec2f,
-    player_world_pos: Vec2f,
-    player_facing_dir: Vec2f,
-    enemy_world_positions: []const Vec2f,
-    enemy_velocities: []const Vec2f,
-    env_obj_world_positions: []const Vec2f,
-    env_obj_bitmap_indices: []const u8,
-    player_score: u64,
-    player_health: u8,
-    bullets_remaining: u32,
-) void {
+pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const GameState, level: *const Level, frame_arena: *Arena) RenderStats {
     const sys = playdate_api.system.*;
     const disp = playdate_api.display.*;
     const graphics = playdate_api.graphics.*;
 
-    const dispWidth = disp.getWidth.?();
-    const dispHeight = disp.getHeight.?();
+    const screen = Screen{ .width = disp.getWidth.?(), .height = disp.getHeight.?(), .camera_pos = game.camera_pos };
 
-    //graphics.clear.?(pd.kColorWhite);
+    //Inverting the whole screen is the hit flash
+    _ = graphics.setDrawMode.?(if (game.player.hit_flash_timer > 0) pd.kDrawModeInverted else pd.kDrawModeCopy);
 
     //---Render the BG
-    const bg_world_pos = [_]Vec2f{Vec2f{ 0, 0 }};
-    var bg_screen_pos: [1]Vec2i = undefined;
-    graphics_coords.worldSpaceToScreenSpace(camera_pos, bg_world_pos[0..], bg_screen_pos[0..], dispWidth, dispHeight);
-    graphics.tileBitmap.?(bg_bitmap, bg_screen_pos[0][0] - @divTrunc(background_size_pixels[0], 2), bg_screen_pos[0][1] - @divTrunc(background_size_pixels[1], 2), background_size_pixels[0], background_size_pixels[1], pd.kBitmapUnflipped);
+    const bg_screen_pos = screen.toScreen(Vec2f{ 0, 0 });
+    const bg_size = level.bg_size_pixels;
+    graphics.tileBitmap.?(assets.bg_bitmap, bg_screen_pos[0] - @divTrunc(bg_size[0], 2), bg_screen_pos[1] - @divTrunc(bg_size[1], 2), bg_size[0], bg_size[1], pd.kBitmapUnflipped);
 
-    //---Transform the entities to screen space
-    var buffer_start: usize = 0;
-    var buffer_end: usize = 1;
+    //---Build the draw list of visible sprites. Characters face the way they are aiming / moving
+    const max_items = 1 + game.enemies.len + level.obj_world_positions.len;
+    var list = DrawList{ .items = frame_arena.alloc(DrawItem, max_items), .keys = frame_arena.alloc(SortKey, max_items) };
 
-    const player_world_positions = [_]Vec2f{player_world_pos};
-    graphics_coords.worldSpaceToScreenSpace(camera_pos, player_world_positions[0..], entity_screen_pos[buffer_start..buffer_end], dispWidth, dispHeight);
-    buffer_start = buffer_end;
-    buffer_end += enemy_world_positions.len;
-
-    graphics_coords.worldSpaceToScreenSpace(camera_pos, enemy_world_positions[0..], entity_screen_pos[buffer_start..buffer_end], dispWidth, dispHeight);
-    buffer_start = buffer_end;
-    buffer_end += env_obj_world_positions.len;
-
-    graphics_coords.worldSpaceToScreenSpace(camera_pos, env_obj_world_positions[0..], entity_screen_pos[buffer_start..buffer_end], dispWidth, dispHeight);
-
-    //---Build the render commands for the player and enemies
-    const player_bitmap_frame = anim.bitmapFrameForDir(player_facing_dir);
-    render_command_data_buffer[0] = RenderCommandData{
-        .bitmap_table = player_bitmap_table,
-        .bitmap_idx = player_bitmap_frame.index,
-        .flip = player_bitmap_frame.flip,
-        .width_offset = bitmap_descs.CHAR_W / 2,
-        .height_offset = @as(i32, @intCast(bitmap_descs.CHAR_H)) - anim.walkBobAnim(player_world_pos),
-    };
-
-    var enemy_bitmap_frames: [consts.MAX_ENEMIES]anim.BitmapFrame = undefined; //Enemies facing the way they are moving
-    for (enemy_velocities, 0..) |v, i| {
-        enemy_bitmap_frames[i] = anim.bitmapFrameForDir(v);
+    list.addCharacter(screen, .player, game.player.pos, game.player.facing_dir);
+    for (game.enemies.positions(), game.enemies.velocities()) |p, v| {
+        list.addCharacter(screen, .enemy, p, v);
     }
-    for (enemy_world_positions, 0..) |p, i| {
-        render_command_data_buffer[i + 1] = RenderCommandData{
-            .bitmap_table = enemy_bitmap_table,
-            .bitmap_idx = enemy_bitmap_frames[i].index,
-            .flip = enemy_bitmap_frames[i].flip,
-            .width_offset = bitmap_descs.CHAR_W / 2,
-            .height_offset = @as(i32, @intCast(bitmap_descs.CHAR_H)) - anim.walkBobAnim(p),
-        };
+    for (level.obj_world_positions, level.obj_bitmap_indices) |p, bi| {
+        list.add(screen, .env, p, .{ .index = bi, .flipped = false }, .{ bitmap_descs.ENV_OBJ_W / 2, bitmap_descs.ENV_OBJ_H });
     }
 
-    const offset = enemy_world_positions.len + 1;
-    for (env_obj_bitmap_indices, 0..) |bi, i| {
-        render_command_data_buffer[i + offset] = RenderCommandData{
-            .bitmap_table = env_obj_bitmap_table,
-            .bitmap_idx = bi,
-            .flip = pd.kBitmapUnflipped,
-            .width_offset = bitmap_descs.ENV_OBJ_W / 2,
-            .height_offset = bitmap_descs.ENV_OBJ_H,
-        };
+    //---Sort by depth and draw back to front
+    const keys = list.keys[0..list.len];
+    std.sort.pdq(SortKey, keys, {}, std.sort.asc(SortKey));
+    for (keys) |key| {
+        const item = list.items[@as(u16, @truncate(key))];
+        const bitmap = graphics.getTableBitmap.?(assets.tables[@intFromEnum(item.sheet)], item.frame) orelse @panic("render: Bitmap index out of range for its table");
+        graphics.drawBitmap.?(bitmap, item.x, item.y, if (item.flipped) pd.kBitmapFlippedX else pd.kBitmapUnflipped);
     }
 
-    //---Sort by "depth", really the y-axis. To keep sorting fast we sort indices rather than render data
-    var sorted_indices = render_command_sort_order[0..buffer_end];
-    for (sorted_indices, 0..) |_, i| {
-        sorted_indices[i] = @intCast(i);
-    }
-    std.sort.pdq(u16, sorted_indices, entity_screen_pos[0..buffer_end], compareBackToFront);
-
-    //---Render the entities
-    for (sorted_indices) |idx| {
-        const rd = render_command_data_buffer[idx];
-        graphics.drawBitmap.?(graphics.getTableBitmap.?(rd.bitmap_table, rd.bitmap_idx).?, entity_screen_pos[idx][0] - rd.width_offset, entity_screen_pos[idx][1] - rd.height_offset, rd.flip);
+    //---Bullets are rendered as geometry on top. TODO: Interleave bullets
+    for (game.bullets.positions()) |p| {
+        const sp = screen.toScreen(p);
+        graphics.fillRect.?(sp[0], sp[1], 6, 6, pd.kColorBlack);
     }
 
-    //TODO: Interleave bullets
-    bullet_sys.render(graphics, disp, camera_pos);
-
-    //TODO: Replace with bitmap font
-    var score_buffer: ["Score: ".len + 10]u8 = undefined;
-    const score_string = std.fmt.bufPrint(&score_buffer, "Score: {d}", .{player_score}) catch @panic("scorePrint: Failed to format");
-    _ = graphics.drawText.?(score_string.ptr, score_string.len, pd.kASCIIEncoding, dispWidth - 100, 0);
-
-    var health_buffer: ["Health: ".len + 3]u8 = undefined;
-    const health_string = std.fmt.bufPrint(&health_buffer, "Health: {d}", .{player_health}) catch @panic("healthPrint: Failed to format");
-    _ = graphics.drawText.?(health_string.ptr, health_string.len, pd.kASCIIEncoding, @divTrunc(dispWidth, 2), 0);
-
-    var bullet_buffer: ["Bullets: ".len + 3]u8 = undefined;
-    const bullet_string = std.fmt.bufPrint(&bullet_buffer, "Bullets: {d}", .{bullets_remaining}) catch @panic("bulletPrint: Failed to format");
-    _ = graphics.drawText.?(bullet_string.ptr, bullet_string.len, pd.kASCIIEncoding, @divTrunc(dispWidth, 2), dispHeight - 30);
+    //---HUD. TODO: Replace with bitmap font
+    drawLabel(graphics, "Score: {d}", game.player.score, screen.width - 100, 0);
+    drawLabel(graphics, "Health: {d}", game.player.health, @divTrunc(screen.width, 2), 0);
+    drawLabel(graphics, "Bullets: {d}", game.bullets.magazine, @divTrunc(screen.width, 2), screen.height - 30);
 
     sys.drawFPS.?(0, 0);
+    return .{ .drawn = @intCast(list.len) };
 }
 
-/// Used for depth sorting of an index list against the screen positions
+const Screen = struct {
+    width: i32,
+    height: i32,
+    camera_pos: Vec2f,
+
+    fn toScreen(self: Screen, world_pos: Vec2f) Vec2i {
+        return graphics_coords.worldPointToScreen(self.camera_pos, world_pos, self.width, self.height);
+    }
+};
+
+const DrawList = struct {
+    items: []DrawItem,
+    keys: []SortKey,
+    len: usize = 0,
+
+    fn addCharacter(self: *DrawList, screen: Screen, sheet: Sheet, world_pos: Vec2f, facing_dir: Vec2f) void {
+        const anchor = Vec2i{ bitmap_descs.CHAR_W / 2, @as(i32, bitmap_descs.CHAR_H) - anim.walkBobAnim(world_pos) };
+        self.add(screen, sheet, world_pos, anim.bitmapFrameForDir(facing_dir), anchor);
+    }
+
+    /// Add a sprite whose `anchor` (pixels from its top left) sits at `world_pos`, unless it is off screen
+    ///
+    fn add(self: *DrawList, screen: Screen, sheet: Sheet, world_pos: Vec2f, frame: anim.BitmapFrame, anchor: Vec2i) void {
+        const feet = screen.toScreen(world_pos);
+        const top_left = feet - anchor;
+        const size = sheetSize(sheet);
+        if (top_left[0] >= screen.width or top_left[1] >= screen.height or top_left[0] + size[0] <= 0 or top_left[1] + size[1] <= 0) return;
+
+        //On screen, so every coordinate is well within i16 range
+        const idx: u16 = @intCast(self.len);
+        self.items[idx] = .{ .x = @intCast(top_left[0]), .y = @intCast(top_left[1]), .frame = frame.index, .sheet = sheet, .flipped = frame.flipped };
+        const depth: u16 = @intCast(feet[1] + std.math.maxInt(i16));
+        self.keys[idx] = (@as(SortKey, depth) << 16) | idx;
+        self.len += 1;
+    }
+};
+
+fn sheetSize(sheet: Sheet) Vec2i {
+    return switch (sheet) {
+        .player, .enemy => .{ bitmap_descs.CHAR_W, bitmap_descs.CHAR_H },
+        .env => .{ bitmap_descs.ENV_OBJ_W, bitmap_descs.ENV_OBJ_H },
+    };
+}
+
+/// Draw a single number with a label, truncated if it doesn't fit the buffer
 ///
-fn compareBackToFront(screen_positions: []const Vec2i, a: u16, b: u16) bool {
-    return screen_positions[a][1] <= screen_positions[b][1];
+fn drawLabel(graphics: pd.playdate_graphics, comptime fmt: []const u8, value: anytype, x: c_int, y: c_int) void {
+    var buffer: [32]u8 = undefined;
+    const text = std.fmt.bufPrint(&buffer, fmt, .{value}) catch buffer[0..];
+    _ = graphics.drawText.?(text.ptr, text.len, pd.kASCIIEncoding, x, y);
 }

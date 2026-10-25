@@ -1,84 +1,55 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const pd = @import("playdate.zig").api;
-const sparse_array = @import("sparse_array.zig");
-const graphics_coords = @import("graphics_coords.zig");
-const renderer = @import("renderer.zig");
-const maths = @import("maths.zig");
-const bullet_sys = @import("bullet_system.zig");
-const anim = @import("animation.zig");
-const enemy_move_sys = @import("enemy_movement_system.zig");
-const enemy_spawn_sys = @import("enemy_spawn_system.zig");
-const auto_target_sys = @import("auto_targetting_system.zig");
-const player_move_sys = @import("player_movement_system.zig");
 const consts = @import("tweak_constants.zig");
-const bitmap_descs = @import("bitmap_descs.zig");
+const state = @import("game_state.zig");
+const game = @import("game.zig");
+const renderer = @import("renderer.zig");
 const level_loader = @import("level_loader.zig");
-const cgrid = @import("collision_grid.zig");
+const memory = @import("memory.zig");
+const Arena = memory.Arena;
 
-const Vec2i = @Vector(2, i32);
-const Vec2f = @Vector(2, f32);
-const SparseArray = sparse_array.SparseArray;
+/// Platform layer: owns all memory and state, talks to the Playdate API, and each frame turns its input into
+/// a `state.Input`, ticks the game and renders it. Control flows one way: main -> game -> systems.
 
-const CHAR_ENEMY_COLL_RADIUS_SQRD = consts.CHAR_ENEMY_COLL_RADIUS * consts.CHAR_ENEMY_COLL_RADIUS;
+/// Memory. Everything is carved from one static buffer up front; nothing is allocated from the heap.
+/// app (whole run) -> level (reset when a level loads) and frame (reset at the start of every frame)
+const APP_MEMORY_SIZE = 256 * 1024;
+const LEVEL_ARENA_SIZE = 64 * 1024;
+const FRAME_ARENA_SIZE = 64 * 1024;
+var app_memory: [APP_MEMORY_SIZE]u8 = undefined;
+var app_arena: Arena = undefined;
+var level_arena: Arena = undefined;
+var frame_arena: Arena = undefined;
 
-/// Common game state
+/// Core data
 var playdate_api: *pd.PlaydateAPI = undefined;
-var camera_pos = Vec2f{ 0, 0 };
-var time_last_tick: u32 = undefined;
-var fixed_mem_buffer: [1024 * 1024]u8 = undefined;
+var assets: renderer.Assets = undefined;
+var level: level_loader.Level = undefined;
+var game_state: state.GameState = .{};
 
-/// Input state
-var crank_angle_since_fire: f32 = 0.0;
-var last_fire_time_ms: u32 = 0;
+/// Frame timing and requests from outside the frame loop
+var time_last_tick_ms: u32 = 0;
+var restart_requested = false;
 
 /// Debug logging
 const debug_logging = builtin.mode == .debug;
 var last_log_time_ms: u32 = 0;
-
-/// Player
-var player_world_pos: Vec2f = undefined;
-var player_velocity: Vec2f = undefined;
-var player_facing_dir: Vec2f = undefined;
-var player_health: u8 = undefined;
-var player_score: u64 = undefined;
-var player_kill_streak: u32 = undefined;
-
-/// Enemy entities
-var enemy_world_positions: SparseArray(Vec2f, u8) = undefined;
-var enemy_velocities: SparseArray(Vec2f, u8) = undefined;
-var enemy_healths: SparseArray(u8, u8) = undefined;
-var enemy_free_id_stack: [consts.MAX_ENEMIES]u8 = undefined;
-var enemy_free_id_count: u32 = undefined; //Number of ids on the stack, the top is at count - 1
-var bullet_collision_info: [consts.MAX_ENEMIES]bullet_sys.CollisionInfo = undefined;
-var enemy_collision_info: [consts.MAX_ENEMIES]u8 = undefined;
-
-/// Environment
-var level_map_data: level_loader.LevelMapData = undefined;
+var last_render_stats: renderer.RenderStats = .{ .drawn = 0 };
 
 /// Exposed via the shared library to the Playdate runner which forwards on events
 ///
 pub export fn eventHandler(playdate: [*c]pd.PlaydateAPI, event: pd.PDSystemEvent, _: c_ulong) callconv(.c) c_int {
     switch (event) {
         pd.kEventInit => gameInit(playdate),
+        //Don't count the time spent paused or in the menu as a frame
+        pd.kEventResume, pd.kEventUnlock => resetFrameTimer(),
         else => {},
     }
     return 0;
 }
 
-/// A stack of ids that can be pushed and popped when entities are created or destroyed
-///
-fn createEnemyIds() [consts.MAX_ENEMIES]u8 {
-    var id_stack: [consts.MAX_ENEMIES]u8 = undefined;
-    var i: u8 = 0;
-    while (i < consts.MAX_ENEMIES) : (i += 1) {
-        id_stack[i] = consts.MAX_ENEMIES - i - 1;
-    }
-
-    return id_stack;
-}
-
-/// Upfront setup - allocates all the memory required and loads and initialises all assets and pools
+/// Upfront setup - carves out the memory arenas and loads all assets
 ///
 fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     playdate_api = playdate;
@@ -88,7 +59,9 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
         if (playdate_api.file.*.open.?("log.txt", pd.kFileWrite)) |h| _ = playdate_api.file.*.close.?(h);
     }
 
-    var fba = std.heap.FixedBufferAllocator.init(&fixed_mem_buffer);
+    app_arena = Arena.init("app", &app_memory);
+    level_arena = app_arena.subArena("level", LEVEL_ARENA_SIZE);
+    frame_arena = app_arena.subArena("frame", FRAME_ARENA_SIZE);
 
     sys.setUpdateCallback.?(gameUpdateWrapper, null);
     _ = sys.addMenuItem.?("Restart Level", restartLevel, null);
@@ -96,157 +69,72 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     playdate_api.display.*.setRefreshRate.?(0); //Temp unleashing the frame limit to measure performance
 
     //TODO: Decide if we change level on restart and also decide if we have shared bitmap atlas
-    level_map_data = level_loader.loadLevelMap(playdate_api, "lvl1.bin", fba.allocator());
+    loadLevel("lvl1.bin");
+    assets = renderer.loadAssets(playdate_api, "lvl1");
 
-    //Create the entity pools
-    //TODO: No point having multiple lookups when they are shared across all arrays
-    enemy_world_positions = SparseArray(Vec2f, u8).init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("init: Failed to init enemy pos"); //todo @errorName
-    enemy_velocities = SparseArray(Vec2f, u8).init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("init: Failed to init enemy vels");
-    enemy_healths = SparseArray(u8, u8).init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("init: Failed to init enemy healths");
-
-    //Init the systems
-    renderer.init(playdate_api, level_map_data.bg_size_pixels, level_map_data.obj_world_positions.len, fba.allocator()) catch @panic("init: Failed to init renderer");
-    enemy_spawn_sys.init(consts.MAX_ENEMIES);
-    enemy_move_sys.init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("reinit: Failed to init enemy move sys");
-
-    //Load the assets
-    renderer.loadAssets("lvl1");
-
-    time_last_tick = sys.getCurrentTimeMilliseconds.?();
-    reset();
-    debugLog("init complete", .{});
+    game_state.reset();
+    resetFrameTimer();
+    debugLog("init complete: level arena {d}/{d} bytes, L1 hot set budget {d} bytes (collision {d}, {d} per sprite drawn)", .{ level_arena.used(), level_arena.capacity(), memory.HOT_SET_BUDGET, state.COLLISION_HOT_SET_BYTES, renderer.BYTES_PER_DRAW_ITEM });
 }
 
-/// Called from the system menu by the user if they want to restart
+/// Replace the current level, releasing everything the previous one allocated
+///
+fn loadLevel(file_name: [*:0]const u8) void {
+    level_arena.reset();
+    level = level_loader.load(playdate_api, file_name, &level_arena) catch |err| std.debug.panic("loadLevel: {s}", .{@errorName(err)});
+}
+
+/// Called from the system menu by the user if they want to restart. Handled at the start of the next frame
 ///
 fn restartLevel(_: ?*anyopaque) callconv(.c) void {
-    reset();
+    restart_requested = true;
 }
 
-/// Reinit this on game restart
-///
-fn reset() void {
-    player_world_pos = @splat(0);
-    player_velocity = @splat(0);
-    player_facing_dir = @splat(0);
-    player_health = 100;
-    player_score = 0;
-    player_kill_streak = 0;
-
-    camera_pos = @splat(0);
-
-    renderer.reset();
-    enemy_spawn_sys.reset();
-    enemy_move_sys.reset();
-    bullet_sys.reset();
-
-    enemy_world_positions.clear();
-    enemy_velocities.clear();
-    enemy_healths.clear();
-
-    enemy_free_id_stack = createEnemyIds();
-    enemy_free_id_count = consts.MAX_ENEMIES;
+fn resetFrameTimer() void {
+    time_last_tick_ms = playdate_api.system.*.getCurrentTimeMilliseconds.?();
 }
 
-/// Ticks the main game update and render loops
+/// Ticks the main game update and render once per frame
 ///
 fn gameUpdateWrapper(_: ?*anyopaque) callconv(.c) c_int {
-    update();
-    renderer.render(camera_pos, player_world_pos, player_facing_dir, enemy_world_positions.toDataSlice(), enemy_velocities.toDataSlice(), level_map_data.obj_world_positions, level_map_data.obj_bitmap_indices, player_score, player_health, bullet_sys.getRemainingBullets());
+    const sys = playdate_api.system.*;
+    frame_arena.reset();
+
+    if (restart_requested) {
+        restart_requested = false;
+        game_state.reset();
+    }
+
+    const now_ms = sys.getCurrentTimeMilliseconds.?();
+    const dt = @min(@as(f32, @floatFromInt(now_ms -% time_last_tick_ms)) * 0.001, consts.MAX_FRAME_DT);
+    time_last_tick_ms = now_ms;
+
+    if (game.tick(&game_state, &level, readInput(), dt, &frame_arena) == .player_died) {
+        game_state.reset();
+    }
+    last_render_stats = renderer.render(playdate_api, &assets, &game_state, &level, &frame_arena);
+
+    logStatus(now_ms);
     return 1; //Inform the SDK we have stuff to render
 }
 
-/// The main update loop that drives the various systems
+/// Snapshot this frame's buttons and crank
 ///
-fn update() void {
+fn readInput() state.Input {
     const sys = playdate_api.system.*;
-
-    const time_this_tick = sys.getCurrentTimeMilliseconds.?();
-    const dt = @as(f32, @floatFromInt(time_this_tick - time_last_tick)) * 0.001;
-    time_last_tick = time_this_tick;
-
     var current: pd.PDButtons = undefined;
     var pushed: pd.PDButtons = undefined;
     var released: pd.PDButtons = undefined;
     sys.getButtonState.?(&current, &pushed, &released);
 
-    //Spawn any new enemies
-    const spawned = enemy_spawn_sys.update(dt, enemy_world_positions.len, player_world_pos);
-    for (spawned) |s| {
-        enemy_free_id_count -= 1;
-        const ent_id = enemy_free_id_stack[enemy_free_id_count];
-
-        enemy_world_positions.insertFirst(ent_id, s.world_pos) catch @panic("spawn: Failed to insert pos");
-        enemy_velocities.insertFirst(ent_id, Vec2f{ 0, 0 }) catch @panic("spawn: Failed to insert vel");
-        enemy_healths.insertFirst(ent_id, 100) catch @panic("spawn: Failed to insert health");
-        enemy_move_sys.startSeeking(ent_id) catch @panic("spawn: Failed to start seeking");
-    }
-
-    //Move the player based on input and move any enemies that are in the seeking or bumping back state
-    player_move_sys.update(current, level_map_data.collision_grid, dt, &player_world_pos, &player_velocity);
-    enemy_move_sys.update(player_world_pos, dt, enemy_world_positions, enemy_velocities) catch |err| @panic(@errorName(err));
-
-    //Move any fired projectiles and check for collisions
-    var num_hits: u8 = 0;
-    bullet_sys.update(dt, enemy_world_positions, bullet_collision_info[0..], &num_hits) catch @panic("bulletSys: Update error");
-
-    //Apply any bullet -> Enemy collisions that push the enemy back, deduct health and ultimately destroy
-    for (bullet_collision_info[0..num_hits]) |info| {
-        if (enemy_healths.tryLookup(info.entity_id)) |current_health| {
-            if (current_health <= consts.DMG_PER_HIT) {
-                //Enemy is dead - TODO: Graceful death and not just dissappear
-                enemy_world_positions.remove(info.entity_id) catch @panic("enemyDestroy: Failed to remove pos");
-                enemy_velocities.remove(info.entity_id) catch @panic("enemyDestroy: Failed to remove vel");
-                enemy_healths.remove(info.entity_id) catch @panic("enemyDestroy: Failed to remove health");
-                enemy_move_sys.remove(info.entity_id) catch @panic("enemyDestroy: Failed to remove from move sys");
-                player_kill_streak += 1;
-                player_score = @min(player_score + 10 * player_kill_streak, consts.MAX_SCORE);
-
-                enemy_free_id_stack[enemy_free_id_count] = info.entity_id;
-                enemy_free_id_count += 1;
-            } else {
-                const new_health = current_health - consts.DMG_PER_HIT;
-                enemy_healths.insert(info.entity_id, new_health) catch @panic("enemyHit: Failed to update health");
-                const pos = enemy_world_positions.lookup(info.entity_id) catch @panic("enemyHit: failed to find pos");
-                enemy_move_sys.startBumpBack(info.entity_id, pos, info.impact_dir, consts.BUMP_DISTANCE) catch @panic("enemyHit: Failed to bump back");
-            }
-        }
-    }
-
-    //Check for collisions with enemies and player and deduct damage
-    var num_hits_on_player: u8 = undefined;
-    checkPlayerCollision(player_world_pos, enemy_world_positions, enemy_collision_info[0..], &num_hits_on_player) catch @panic("playerCollision: Failed collision check");
-    const deduct_health = @min(num_hits_on_player * 5, player_health);
-    if (deduct_health > 0) {
-        player_health -= deduct_health;
-        player_kill_streak = 0;
-        renderer.playerHitFlash(consts.FLASH_HIT_EFFECT_DURATION);
-        if (player_health == 0) {
-            reset();
-            return;
-        }
-    }
-    for (enemy_collision_info[0..num_hits_on_player]) |enemy_id| {
-        const pos = enemy_world_positions.lookup(enemy_id) catch @panic("playerHit: failed to find pos");
-        const vel = enemy_velocities.lookup(enemy_id) catch @panic("playerHit: failed to find vel");
-        enemy_move_sys.startBumpBack(enemy_id, pos, maths.normaliseSafe(vel, Vec2f{ 1, 0 }) * @as(Vec2f, @splat(-1)), consts.BUMP_DISTANCE_SMALL) catch @panic("playerHit: Failed to bump back");
-    }
-
-    //Now that the enemy positions have been updated - the player can re-evaluate the hottest one to target
-    const target_dir = auto_target_sys.calculateHottestTargetDir(player_world_pos, enemy_world_positions.toDataSlice()) orelse maths.normaliseSafe(player_velocity, Vec2f{ 1, 0 });
-
-    //Fire
-    const should_fire = firingSystemUpdate(current, sys);
-    if (should_fire) {
-        bullet_sys.fire(player_world_pos, target_dir);
-    }
-
-    camera_pos = player_world_pos; //Follow the player directly for now
-    player_facing_dir = target_dir; //Player facing the way they are firing
-
-    renderer.update(dt);
-
-    logStatus(time_this_tick);
+    return .{
+        .left = (current & pd.kButtonLeft) != 0,
+        .right = (current & pd.kButtonRight) != 0,
+        .up = (current & pd.kButtonUp) != 0,
+        .down = (current & pd.kButtonDown) != 0,
+        .fire_held = (current & (pd.kButtonA | pd.kButtonB)) != 0,
+        .crank_delta = sys.getCrankChange.?(),
+    };
 }
 
 /// Once a second write a status line so a run can be inspected from the logs
@@ -255,7 +143,8 @@ fn logStatus(now_ms: u32) void {
     if (!debug_logging or now_ms -% last_log_time_ms < 1000) return;
     last_log_time_ms = now_ms;
 
-    debugLog("t={d}ms enemies={d} health={d} score={d} pos=({d:.2},{d:.2}) bullets={d} crank={d:.1}", .{ now_ms, enemy_world_positions.len, player_health, player_score, player_world_pos[0], player_world_pos[1], bullet_sys.getRemainingBullets(), playdate_api.system.*.getCrankAngle.?() });
+    const p = game_state.player;
+    debugLog("t={d}ms enemies={d} health={d} score={d} pos=({d:.2},{d:.2}) bullets={d} crank={d:.1} frame_mem={d} drawn={d}", .{ now_ms, game_state.enemies.len, p.health, p.score, p.pos[0], p.pos[1], game_state.bullets.magazine, playdate_api.system.*.getCrankAngle.?(), frame_arena.high_water, last_render_stats.drawn });
 }
 
 /// Debug builds only: write to the Playdate console and append to `log.txt` in the game's data folder.
@@ -264,7 +153,7 @@ fn logStatus(now_ms: u32) void {
 fn debugLog(comptime fmt: []const u8, args: anytype) void {
     if (!debug_logging) return;
 
-    var buf: [160]u8 = undefined;
+    var buf: [192]u8 = undefined;
     const msg = std.mem.printSentinel(&buf, "until-none: " ++ fmt, args, 0) catch return;
     playdate_api.system.*.logToConsole.?("%s", msg.ptr);
 
@@ -273,44 +162,4 @@ fn debugLog(comptime fmt: []const u8, args: anytype) void {
     defer _ = file.close.?(handle);
     _ = file.write.?(handle, msg.ptr, @intCast(msg.len));
     _ = file.write.?(handle, "\n", 1);
-}
-
-/// Fire everytime the crank moves through 60 degrees (6 bullets per revolution)
-/// Alternatively fire once the buttons have been held down long enough
-///
-fn firingSystemUpdate(current_input: pd.PDButtons, sys: pd.playdate_sys) bool {
-    if ((current_input & pd.kButtonA) > 0 or (current_input & pd.kButtonB) > 0) {
-        const now_ms = sys.getCurrentTimeMilliseconds.?();
-        const dt = now_ms - last_fire_time_ms;
-        if (dt >= consts.FIRE_BUTTON_DELAY_MS) {
-            last_fire_time_ms = now_ms;
-            return true;
-        }
-    }
-
-    const crank_delta = sys.getCrankChange.?();
-    if (crank_delta >= 0) {
-        crank_angle_since_fire += crank_delta;
-        if (crank_angle_since_fire >= consts.FIRE_ANGLE_DELTA) {
-            //Fire
-            crank_angle_since_fire -= consts.FIRE_ANGLE_DELTA;
-            return true;
-        }
-    }
-
-    return false;
-}
-
-/// Check number of collisions between enemies and player
-///
-fn checkPlayerCollision(player_pos: Vec2f, enemy_positions: SparseArray(Vec2f, u8), collision_data: []u8, num_collisions: *u8) !void {
-    num_collisions.* = 0;
-
-    for (enemy_positions.toDataSlice(), 0..) |enemy_pos, enemy_idx| {
-        const delta = enemy_pos - player_pos;
-        if (maths.magnitudeSqrd(delta) <= CHAR_ENEMY_COLL_RADIUS_SQRD) {
-            collision_data[num_collisions.*] = try enemy_positions.lookupKeyByIndex(enemy_idx);
-            num_collisions.* += 1;
-        }
-    }
 }

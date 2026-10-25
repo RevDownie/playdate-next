@@ -8,18 +8,23 @@ const Vec2f = @Vector(2, f32);
 /// 1m = 128 pixels (consts.METRES_TO_PIXELS)
 ///
 pub fn worldSpaceToScreenSpace(camera_pos: Vec2f, world_pos: []const Vec2f, screen_pos: []Vec2i, screen_width: i32, screen_height: i32) void {
-    const half_width = screen_width >> 1;
-    const half_height = screen_height >> 1;
-
-    var i: usize = 0;
-    while (i < world_pos.len) : (i += 1) {
-        //World to Camera
-        const cam_space = world_pos[i] - camera_pos;
-
-        //Camera to Screen
-        const screen_posf = Vec2f{ cam_space[0] * consts.METRES_TO_PIXELS + @as(f32, @floatFromInt(half_width)), (cam_space[1] * consts.METRES_TO_PIXELS - @as(f32, @floatFromInt(half_height))) * -1 };
-        screen_pos[i] = Vec2i{ @intFromFloat(screen_posf[0]), @intFromFloat(screen_posf[1]) };
+    for (world_pos, screen_pos[0..world_pos.len]) |wp, *sp| {
+        sp.* = worldPointToScreen(camera_pos, wp, screen_width, screen_height);
     }
+}
+
+/// Single point version of `worldSpaceToScreenSpace`, for building draw lists without a temporary buffer
+///
+pub inline fn worldPointToScreen(camera_pos: Vec2f, world_pos: Vec2f, screen_width: i32, screen_height: i32) Vec2i {
+    const half_width: f32 = @floatFromInt(screen_width >> 1);
+    const half_height: f32 = @floatFromInt(screen_height >> 1);
+
+    //World to Camera
+    const cam_space = world_pos - camera_pos;
+
+    //Camera to Screen
+    const screen_posf = Vec2f{ cam_space[0] * consts.METRES_TO_PIXELS + half_width, (cam_space[1] * consts.METRES_TO_PIXELS - half_height) * -1 };
+    return Vec2i{ @intFromFloat(screen_posf[0]), @intFromFloat(screen_posf[1]) };
 }
 
 test "[graphics_coords] worldSpaceToScreenSpace - metre conversion" {

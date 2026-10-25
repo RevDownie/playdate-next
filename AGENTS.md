@@ -36,7 +36,7 @@ The simulator is left running afterwards; stop it with `Stop-Process -Name Playd
 Game logging: `debugLog(fmt, args)` in `src/main.zig` (Debug builds only) writes to the in-simulator console (the `>_` button) and appends to `log.txt` in the game's data folder, `%PLAYDATE_SDK_PATH%\Disk\Data\com.downie.next\log.txt` (truncated on every start). A status line (enemies, health, score, player pos) is written once a second. `logToConsole` output is NOT available on stdout/stderr, hence the file. Release builds do no logging.
 
 Notes:
-- Debug builds fill `undefined` memory with `0xaa`, which exposes use-after-remove bugs that Release hides (e.g. iterating a `SparseArray` while removing from it). Panics report the error name via `@errorName`.
+- Debug builds fill `undefined` memory with `0xaa`, which exposes use-after-remove bugs that Release hides (e.g. reading entity data after it was swap-removed, or keeping frame arena memory past the frame; `Arena.reset` also refills with `0xaa`). Panics report the error name via `@errorName`.
 - The simulator has its own screenshot/recording buttons (camera icon) and `Ctrl+S`-style capture, but the script's capture is easier to automate.
 
 ### Driving the game with input (for agents)
@@ -57,8 +57,8 @@ Steps run in order, comma separated:
 How it works / gotchas:
 - Buttons are Windows key messages posted to the simulator window (no focus needed). Simulator bindings: arrows = D-pad, **`A` key = B button, `S` key = A button**. Arrow keys must carry the "extended key" bit (handled in `tools/sim-common.ps1`).
 - The crank is the mouse wheel: each notch is 4 degrees (`$CrankDegreesPerNotch`, calibrated against `getCrankAngle`; the log's `crank=` field confirms it).
-- Verify results from the log line (`pos`, `bullets`, `health`, `score`, `crank`), not only screenshots. World +y is up: `down` decreases y. Holding A or B fires every `FIRE_BUTTON_DELAY_MS` (500ms).
-- The player dies in ~10s if left alone (enemies spawn on top of them) and the game resets (health back to 100, bullets 60, position 0,0), which can confuse a long test. Keep sequences short or check `health`.
+- Verify results from the log line (`pos`, `bullets`, `health`, `score`, `crank`), not only screenshots. World +y is up: `down` decreases y. Holding A or B fires every `FIRE_BUTTON_DELAY` (0.5s).
+- The player dies if left alone (enemies spawn around them and close in; contact damage is 5 per touch) and the game resets (health back to 100, bullets 60, position 0,0), which can confuse a long test. Keep sequences short or check `health`.
 - The simulator window takes ~3s to appear; use `-Seconds 4` or more with `tools/sim.ps1` if you want the launch screenshot.
 - Don't pipe `tools/sim.ps1` into something that waits for EOF (e.g. `| tail`): the simulator inherits the pipe and stays alive, so the command never returns. Redirect to a file (`> out.txt`) or use `| head -1`.
 - Debug builds also reach `logs/sim-stdout.log` (console output, flushed late); prefer the game's `log.txt` for timing.
@@ -75,17 +75,20 @@ There is no build step for this yet (it is on the README TODO list). Manually:
    (Or sideload the `.pdx` through play.date/sideload, or drag it to the simulator's "Upload Game to Device".)
 
 ### Tests
-`zig build test` runs the unit tests in `src/maths.zig`, `src/graphics_coords.zig` and `src/sparse_array.zig` on the host. Output is silent on success; add `--summary all` to see what ran. Other files are not unit tested (they depend on the Playdate C API). Add new test files to the list in `build.zig`.
+`zig build test` runs the unit tests on the host for every module that doesn't need the Playdate C API: the maths helpers, memory arenas, game state, level parsing, each simulation system and `game.zig` (whose tests run the whole simulation at worst-case enemy/bullet counts). Output is silent on success; add `--summary all` to see what ran. `main.zig` and `renderer.zig` are not unit tested (they use the Playdate API). Add new test files to the list in `build.zig`.
 
 ## Layout
 - `build.zig` - build graph (see below)
-- `src/main.zig` - entry point. Exports `eventHandler` (called by the Playdate runtime), owns global game state, `gameInit`, `update` and the frame loop (`gameUpdateWrapper`).
+- `src/main.zig` - platform layer and entry point. Exports `eventHandler` (called by the Playdate runtime), owns the memory arenas, the `GameState`, the loaded level and assets; `gameInit` loads everything, and `gameUpdateWrapper` runs each frame: reset frame arena -> read input -> `game.tick` -> `renderer.render`. Restart (menu) and player death reset the state at frame boundaries.
+- `src/game.zig` - the orchestrator. `tick` runs every simulation system in one fixed, linear order on the data it is given. No Playdate API, so it is host-testable.
+- `src/game_state.zig` - all mutable simulation data: `Input`, `Player`, `Enemies` and `Bullets` (fixed-capacity structure-of-arrays), `Trigger`, `Spawner`, `Hit`.
+- `src/memory.zig` - `Arena`, a bump allocator over a fixed buffer that panics with its name when full.
 - `src/playdate.zig` + `src/playdate_c.h` - Playdate C API (`pd_api.h`) translated via the build's translate-c step and exposed as `@import("playdate").api`. The build supplies it to `main.zig` as the `playdate_c` module import.
-- Systems (plain modules with module-level state and `init`/`reset`/`update`):
+- Systems are stateless functions that take exactly the data they work on (no module-level state, no system imports another):
   - `player_movement_system.zig`, `enemy_movement_system.zig` (seek + bump-back), `enemy_spawn_system.zig`
-  - `bullet_system.zig` (pooled bullets, bullet/enemy collisions), `auto_targetting_system.zig`
-  - `renderer.zig` (bitmap tables, depth sorting by screen y, HUD), `animation.zig` (facing-direction frames, walk bob)
-- Data/helpers: `sparse_array.zig` (dense data + key lookup, used for enemy components), `collision_grid.zig`, `level_loader.zig` (reads `lvl1.bin`), `maths.zig`, `graphics_coords.zig` (world metres -> screen pixels), `tweak_constants.zig` (gameplay tuning), `bitmap_descs.zig` (**autogenerated** by `convert_raw.py`).
+  - `bullet_system.zig` (fire/reload, move, bullet/enemy collisions), `combat_system.zig` (apply bullet hits and enemy contact damage), `firing_system.zig` (crank/button trigger), `auto_targetting_system.zig`
+  - `renderer.zig` (loads `Assets`, depth sorting by screen y, bullets, HUD), `animation.zig` (facing-direction frames, walk bob)
+- Data/helpers: `collision_grid.zig` (out of bounds counts as blocked), `level_loader.zig` (`load` reads a level file into the level arena, `parse` validates and decodes it), `maths.zig`, `graphics_coords.zig` (world metres -> screen pixels), `tweak_constants.zig` (gameplay tuning), `bitmap_descs.zig` (**autogenerated** by `convert_raw.py`).
 - Assets: `images/` (1-bit sprites/tables, copied into the pdx), `levels/` (binary level files), `pdxinfo`. Sources: `raw-images/`, `raw-levels/`, `map-tiles/` (Tiled maps).
 - `convert_raw.py <imagemagick path>` - converts `raw-images/` to 1-bit sprites in `images/` and regenerates `src/bitmap_descs.zig`. `convert_tilemaps.py` - converts Tiled JSON in `map-tiles/` to `levels/*.bin`.
 
@@ -97,15 +100,38 @@ There is no build step for this yet (it is on the README TODO list). Manually:
 - Whatever is in `zig-out/lib` ends up in the pdx, so stale files there get shipped; delete `zig-out` if in doubt.
 - Occasional `unable to load "<std file>": Unexpected` errors from the compiler are transient - just re-run.
 
+## Target hardware (design against Rev A, the weakest)
+| | Spec | What it means for the code |
+|---|---|---|
+| CPU | Rev A: STM32F746, Arm Cortex-M7 at 168 MHz. Rev B: a different vendor's Cortex-M7 at the same clock (cache sizes unconfirmed, assumed no smaller) | Single core, in-order-ish, no SIMD worth relying on. Budget per frame at 30 FPS is ~33ms, shared with the OS and the display update |
+| FPU | Single precision only (`fp_armv8d16sp`) | Use `f32` everywhere. Any `f64` maths (including `std.math` calls on `f64` or float literals that resolve to `f64` at runtime) falls back to slow software emulation |
+| L1 data cache | **4 KB**, 32 byte lines | Constants in `src/memory.zig`: `L1_DCACHE_SIZE`, `CACHE_LINE_SIZE`, `HOT_SET_BUDGET` (2 KB). See the rules below |
+| L1 instruction cache | **4 KB** | The frame loop's code competes for it. Keep hot loops small and simple, avoid heavy generic instantiation or forced inlining in them, and prefer `ReleaseSmall` unless `ReleaseFast` measures faster on device |
+| RAM | 16 MB external memory | Plenty of space, but a cache miss to it is expensive. Size matters less than access pattern |
+| Display | 400x240, 1-bit, refresh up to 50 Hz | Shipping target is a locked 30 FPS. Drawing is done by the SDK into a 1-bit framebuffer; overdraw and the number of draw calls cost more than the maths around them |
+| Storage / load | Flash, assets read through the SDK file API | Pre-convert assets offline (`convert_*.py`), read each file once at load into an arena |
+
+### Cache rules for data layouts
+- **Revisited data must fit `HOT_SET_BUDGET` (half the D-cache)**: anything a loop re-reads per outer iteration or accesses in random order, e.g. the enemy positions re-read for every bullet, or the draw list read back in sorted order. The other half is left for the stack, the SDK and framebuffer writes.
+- **Streamed data only needs to be dense**: structure-of-arrays with no padding and no cold fields mixed in, so every 32 byte line fetched is fully used (4 `Vec2f`, 8 `f32`, 32 `u8`).
+- **Split hot from cold**: fields only read in rare cases live in their own arrays (e.g. `Enemies.bump_start`/`bump_offset` are only touched while bumping; `Bullets.dir` is read on a hit, not per collision test).
+- **Enforce budgets at compile time** where the counts are constant: `state.COLLISION_HOT_SET_BYTES` and the renderer's character draw list both `@compileError` if they outgrow the budget. When adding a hot loop, add the same kind of check.
+- **Arrays in entity stores start on a cache line** (`align(memory.CACHE_LINE_SIZE)`).
+- **Smallest types that fit, no pointers in per-entity or per-frame records**: indices or enums into small tables instead (the renderer's `DrawItem` is 8 bytes: `i16` screen position, `u8` frame, `Sheet` enum; `animation.BitmapFrame` is 2 bytes).
+- **Cull before you sort or draw**: only on-screen sprites enter the draw list, so its size follows what is visible rather than the level size.
+- **Sort plain integer keys, not indices compared through another array**: the draw list sorts packed `u32` keys (depth << 16 | index).
+- The debug status line reports `frame_mem` (frame arena high-water mark) and `drawn` (sprites in the draw list) to keep an eye on these. At 100 enemies `drawn` is ~110, which is ~1.3 KB of draw list.
+- Verify on device: the simulator runs on a desktop CPU with megabytes of cache and hides all of this.
+
 ## Design principles (these take priority over everything below)
-- **Data-oriented design.** Model the game as data transformed by systems, not as objects with behaviour. Prefer plain structs and flat arrays (structure-of-arrays where it helps) over per-entity objects, pointers or hierarchies. Systems iterate contiguous data; per-entity state lives in parallel arrays keyed by id (see `SparseArray`).
-- **Simple, efficient data structures with layouts chosen for the hardware.** The target is a Cortex-M7 with small caches and a single-precision FPU: keep hot data compact and contiguous, use the smallest integer types that fit (`u8` ids, `u16` indices), avoid pointer chasing and per-frame allocation, keep iteration linear and cache friendly, and reach for the simplest structure that works before anything clever. Measure before adding complexity.
+- **Data-oriented design.** Model the game as data transformed by systems, not as objects with behaviour. Prefer plain structs and flat arrays (structure-of-arrays where it helps) over per-entity objects, pointers or hierarchies. Systems iterate contiguous data; per-entity state lives in parallel arrays indexed by entity (see `Enemies` in `game_state.zig`).
+- **Simple, efficient data structures with layouts chosen for the hardware.** The target is a Cortex-M7 with a 4 KB data cache and a single-precision FPU (see Target hardware): keep hot data compact and contiguous, use the smallest integer types that fit (`u8` ids, `u16` indices), avoid pointer chasing and per-frame allocation, keep iteration linear and cache friendly, and reach for the simplest structure that works before anything clever. Measure before adding complexity.
 - **Solid, stable 30 FPS on device with no runtime frame drops.** Every frame must fit its budget (~33ms) in the worst case, not just on average: no allocation, file IO, sorting of unbounded data or other spiky work in the frame loop, and all pools are fixed size with worst-case counts tested (max enemies, max bullets). Do not trade a stable frame time for a higher average. Check performance on device, not only in the simulator (the simulator runs on a desktop CPU and hides problems). Note `gameInit` currently calls `setRefreshRate(0)` (uncapped) to measure performance; the shipping target is a locked 30 FPS.
 - **Near-instant load times.** Do all expensive setup once, up front, with fixed buffers, and keep assets small and in the formats the device loads fastest (pre-converted 1-bit images and compact binary levels, produced offline by the `convert_*.py` scripts rather than parsed or processed at runtime). Avoid runtime asset processing or any startup work that scales with content size.
 
 ## Conventions
-- Memory: no heap on device. `main.zig` carves everything from a fixed 1 MiB buffer via `FixedBufferAllocator` during `gameInit`; pools are fixed size (`MAX_ENEMIES` etc. in `tweak_constants.zig`). Failures `@panic` with a short context message.
+- Memory: no heap. Pools with a constant capacity (`MAX_ENEMIES`, `BULLET_POOL_SIZE` in `tweak_constants.zig`) are plain arrays inside `GameState`. Anything sized at runtime comes from an `Arena` (`memory.zig`) matching its lifetime: the **app** arena (a static buffer in `main.zig`) is split into the **level** arena (reset when a level loads: level objects, collision grid) and the **frame** arena (reset at the start of every frame: hit lists, render buffers). Never keep frame arena memory across frames. Running out `@panic`s with the arena name; the status log line reports the frame arena's high-water mark (`frame_mem`).
 - Vectors are `@Vector(2, f32)` (`Vec2f`) in world metres; `METRES_TO_PIXELS` converts to screen.
-- Entity ids are `u8`, recycled through a free-id stack in `main.zig`.
+- Entities have no ids: an entity is its index into its store, packed into `0..len`. To delete one, flag it (enemy `health = 0`, bullet `lifetime <= 0`) and let `removeDead` swap-remove the flagged ones once per frame; indices (e.g. in `Hit`) are only valid until then.
 - Call the Playdate API through function pointers on the `PlaydateAPI` struct (`sys.getCurrentTimeMilliseconds.?()`).
 - Comments use `///` doc comments on functions, matching existing style.

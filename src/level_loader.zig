@@ -1,73 +1,129 @@
 const std = @import("std");
 const pd = @import("playdate.zig").api;
 const consts = @import("tweak_constants.zig");
-const cgrid = @import("collision_grid.zig");
+const CollisionGrid = @import("collision_grid.zig").CollisionGrid;
+const Arena = @import("memory.zig").Arena;
 
 const Vec2f = @Vector(2, f32);
 const Vec2i = @Vector(2, i32);
 
-pub const LevelMapData = struct {
-    obj_world_positions: []Vec2f,
-    obj_bitmap_indices: []u8,
-    collision_grid: cgrid.CollisionGrid,
+/// Everything loaded for a level. All slices live in the level arena
+///
+pub const Level = struct {
+    obj_world_positions: []const Vec2f,
+    obj_bitmap_indices: []const u8,
+    collision_grid: CollisionGrid,
     bg_size_pixels: Vec2i,
 };
 
-/// Load the object data for the level map converting the co-ords into isometric world positions
-/// and returning the bitmap table indices and collision map
+pub const Error = error{
+    FileOpenFailed,
+    FileReadFailed,
+    TruncatedHeader,
+    TruncatedObject,
+    EmptyGrid,
+    CellOutOfRange,
+    InvalidSpriteId,
+};
+
+const HEADER_SIZE = 4;
+const OBJ_SIZE = 3;
+
+/// Read the level file into the level arena and parse it
 ///
-pub fn loadLevelMap(playdate_api: *pd.PlaydateAPI, level_file_name: [*c]const u8, allocator: std.mem.Allocator) LevelMapData {
+pub fn load(playdate_api: *pd.PlaydateAPI, level_file_name: [*:0]const u8, arena: *Arena) Error!Level {
     const file = playdate_api.file.*;
 
-    const lvl_file = file.open.?(level_file_name, pd.kFileRead);
+    var stat: pd.FileStat = undefined;
+    if (file.stat.?(level_file_name, &stat) != 0) return Error.FileOpenFailed;
+
+    const lvl_file = file.open.?(level_file_name, pd.kFileRead) orelse return Error.FileOpenFailed;
     defer _ = file.close.?(lvl_file);
 
-    var buffer: [1024]u8 = undefined;
-    const data_len = file.read.?(lvl_file, &buffer, 1024);
-    std.debug.assert(data_len < 1024);
-
-    var read_idx: usize = 0;
-    const grid_width = buffer[read_idx];
-    const grid_width_half = grid_width / 2;
-    read_idx += 1;
-    const grid_height = buffer[read_idx];
-    const grid_height_half = grid_height / 2;
-    read_idx += 1;
-    const cell_width = buffer[read_idx];
-    read_idx += 1;
-    const cell_height = buffer[read_idx];
-    read_idx += 1;
-
-    const num_objs: usize = (@as(usize, @intCast(data_len)) - 4) / 3;
-    var world_positions = allocator.alloc(Vec2f, num_objs) catch @panic("loadLevelMap: Out of memory for world pos");
-    var bitmap_indices = allocator.alloc(u8, num_objs) catch @panic("loadLevelMap: Out of memory for bitmap indices");
-    var collision_grid = std.StaticBitSet(900).empty; //NOTE: Having weird issues with DynamicBitSet having bits set erroneously
-
-    var write_idx: usize = 0;
-    while (read_idx < data_len) : (write_idx += 1) {
-        const idx = std.mem.readInt(u16, buffer[read_idx..][0..2], .little);
-        collision_grid.set(idx);
-
-        const x = @as(i32, @intCast(idx % grid_width)) - grid_width_half;
-        const y = @as(i32, @intCast(idx / grid_width)) - grid_height_half;
-        world_positions[write_idx] = Vec2f{ @floatFromInt(x * cell_width), @floatFromInt(y * cell_height * -1) } / @as(Vec2f, @splat(consts.METRES_TO_PIXELS));
-        read_idx += 2;
-
-        const sprite_id = buffer[read_idx];
-        bitmap_indices[write_idx] = sprite_id - 1;
-        read_idx += 1;
+    const bytes = arena.alloc(u8, stat.size);
+    var read_len: usize = 0;
+    while (read_len < bytes.len) {
+        const n = file.read.?(lvl_file, bytes[read_len..].ptr, @intCast(bytes.len - read_len));
+        if (n <= 0) return Error.FileReadFailed;
+        read_len += @intCast(n);
     }
 
-    return LevelMapData{
+    return parse(bytes, arena);
+}
+
+/// Parse the level binary (see convert_tilemaps.py) converting the cell co-ords into world positions,
+/// and build the bitmap table indices and collision grid.
+/// Format: u8 grid width, u8 grid height, u8 cell width px, u8 cell height px,
+/// then per object: u16 LE cell index, u8 sprite id (1 based)
+///
+pub fn parse(bytes: []const u8, arena: *Arena) Error!Level {
+    if (bytes.len < HEADER_SIZE) return Error.TruncatedHeader;
+    const grid_width = bytes[0];
+    const grid_height = bytes[1];
+    const cell_width = bytes[2];
+    const cell_height = bytes[3];
+    if (grid_width == 0 or grid_height == 0 or cell_width == 0 or cell_height == 0) return Error.EmptyGrid;
+
+    const obj_bytes = bytes[HEADER_SIZE..];
+    if (obj_bytes.len % OBJ_SIZE != 0) return Error.TruncatedObject;
+    const num_objs = obj_bytes.len / OBJ_SIZE;
+    const num_cells = @as(usize, grid_width) * grid_height;
+
+    const world_positions = arena.alloc(Vec2f, num_objs);
+    const bitmap_indices = arena.alloc(u8, num_objs);
+    const cells = arena.alloc(bool, num_cells);
+    @memset(cells, false);
+
+    const half_w: i32 = grid_width / 2;
+    const half_h: i32 = grid_height / 2;
+    for (0..num_objs) |i| {
+        const obj = obj_bytes[i * OBJ_SIZE ..][0..OBJ_SIZE];
+        const idx = std.mem.readInt(u16, obj[0..2], .little);
+        if (idx >= num_cells) return Error.CellOutOfRange;
+        const sprite_id = obj[2];
+        if (sprite_id == 0) return Error.InvalidSpriteId;
+
+        cells[idx] = true;
+        const x = @as(i32, idx % grid_width) - half_w;
+        const y = @as(i32, idx / grid_width) - half_h;
+        world_positions[i] = Vec2f{ @floatFromInt(x * cell_width), @floatFromInt(-y * cell_height) } / @as(Vec2f, @splat(consts.METRES_TO_PIXELS));
+        bitmap_indices[i] = sprite_id - 1;
+    }
+
+    return Level{
         .obj_world_positions = world_positions,
         .obj_bitmap_indices = bitmap_indices,
-        .collision_grid = cgrid.CollisionGrid{
-            .collision_grid = collision_grid,
+        .collision_grid = .{
+            .cells = cells,
             .width = grid_width,
             .height = grid_height,
             .cell_width = cell_width,
             .cell_height = cell_height,
         },
-        .bg_size_pixels = Vec2i{ @as(i32, @intCast(grid_width)) * cell_width * 2, @as(i32, @intCast(grid_height)) * cell_height * 2 },
+        .bg_size_pixels = Vec2i{ @as(i32, grid_width) * cell_width * 2, @as(i32, grid_height) * cell_height * 2 },
     };
+}
+
+test "[level_loader] parse objects and collision" {
+    var buffer: [1024]u8 = undefined;
+    var arena = Arena.init("level", &buffer);
+    //4x4 grid of 128px cells, an object in cell 0 (top left) with sprite 2
+    const bytes = [_]u8{ 4, 4, 128, 128, 0, 0, 2 };
+    const level = try parse(&bytes, &arena);
+
+    try std.testing.expect(level.obj_world_positions.len == 1);
+    try std.testing.expect(level.obj_bitmap_indices[0] == 1);
+    try std.testing.expect(level.obj_world_positions[0][0] == -2 and level.obj_world_positions[0][1] == 2);
+    try std.testing.expect(level.collision_grid.isOccupied(level.obj_world_positions[0]));
+    try std.testing.expect(!level.collision_grid.isOccupied(Vec2f{ 0, 0 }));
+}
+
+test "[level_loader] parse rejects bad input" {
+    var buffer: [1024]u8 = undefined;
+    var arena = Arena.init("level", &buffer);
+    try std.testing.expectError(Error.TruncatedHeader, parse(&[_]u8{ 4, 4 }, &arena));
+    try std.testing.expectError(Error.EmptyGrid, parse(&[_]u8{ 0, 4, 128, 128 }, &arena));
+    try std.testing.expectError(Error.TruncatedObject, parse(&[_]u8{ 4, 4, 128, 128, 0, 0 }, &arena));
+    try std.testing.expectError(Error.CellOutOfRange, parse(&[_]u8{ 4, 4, 128, 128, 16, 0, 1 }, &arena));
+    try std.testing.expectError(Error.InvalidSpriteId, parse(&[_]u8{ 4, 4, 128, 128, 1, 0, 0 }, &arena));
 }
