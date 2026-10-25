@@ -34,7 +34,7 @@ pub fn update(dt: f32, num_active: usize, player_world_pos: Vec2f) []SpawnData {
     if (next_spawn_timer <= 0.0) {
         //Spawn
         next_spawn_timer = spawn_time;
-        spawn_time -= consts.SPAWN_TIME_REDUCTION;
+        spawn_time = @max(spawn_time - consts.SPAWN_TIME_REDUCTION, consts.MIN_SPAWN_TIME);
         const to_spawn = @min(consts.ENEMIES_PER_SPAWN, max_active_allowed - num_active);
         var i: u32 = 0;
         while (i < to_spawn) : (i += 1) {

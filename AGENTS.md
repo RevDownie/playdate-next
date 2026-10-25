@@ -60,6 +60,8 @@ How it works / gotchas:
 - Verify results from the log line (`pos`, `bullets`, `health`, `score`, `crank`), not only screenshots. World +y is up: `down` decreases y. Holding A or B fires every `FIRE_BUTTON_DELAY_MS` (500ms).
 - The player dies in ~10s if left alone (enemies spawn on top of them) and the game resets (health back to 100, bullets 60, position 0,0), which can confuse a long test. Keep sequences short or check `health`.
 - The simulator window takes ~3s to appear; use `-Seconds 4` or more with `tools/sim.ps1` if you want the launch screenshot.
+- Don't pipe `tools/sim.ps1` into something that waits for EOF (e.g. `| tail`): the simulator inherits the pipe and stays alive, so the command never returns. Redirect to a file (`> out.txt`) or use `| head -1`.
+- Debug builds also reach `logs/sim-stdout.log` (console output, flushed late); prefer the game's `log.txt` for timing.
 - Helpers (`Send-SimKey`, `Send-SimCrank`, `Save-SimScreenshot`) live in `tools/sim-common.ps1` for writing custom scenarios.
 
 ### Device

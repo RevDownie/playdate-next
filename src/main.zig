@@ -49,7 +49,7 @@ var enemy_world_positions: SparseArray(Vec2f, u8) = undefined;
 var enemy_velocities: SparseArray(Vec2f, u8) = undefined;
 var enemy_healths: SparseArray(u8, u8) = undefined;
 var enemy_free_id_stack: [consts.MAX_ENEMIES]u8 = undefined;
-var enemy_free_id_head: u32 = undefined;
+var enemy_free_id_count: u32 = undefined; //Number of ids on the stack, the top is at count - 1
 var bullet_collision_info: [consts.MAX_ENEMIES]bullet_sys.CollisionInfo = undefined;
 var enemy_collision_info: [consts.MAX_ENEMIES]u8 = undefined;
 
@@ -105,7 +105,7 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     enemy_healths = SparseArray(u8, u8).init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("init: Failed to init enemy healths");
 
     //Init the systems
-    renderer.init(playdate_api, level_map_data.bg_size_pixels);
+    renderer.init(playdate_api, level_map_data.bg_size_pixels, level_map_data.obj_world_positions.len, fba.allocator()) catch @panic("init: Failed to init renderer");
     enemy_spawn_sys.init(consts.MAX_ENEMIES);
     enemy_move_sys.init(consts.MAX_ENEMIES, fba.allocator()) catch @panic("reinit: Failed to init enemy move sys");
 
@@ -145,7 +145,7 @@ fn reset() void {
     enemy_healths.clear();
 
     enemy_free_id_stack = createEnemyIds();
-    enemy_free_id_head = consts.MAX_ENEMIES - 1;
+    enemy_free_id_count = consts.MAX_ENEMIES;
 }
 
 /// Ticks the main game update and render loops
@@ -173,8 +173,8 @@ fn update() void {
     //Spawn any new enemies
     const spawned = enemy_spawn_sys.update(dt, enemy_world_positions.len, player_world_pos);
     for (spawned) |s| {
-        const ent_id = enemy_free_id_stack[enemy_free_id_head];
-        enemy_free_id_head -= 1;
+        enemy_free_id_count -= 1;
+        const ent_id = enemy_free_id_stack[enemy_free_id_count];
 
         enemy_world_positions.insertFirst(ent_id, s.world_pos) catch @panic("spawn: Failed to insert pos");
         enemy_velocities.insertFirst(ent_id, Vec2f{ 0, 0 }) catch @panic("spawn: Failed to insert vel");
@@ -202,8 +202,8 @@ fn update() void {
                 player_kill_streak += 1;
                 player_score = @min(player_score + 10 * player_kill_streak, consts.MAX_SCORE);
 
-                enemy_free_id_head += 1;
-                enemy_free_id_stack[enemy_free_id_head] = info.entity_id;
+                enemy_free_id_stack[enemy_free_id_count] = info.entity_id;
+                enemy_free_id_count += 1;
             } else {
                 const new_health = current_health - consts.DMG_PER_HIT;
                 enemy_healths.insert(info.entity_id, new_health) catch @panic("enemyHit: Failed to update health");

@@ -9,8 +9,6 @@ const consts = @import("tweak_constants.zig");
 const Vec2i = @Vector(2, i32);
 const Vec2f = @Vector(2, f32);
 
-const MAX_ENTITIES: u32 = 200;
-
 pub const RenderCommandData = struct {
     bitmap_table: *pd.LCDBitmapTable,
     bitmap_idx: c_int,
@@ -26,18 +24,26 @@ var player_bitmap_table: *pd.LCDBitmapTable = undefined;
 var enemy_bitmap_table: *pd.LCDBitmapTable = undefined;
 var env_obj_bitmap_table: *pd.LCDBitmapTable = undefined;
 
-var render_command_sort_order: [MAX_ENTITIES]u8 = undefined;
-var render_command_data_buffer: [MAX_ENTITIES]RenderCommandData = undefined;
+//Sized once in init to hold the player, the maximum number of enemies and every environment object
+var render_command_sort_order: []u16 = undefined;
+var render_command_data_buffer: []RenderCommandData = undefined;
+var entity_screen_pos: []Vec2i = undefined;
 
 var background_size_pixels: Vec2i = undefined;
 
 var player_hit_flash_timer: ?f32 = null;
 
-/// Setup
+/// Setup - allocates the per frame render buffers up front so nothing is allocated in the frame loop
 ///
-pub fn init(pd_api: *pd.PlaydateAPI, bg_size_pixels: Vec2i) void {
+pub fn init(pd_api: *pd.PlaydateAPI, bg_size_pixels: Vec2i, num_env_objs: usize, allocator: std.mem.Allocator) !void {
     playdate_api = pd_api;
     background_size_pixels = bg_size_pixels;
+
+    const max_entities = 1 + consts.MAX_ENEMIES + num_env_objs; //Player + enemies + environment
+    std.debug.assert(max_entities <= std.math.maxInt(u16));
+    render_command_sort_order = try allocator.alloc(u16, max_entities);
+    render_command_data_buffer = try allocator.alloc(RenderCommandData, max_entities);
+    entity_screen_pos = try allocator.alloc(Vec2i, max_entities);
 }
 
 /// Called on restart
@@ -109,7 +115,6 @@ pub fn render(
     graphics.tileBitmap.?(bg_bitmap, bg_screen_pos[0][0] - @divTrunc(background_size_pixels[0], 2), bg_screen_pos[0][1] - @divTrunc(background_size_pixels[1], 2), background_size_pixels[0], background_size_pixels[1], pd.kBitmapUnflipped);
 
     //---Transform the entities to screen space
-    var entity_screen_pos: [MAX_ENTITIES]Vec2i = undefined;
     var buffer_start: usize = 0;
     var buffer_end: usize = 1;
 
@@ -164,7 +169,7 @@ pub fn render(
     for (sorted_indices, 0..) |_, i| {
         sorted_indices[i] = @intCast(i);
     }
-    std.sort.pdq(u8, sorted_indices, entity_screen_pos[0..buffer_end], compareBackToFront);
+    std.sort.pdq(u16, sorted_indices, entity_screen_pos[0..buffer_end], compareBackToFront);
 
     //---Render the entities
     for (sorted_indices) |idx| {
@@ -193,6 +198,6 @@ pub fn render(
 
 /// Used for depth sorting of an index list against the screen positions
 ///
-fn compareBackToFront(screen_positions: []const Vec2i, a: u8, b: u8) bool {
+fn compareBackToFront(screen_positions: []const Vec2i, a: u16, b: u16) bool {
     return screen_positions[a][1] <= screen_positions[b][1];
 }

@@ -9,6 +9,7 @@ pub const ENEMY_MAX_SPEED: f32 = 1.2;
 
 pub const INIT_SPAWN_TIME: f32 = 8.0;
 pub const SPAWN_TIME_REDUCTION: f32 = 1.0;
+pub const MIN_SPAWN_TIME: f32 = 1.0; //Spawn interval never drops below this (it used to reach 0 and spawn every frame)
 pub const ENEMIES_PER_SPAWN: u8 = 3;
 
 pub const FIRE_ANGLE_DELTA: f32 = 60;
