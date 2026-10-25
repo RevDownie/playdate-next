@@ -4,7 +4,7 @@
 
 ## Toolchain
 - Zig 0.17.0 (`zig version`). Note 0.17 differs a lot from older Zig: no `@cImport`, no `std.build`, single-argument cast builtins (`@intCast(x)`, `@floatFromInt(x)`, `@splat(x)`), `callconv(.c)`, `std.Random`.
-- Arm GNU toolchain 11.3.1 (`arm-none-eabi`), Playdate SDK 1.13.2.
+- Arm GNU toolchain 11.3.1 (`arm-none-eabi`), Playdate SDK 3.1.2.
 - Required environment variables:
   - `PLAYDATE_SDK_PATH` - SDK root (e.g. `C:\Users\<you>\Documents\PlaydateSDK`)
   - `ARM_TOOLKIT_PATH` - Arm toolchain root (e.g. `D:\11.3 rel1`)
@@ -20,7 +20,7 @@
 
 `zig build` produces:
 - `zig-out/lib/pdex.dll` - simulator build (host target)
-- `zig-out/bin/pdex.elf` -> `zig-out/lib/pdex.bin` - device build (thumb, Cortex-M7, hard-float)
+- `zig-out/bin/pdex.elf` -> `zig-out/lib/pdex.elf` - device build (thumb, Cortex-M7, hard-float). `pdc` converts it into the pdx's relocatable `pdex.bin`
 - `zig-out/until-none.pdx` - package made by `pdc` from everything in `zig-out/lib` (both the DLL and the bin, plus `pdxinfo`, `images/`, `levels/`)
 
 ### Simulator
@@ -109,8 +109,8 @@ Before calling a change done (and before committing or opening a PR), run all of
 - `convert_raw.py <imagemagick path>` - converts `raw-images/` to 1-bit sprites in `images/` and regenerates `src/bitmap_descs.zig`. `convert_tilemaps.py` - converts Tiled JSON in `map-tiles/` to `levels/*.bin`.
 
 ## Build graph notes (non-obvious things in `build.zig`)
-- Two targets compile the same `src/main.zig`: the simulator DLL (native, links libc) and the device object (freestanding thumb) which is linked with the SDK's `buildsupport/setup.c` into `pdex.elf`, then `objcopy`'d to `pdex.bin`.
-- Device specifics that were needed to link: FPU feature `fp_armv8d16sp` must be enabled (Zig's `cortex_m7` model has none), unwind tables are off (otherwise newlib's malloc clashes with the SDK's), the entry symbol is `eventHandlerShim`, and the linker script is wrapped so `SEARCH_DIR`s for the Arm libs are added (lld is not passed `-L` for freestanding).
+- Two targets compile the same `src/main.zig`: the simulator DLL (native, links libc) and the device object (freestanding thumb) which is linked with the SDK's `buildsupport/setup.c` into `pdex.elf`. Like the SDK's `common.mk`, it is linked at address 0 with `--emit-relocs` (so it can't be stripped) and handed to `pdc`, which writes `pdex.bin` (starts with a `Playdate PDX` header). Shipping a raw `objcopy` of the elf instead makes the device fail with "CAPI handler function wasn't located in loaded data".
+- Device specifics that were needed to link: FPU feature `fp_armv8d16sp` must be enabled (Zig's `cortex_m7` model has none), `no_movt` must be enabled (pdc only relocates `R_ARM_ABS32` literals; LLVM's default `MOVW`/`MOVT` address pairs are left pointing at link-time addresses and crash on launch; check with `arm-none-eabi-readelf -r zig-out/lib/pdex.elf`), unwind tables are off (otherwise newlib's malloc clashes with the SDK's), the entry symbol is `eventHandlerShim`, and the linker script is wrapped so `SEARCH_DIR`s for the Arm libs are added (lld is not passed `-L` for freestanding).
 - translate-c on the device needs a `wint_t` typedef shim, which lives in `src/playdate_c.h`.
 - The device game code defines `TARGET_SIMULATOR` (historical; `TARGET_PLAYDATE` may have been intended).
 - Whatever is in `zig-out/lib` ends up in the pdx, so stale files there get shipped; delete `zig-out` if in doubt.

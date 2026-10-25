@@ -15,7 +15,9 @@ pub fn build(b: *std.Build) void {
     const device_target = b.resolveTargetQuery(.{
         .cpu_arch = .thumb,
         .cpu_model = .{ .explicit = &std.Target.arm.cpu.cortex_m7 },
-        .cpu_features_add = std.Target.arm.featureSet(&.{ .v7em, .fp_armv8d16sp }),
+        // no_movt: load addresses from literal pools (R_ARM_ABS32, which pdc relocates) like GCC does, not
+        // MOVW/MOVT pairs, which pdc leaves unrelocated so the code writes to the wrong address on launch
+        .cpu_features_add = std.Target.arm.featureSet(&.{ .v7em, .fp_armv8d16sp, .no_movt }),
         .os_tag = .freestanding,
         .abi = .eabihf,
     });
@@ -33,7 +35,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .target = device_target,
             .optimize = optimize,
-            .strip = true,
+            .strip = false, // lld refuses --strip-all with --emit-relocs; pdc drops what it does not need
             .sanitize_c = .off, // no ubsan runtime for freestanding
             .unwind_tables = .none, // would pull in libgcc unwinding, which drags in newlib malloc and clashes with the SDK
             .omit_frame_pointer = if (is_release) true else null,
@@ -59,6 +61,11 @@ pub fn build(b: *std.Build) void {
     }));
     game_elf.setLinkerScript(link_script);
     game_elf.link_function_sections = true;
+    // Link like the SDK's common.mk: from address 0 and keeping the relocations, which pdc needs to turn the
+    // elf into the relocatable pdex.bin the device loads (a raw objcopy of the elf has no header, so the
+    // runtime fails with "CAPI handler function wasn't located in loaded data")
+    game_elf.link_emit_relocs = true;
+    game_elf.image_base = 0;
     game_elf.link_z_notext = true; // needed for @cos func
     game_elf.stack_size = 61800;
     game_elf.entry = .{ .symbol_name = "eventHandlerShim" };
@@ -68,8 +75,8 @@ pub fn build(b: *std.Build) void {
     //Everything that pdc packages lives in zig-out/lib
     const pdc_inputs = b.step("pdc-inputs", "Everything pdc needs to build the pdx package");
 
-    const game_bin = game_elf.addObjCopy(.{ .format = .binary });
-    pdc_inputs.dependOn(&b.addInstallLibFile(game_bin.getOutput(), "pdex.bin").step);
+    //pdc converts the elf to pdex.bin itself
+    pdc_inputs.dependOn(&b.addInstallLibFile(game_elf.getEmittedBin(), "pdex.elf").step);
 
     //Simulator DLL
     const simulator = b.addLibrary(.{
