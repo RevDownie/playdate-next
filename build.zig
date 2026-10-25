@@ -105,16 +105,15 @@ pub fn build(b: *std.Build) void {
 
     //Tests
     const test_step = b.step("test", "Run tests");
-    for ([_][]const u8{ "src/maths.zig", "src/graphics_coords.zig", "src/memory.zig", "src/animation.zig", "src/game_state.zig", "src/collision_grid.zig", "src/level_loader.zig", "src/bullet_system.zig", "src/enemy_movement_system.zig", "src/enemy_spawn_system.zig", "src/combat_system.zig", "src/firing_system.zig", "src/game.zig" }) |test_file| {
-        const unit_tests = b.addTest(.{
-            .root_module = b.createModule(.{
-                .root_source_file = b.path(test_file),
-                .target = b.graph.host,
-                .optimize = optimize,
-            }),
-        });
-        test_step.dependOn(&b.addRunArtifact(unit_tests).step);
-    }
+    //One root that imports every testable module (see src/tests.zig), so everything compiles once and each test runs once
+    const unit_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tests.zig"),
+            .target = b.graph.host,
+            .optimize = optimize,
+        }),
+    });
+    test_step.dependOn(&b.addRunArtifact(unit_tests).step);
 }
 
 const GameTarget = enum { device, simulator };
