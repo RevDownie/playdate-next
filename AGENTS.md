@@ -95,6 +95,12 @@ There is no build step for this yet (it is on the README TODO list). Manually:
 - Whatever is in `zig-out/lib` ends up in the pdx, so stale files there get shipped; delete `zig-out` if in doubt.
 - Occasional `unable to load "<std file>": Unexpected` errors from the compiler are transient - just re-run.
 
+## Design principles (these take priority over everything below)
+- **Data-oriented design.** Model the game as data transformed by systems, not as objects with behaviour. Prefer plain structs and flat arrays (structure-of-arrays where it helps) over per-entity objects, pointers or hierarchies. Systems iterate contiguous data; per-entity state lives in parallel arrays keyed by id (see `SparseArray`).
+- **Simple, efficient data structures with layouts chosen for the hardware.** The target is a Cortex-M7 with small caches and a single-precision FPU: keep hot data compact and contiguous, use the smallest integer types that fit (`u8` ids, `u16` indices), avoid pointer chasing and per-frame allocation, keep iteration linear and cache friendly, and reach for the simplest structure that works before anything clever. Measure before adding complexity.
+- **Solid, stable 30 FPS on device with no runtime frame drops.** Every frame must fit its budget (~33ms) in the worst case, not just on average: no allocation, file IO, sorting of unbounded data or other spiky work in the frame loop, and all pools are fixed size with worst-case counts tested (max enemies, max bullets). Do not trade a stable frame time for a higher average. Check performance on device, not only in the simulator (the simulator runs on a desktop CPU and hides problems). Note `gameInit` currently calls `setRefreshRate(0)` (uncapped) to measure performance; the shipping target is a locked 30 FPS.
+- **Near-instant load times.** Do all expensive setup once, up front, with fixed buffers, and keep assets small and in the formats the device loads fastest (pre-converted 1-bit images and compact binary levels, produced offline by the `convert_*.py` scripts rather than parsed or processed at runtime). Avoid runtime asset processing or any startup work that scales with content size.
+
 ## Conventions
 - Memory: no heap on device. `main.zig` carves everything from a fixed 1 MiB buffer via `FixedBufferAllocator` during `gameInit`; pools are fixed size (`MAX_ENEMIES` etc. in `tweak_constants.zig`). Failures `@panic` with a short context message.
 - Vectors are `@Vector(2, f32)` (`Vec2f`) in world metres; `METRES_TO_PIXELS` converts to screen.
