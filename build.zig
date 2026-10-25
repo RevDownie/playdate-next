@@ -1,176 +1,173 @@
 const std = @import("std");
-const string = []const u8;
-const Builder = std.build.Builder;
 
-const playdate_target = std.zig.CrossTarget{
-    .cpu_arch = .thumb,
-    .cpu_model = .{ .explicit = &std.Target.arm.cpu.cortex_m7 },
-    .cpu_features_add = std.Target.arm.featureSet(&.{.v7em}),
-    .os_tag = .freestanding,
-    .abi = .eabihf,
-};
 const game_name = "until-none";
 const arm_toolchain_version = "11.3.1";
 
-pub fn build(b: *Builder) !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+pub fn build(b: *std.Build) void {
+    const optimize = b.standardOptimizeOption(.{});
+    const is_release = optimize != .debug;
 
-    const mode = b.standardReleaseOptions();
+    const environ = b.graph.environ_map;
+    const sdk_path = environ.get("PLAYDATE_SDK_PATH") orelse @panic("PLAYDATE_SDK_PATH is not set");
+    const arm_toolchain_path = environ.get("ARM_TOOLKIT_PATH") orelse @panic("ARM_TOOLKIT_PATH is not set");
+    const c_sdk_path = b.pathJoin(&.{ sdk_path, "C_API" });
 
-    const sdk_path = try std.process.getEnvVarOwned(allocator, "PLAYDATE_SDK_PATH");
-    const c_sdk_path = try std.fs.path.join(allocator, &[_]string{ sdk_path, "C_API" });
-    const arm_toolchain_path = try std.process.getEnvVarOwned(allocator, "ARM_TOOLKIT_PATH");
-    const libc_txt_path = "playdate-libc.txt";
+    const device_target = b.resolveTargetQuery(.{
+        .cpu_arch = .thumb,
+        .cpu_model = .{ .explicit = &std.Target.arm.cpu.cortex_m7 },
+        .cpu_features_add = std.Target.arm.featureSet(&.{ .v7em, .fp_armv8d16sp }),
+        .os_tag = .freestanding,
+        .abi = .eabihf,
+    });
+    const sim_target = b.standardTargetOptions(.{});
 
-    //Create the device exe
-    const device_lib = createDeviceLib(game_name, "src/main.zig", b, c_sdk_path, arm_toolchain_path, libc_txt_path);
-    device_lib.setBuildMode(mode);
-    device_lib.install();
+    //Device: the game compiled to an object that is linked with the SDK's setup.c into an elf
+    const device_game = b.addObject(.{
+        .name = game_name,
+        .root_module = createGameModule(b, device_target, optimize, c_sdk_path, arm_toolchain_path, .device, is_release),
+    });
+    configureDevice(b, device_game.root_module, c_sdk_path, arm_toolchain_path);
 
-    const game_elf = createElf(b, device_lib, c_sdk_path, arm_toolchain_path, libc_txt_path);
-    game_elf.setBuildMode(mode);
-    game_elf.install();
+    const game_elf = b.addExecutable(.{
+        .name = "pdex.elf",
+        .root_module = b.createModule(.{
+            .target = device_target,
+            .optimize = optimize,
+            .strip = true,
+            .sanitize_c = .off, // no ubsan runtime for freestanding
+            .unwind_tables = .none, // would pull in libgcc unwinding, which drags in newlib malloc and clashes with the SDK
+            .omit_frame_pointer = if (is_release) true else null,
+        }),
+    });
+    game_elf.root_module.addObject(device_game);
+    game_elf.root_module.addCSourceFile(.{
+        .file = .{ .cwd_relative = b.pathJoin(&.{ c_sdk_path, "buildsupport", "setup.c" }) },
+        .flags = &.{ "-DTARGET_PLAYDATE=1", "-DTARGET_EXTENSION=1" },
+    });
+    configureDevice(b, game_elf.root_module, c_sdk_path, arm_toolchain_path);
+    // The SDK's linker script does GROUP(libgcc.a libc.a libm.a) but the library paths never reach lld
+    // for a freestanding target, so wrap it in a script that adds the search dirs itself
+    const link_script = b.addWriteFiles().add("link_map.ld", b.fmt(
+        \\SEARCH_DIR("{[gcc_lib]s}")
+        \\SEARCH_DIR("{[newlib_lib]s}")
+        \\INCLUDE "{[sdk_script]s}"
+        \\
+    , .{
+        .gcc_lib = linkerPath(b, &.{ arm_toolchain_path, "lib", "gcc", "arm-none-eabi", arm_toolchain_version, "thumb", "v7e-m+fp", "hard" }),
+        .newlib_lib = linkerPath(b, &.{ arm_toolchain_path, "arm-none-eabi", "lib", "thumb", "v7e-m+fp", "hard" }),
+        .sdk_script = linkerPath(b, &.{ c_sdk_path, "buildsupport", "link_map.ld" }),
+    }));
+    game_elf.setLinkerScript(link_script);
+    game_elf.link_function_sections = true;
+    game_elf.link_z_notext = true; // needed for @cos func
+    game_elf.stack_size = 61800;
+    game_elf.entry = .{ .symbol_name = "eventHandlerShim" };
+    game_elf.lto = .none; // otherwise release build does not work
+    b.installArtifact(game_elf);
 
-    //Create simulator DLL
-    const simulator = createSimLib("src/main.zig", b, c_sdk_path);
-    simulator.setBuildMode(mode);
-    simulator.install();
+    //Everything that pdc packages lives in zig-out/lib
+    const pdc_inputs = b.step("pdc-inputs", "Everything pdc needs to build the pdx package");
 
-    // //Create empty bin folder needed to run pdc
-    // const empty_bin_step = b.step("sim-bin", "Create bin file for simulator");
-    // empty_bin_step.makeFn = createEmptyBin;
-    // b.getInstallStep().dependOn(empty_bin_step);
+    const game_bin = game_elf.addObjCopy(.{ .format = .binary });
+    pdc_inputs.dependOn(&b.addInstallLibFile(game_bin.getOutput(), "pdex.bin").step);
 
-    //objcopy elf to bin
-    const elf_to_bin_step = b.addSystemCommand(&.{ "objcopy", "-O", "binary", "zig-out/bin/pdex.elf", "zig-out/lib/pdex.bin" });
-    b.getInstallStep().dependOn(&elf_to_bin_step.step);
+    //Simulator DLL
+    const simulator = b.addLibrary(.{
+        .name = "pdex",
+        .linkage = .dynamic,
+        .root_module = createGameModule(b, sim_target, optimize, c_sdk_path, arm_toolchain_path, .simulator, is_release),
+    });
+    pdc_inputs.dependOn(&b.addInstallArtifact(simulator, .{ .dest_dir = .{ .override = .lib }, .pdb_dir = .disabled, .implib_dir = .disabled }).step);
 
-    //Copy assets ready for pdc
-    const copy_assets_step = b.step("assets", "Copy the assets into the build folder to be pdc'd");
-    copy_assets_step.makeFn = copyAssets;
-    b.getInstallStep().dependOn(copy_assets_step);
+    //Assets
+    pdc_inputs.dependOn(&b.addInstallLibFile(b.path("pdxinfo"), "pdxinfo").step);
+    for ([_][]const u8{ "images", "levels" }) |asset_dir| {
+        pdc_inputs.dependOn(&b.addInstallDirectory(.{
+            .source_dir = b.path(asset_dir),
+            .install_dir = .lib,
+            .install_subdir = "",
+        }).step);
+    }
 
     //pdc step to create pdx package
-    const pdc_step = b.addSystemCommand(&.{ "pdc", "zig-out/lib", b.fmt("zig-out/{s}.pdx", .{game_name}) });
-    pdc_step.step.dependOn(copy_assets_step);
-    b.getInstallStep().dependOn(&pdc_step.step);
+    const pdx_path = b.graph.path(.install_prefix, game_name ++ ".pdx");
+    const pdc = b.addSystemCommand(&.{"pdc"});
+    pdc.addDirectoryArg(b.graph.path(.install_lib, ""));
+    pdc.addDirectoryArg(pdx_path);
+    pdc.step.dependOn(pdc_inputs);
+    b.getInstallStep().dependOn(&pdc.step);
 
-    //run on simulator
-    const sim_path = try std.fs.path.join(allocator, &[_]string{ sdk_path, "bin/PlaydateSimulator.exe" });
-    const run_sim_cmd = b.addSystemCommand(&.{ sim_path, "zig-out/" ++ game_name ++ ".pdx" });
-    run_sim_cmd.step.dependOn(b.getInstallStep());
-    const run_sim_step = b.step("run-sim", "Run the game on simulator");
-    run_sim_step.dependOn(&run_sim_cmd.step);
+    //Run on simulator
+    const run_sim = b.addSystemCommand(&.{b.pathJoin(&.{ sdk_path, "bin", "PlaydateSimulator.exe" })});
+    run_sim.addDirectoryArg(pdx_path);
+    run_sim.step.dependOn(b.getInstallStep());
+    b.step("run-sim", "Run the game on simulator").dependOn(&run_sim.step);
 
     //Tests
-    const maths_test_step = b.addTest("src/maths.zig");
-    const graph_coords_test_step = b.addTest("src/graphics_coords.zig");
-    const sparse_array_test_step = b.addTest("src/sparse_array.zig");
     const test_step = b.step("test", "Run tests");
-    test_step.dependOn(&maths_test_step.step);
-    test_step.dependOn(&graph_coords_test_step.step);
-    test_step.dependOn(&sparse_array_test_step.step);
-}
-
-fn createEmptyBin(_: *std.build.Step) !void {
-    std.debug.print("Creating simulator bin file\n", .{});
-    if (std.fs.cwd().createFile("zig-out/lib/pdex.bin", .{})) |file| {
-        file.close();
-    } else |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
+    for ([_][]const u8{ "src/maths.zig", "src/graphics_coords.zig", "src/sparse_array.zig" }) |test_file| {
+        const unit_tests = b.addTest(.{
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(test_file),
+                .target = b.graph.host,
+                .optimize = optimize,
+            }),
+        });
+        test_step.dependOn(&b.addRunArtifact(unit_tests).step);
     }
 }
 
-fn copyAssets(_: *std.build.Step) !void {
-    std.debug.print("Copying assets...\n", .{});
+const GameTarget = enum { device, simulator };
 
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    var output_dir = try std.fs.cwd().openDir("zig-out/lib", .{});
-    defer output_dir.close();
-
-    //pdxinfo
-    try std.fs.cwd().copyFile("pdxinfo", output_dir, "pdxinfo", .{});
-
-    //Images
-    var image_dir = try std.fs.cwd().openIterableDir("images", .{});
-    defer image_dir.close();
-
-    var iter_img = image_dir.iterate();
-    while (try iter_img.next()) |entry| {
-        if (entry.kind == .File) {
-            std.debug.print("Copying image: {s}\n", .{entry.name});
-            const path = try std.fs.path.join(allocator, &[_]string{ "images", entry.name });
-            try std.fs.cwd().copyFile(path, output_dir, entry.name, .{});
-        }
+/// The game's root module with the Playdate C API (translated from pd_api.h) available as the "playdate_c" import
+fn createGameModule(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.Optimize,
+    c_sdk_path: []const u8,
+    arm_toolchain_path: []const u8,
+    game_target: GameTarget,
+    is_release: bool,
+) *std.Build.Module {
+    const translate_c = b.addTranslateC(.{
+        .root_source_file = b.path("src/playdate_c.h"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = game_target == .simulator,
+    });
+    translate_c.addIncludePath(.{ .cwd_relative = c_sdk_path });
+    if (game_target == .device) {
+        translate_c.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ arm_toolchain_path, "arm-none-eabi", "include" }) });
     }
+    translate_c.defineCMacro("TARGET_EXTENSION", null);
+    // The device build has always defined TARGET_SIMULATOR for its game code, so keep doing so
+    translate_c.defineCMacro("TARGET_SIMULATOR", null);
+    if (game_target == .simulator) translate_c.defineCMacro("_WINDLL", null);
 
-    //Levels
-    var levels_dir = try std.fs.cwd().openIterableDir("levels", .{});
-    defer levels_dir.close();
-
-    var iter_lvl = levels_dir.iterate();
-    while (try iter_lvl.next()) |entry| {
-        if (entry.kind == .File) {
-            std.debug.print("Copying level: {s}\n", .{entry.name});
-            const path = try std.fs.path.join(allocator, &[_]string{ "levels", entry.name });
-            try std.fs.cwd().copyFile(path, output_dir, entry.name, .{});
-        }
-    }
+    const module = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = game_target == .simulator,
+        .strip = if (game_target == .device) true else null,
+        .unwind_tables = if (game_target == .device) .none else null,
+        .omit_frame_pointer = if (game_target == .device and is_release) true else null,
+    });
+    module.addImport("playdate_c", translate_c.createModule());
+    return module;
 }
 
-fn createSimLib(root_src: ?string, b: *Builder, playdate_csdk_path: string) *std.build.LibExeObjStep {
-    const lib = b.addSharedLibrary("pdex", root_src, .unversioned);
-    lib.addIncludePath(playdate_csdk_path);
-    lib.defineCMacro("TARGET_SIMULATOR", null);
-    lib.defineCMacro("TARGET_EXTENSION", null);
-    lib.defineCMacro("_WINDLL", null);
-    lib.linkLibC();
-    return lib;
+fn configureDevice(b: *std.Build, module: *std.Build.Module, c_sdk_path: []const u8, arm_toolchain_path: []const u8) void {
+    module.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ arm_toolchain_path, "arm-none-eabi", "include" }) });
+    module.addIncludePath(.{ .cwd_relative = c_sdk_path });
+    module.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ arm_toolchain_path, "lib", "gcc", "arm-none-eabi", arm_toolchain_version, "thumb", "v7e-m+fp", "hard" }) });
+    module.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ arm_toolchain_path, "arm-none-eabi", "lib", "thumb", "v7e-m+fp", "hard" }) });
+    module.addCMacro("TARGET_EXTENSION", "1");
 }
 
-fn createDeviceLib(name: string, root_src: ?string, b: *Builder, playdate_csdk_path: string, arm_toolchain_path: string, libc_txt_path: string) *std.build.LibExeObjStep {
-    const lib = b.addSharedLibrary(name, root_src, .unversioned);
-    lib.setOutputDir("zig-out/lib");
-    lib.defineCMacro("TARGET_SIMULATOR", null);
-    lib.defineCMacro("TARGET_EXTENSION", null);
-    setupStep(b, lib, playdate_csdk_path, arm_toolchain_path, libc_txt_path);
-    return lib;
-}
-
-fn createElf(b: *Builder, lib: *std.build.LibExeObjStep, playdate_csdk_path: string, arm_toolchain_path: string, libc_txt_path: string) *std.build.LibExeObjStep {
-    const game_elf = b.addExecutable("pdex.elf", null);
-    game_elf.addObjectFile(b.pathJoin(&.{ lib.output_dir.?, b.fmt("lib{s}.so.o", .{lib.name}) }));
-    game_elf.step.dependOn(&lib.step);
-    const c_args = [_]string{ "-DTARGET_PLAYDATE=1", "-DTARGET_EXTENSION=1" };
-    game_elf.want_lto = false; // otherwise release build does not work
-    game_elf.addCSourceFile(b.pathJoin(&.{ playdate_csdk_path, "/buildsupport/setup.c" }), &c_args);
-    setupStep(b, game_elf, playdate_csdk_path, arm_toolchain_path, libc_txt_path);
-
-    return game_elf;
-}
-
-fn setupStep(b: *Builder, step: *std.build.LibExeObjStep, playdate_csdk_path: string, arm_toolchain_path: string, libc_txt_path: string) void {
-    step.setLinkerScriptPath(.{ .path = b.pathJoin(&.{ playdate_csdk_path, "/buildsupport/link_map.ld" }) });
-    step.addIncludePath(b.pathJoin(&.{ arm_toolchain_path, "/arm-none-eabi/include" }));
-    step.addLibraryPath(b.pathJoin(&.{ arm_toolchain_path, "/lib/gcc/arm-none-eabi/", arm_toolchain_version, "/thumb/v7e-m+fp/hard/" }));
-    step.addLibraryPath(b.pathJoin(&.{ arm_toolchain_path, "/arm-none-eabi/lib/thumb/v7e-m+fp/hard/" }));
-
-    step.addIncludePath(playdate_csdk_path);
-    step.setLibCFile(std.build.FileSource{ .path = libc_txt_path });
-
-    step.setTarget(playdate_target);
-
-    if (b.is_release) {
-        step.omit_frame_pointer = true;
-    }
-    step.strip = true;
-    step.link_function_sections = true;
-    step.link_z_notext = true; // needed for @cos func
-    step.stack_size = 61800;
+/// Linker scripts want forward slashes, even on Windows
+fn linkerPath(b: *std.Build, parts: []const []const u8) []const u8 {
+    const joined = b.pathJoin(parts);
+    std.mem.replaceScalar(u8, joined, '\\', '/');
+    return joined;
 }

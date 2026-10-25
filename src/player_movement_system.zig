@@ -53,7 +53,7 @@ pub fn update(current_button_states: pd.PDButtons, collision_grid: cgrid.Collisi
     }
 
     // Perform X and Y in separate passes to enable wall sliding
-    var new_world_pos = current_player_world_pos.* + vel * @splat(2, dt);
+    var new_world_pos = current_player_world_pos.* + vel * @as(Vec2f, @splat(dt));
     if (collision_grid.isOccupied(Vec2f{ new_world_pos[0], current_player_world_pos.*[1] })) {
         new_world_pos[0] = current_player_world_pos.*[0];
     }

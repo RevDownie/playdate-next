@@ -1,3 +1,1 @@
-pub const api = @cImport({
-    @cInclude("pd_api.h");
-});
+pub const api = @import("playdate_c");

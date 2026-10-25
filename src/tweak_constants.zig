@@ -29,6 +29,6 @@ pub const FLASH_HIT_EFFECT_DURATION: f32 = 0.3;
 pub const MAX_SCORE: u64 = 9999999999;
 
 pub const METRES_TO_PIXELS: f32 = 128.0;
-pub const CHAR_WIDTH_M: f32 = @intToFloat(f32, bitmap_descs.CHAR_W) / METRES_TO_PIXELS;
+pub const CHAR_WIDTH_M: f32 = @as(f32, @floatFromInt(bitmap_descs.CHAR_W)) / METRES_TO_PIXELS;
 pub const CHAR_BULLET_COLL_RADIUS: f32 = CHAR_WIDTH_M * 0.5;
 pub const CHAR_ENEMY_COLL_RADIUS: f32 = CHAR_WIDTH_M * 0.5 * 1.25;

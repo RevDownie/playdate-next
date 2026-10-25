@@ -17,8 +17,8 @@ pub fn worldSpaceToScreenSpace(camera_pos: Vec2f, world_pos: []const Vec2f, scre
         const cam_space = world_pos[i] - camera_pos;
 
         //Camera to Screen
-        const screen_posf = Vec2f{ cam_space[0] * consts.METRES_TO_PIXELS + @intToFloat(f32, half_width), (cam_space[1] * consts.METRES_TO_PIXELS - @intToFloat(f32, half_height)) * -1 };
-        screen_pos[i] = Vec2i{ @floatToInt(i32, screen_posf[0]), @floatToInt(i32, screen_posf[1]) };
+        const screen_posf = Vec2f{ cam_space[0] * consts.METRES_TO_PIXELS + @as(f32, @floatFromInt(half_width)), (cam_space[1] * consts.METRES_TO_PIXELS - @as(f32, @floatFromInt(half_height))) * -1 };
+        screen_pos[i] = Vec2i{ @intFromFloat(screen_posf[0]), @intFromFloat(screen_posf[1]) };
     }
 }
 

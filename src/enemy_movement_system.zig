@@ -62,21 +62,25 @@ fn updateSeeking(player_world_pos: Vec2f, dt: f32, enemy_world_positions: Sparse
         const to_target = player_world_pos - enemy_world_positions.data[entity_pos_idx];
         const mag = maths.magnitude(to_target);
         const dir_to_target = maths.normaliseSafeMag(to_target, mag, enemy_velocities.data[entity_pos_idx]);
-        const vel = dir_to_target * @splat(2, @min(consts.ENEMY_MAX_SPEED, mag));
+        const vel = dir_to_target * @as(Vec2f, @splat(@min(consts.ENEMY_MAX_SPEED, mag)));
         enemy_velocities.data[entity_pos_idx] = vel;
-        enemy_world_positions.data[entity_pos_idx] += vel * @splat(2, dt);
+        enemy_world_positions.data[entity_pos_idx] += vel * @as(Vec2f, @splat(dt));
     }
 }
 
 /// Animated push back
 ///
 fn updateBumpBack(dt: f32, enemy_world_positions: SparseArray(Vec2f, u8)) !void {
-    for (entity_bump_data.toMutableDataSlice()) |*ent| {
+    //Iterate backwards as finishing a bump removes the entry, which swaps the last entry into its slot
+    var i = entity_bump_data.len;
+    while (i > 0) {
+        i -= 1;
+        const ent = &entity_bump_data.data[i];
         ent.*.timer += dt;
         const x = @min(ent.*.timer / consts.BUMP_TIME, 1.0);
         const y = easeOutBack(x);
         const entity_pos_idx = try enemy_world_positions.lookupDataIndex(ent.*.entity_id);
-        enemy_world_positions.data[entity_pos_idx] = ent.*.start_world_pos + ent.*.bump_dir * @splat(2, ent.*.bump_dist * y);
+        enemy_world_positions.data[entity_pos_idx] = ent.*.start_world_pos + ent.*.bump_dir * @as(Vec2f, @splat(ent.*.bump_dist * y));
 
         if (x >= 1.0) {
             //Done bumping so put back to seeking

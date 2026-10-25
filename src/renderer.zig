@@ -44,7 +44,7 @@ pub fn init(pd_api: *pd.PlaydateAPI, bg_size_pixels: Vec2i) void {
 ///
 pub fn reset() void {
     player_hit_flash_timer = null;
-    playdate_api.graphics.*.setDrawMode.?(pd.kDrawModeCopy);
+    _ = playdate_api.graphics.*.setDrawMode.?(pd.kDrawModeCopy);
 }
 
 /// Load the rendering assets - bitmaps and bitmap tables
@@ -62,7 +62,7 @@ pub fn loadAssets(level_bitmap_name: [*c]const u8) void {
 ///
 pub fn playerHitFlash(duration: f32) void {
     player_hit_flash_timer = duration;
-    playdate_api.graphics.*.setDrawMode.?(pd.kDrawModeInverted);
+    _ = playdate_api.graphics.*.setDrawMode.?(pd.kDrawModeInverted);
 }
 
 /// Run any time based effects
@@ -72,7 +72,7 @@ pub fn update(dt: f32) void {
         timer.* -= dt;
         if (timer.* <= 0.0) {
             player_hit_flash_timer = null;
-            playdate_api.graphics.*.setDrawMode.?(pd.kDrawModeCopy);
+            _ = playdate_api.graphics.*.setDrawMode.?(pd.kDrawModeCopy);
         }
     }
 }
@@ -131,25 +131,25 @@ pub fn render(
         .bitmap_idx = player_bitmap_frame.index,
         .flip = player_bitmap_frame.flip,
         .width_offset = bitmap_descs.CHAR_W / 2,
-        .height_offset = @intCast(i32, bitmap_descs.CHAR_H) - anim.walkBobAnim(player_world_pos),
+        .height_offset = @as(i32, @intCast(bitmap_descs.CHAR_H)) - anim.walkBobAnim(player_world_pos),
     };
 
     var enemy_bitmap_frames: [consts.MAX_ENEMIES]anim.BitmapFrame = undefined; //Enemies facing the way they are moving
-    for (enemy_velocities) |v, i| {
+    for (enemy_velocities, 0..) |v, i| {
         enemy_bitmap_frames[i] = anim.bitmapFrameForDir(v);
     }
-    for (enemy_world_positions) |p, i| {
+    for (enemy_world_positions, 0..) |p, i| {
         render_command_data_buffer[i + 1] = RenderCommandData{
             .bitmap_table = enemy_bitmap_table,
             .bitmap_idx = enemy_bitmap_frames[i].index,
             .flip = enemy_bitmap_frames[i].flip,
             .width_offset = bitmap_descs.CHAR_W / 2,
-            .height_offset = @intCast(i32, bitmap_descs.CHAR_H) - anim.walkBobAnim(p),
+            .height_offset = @as(i32, @intCast(bitmap_descs.CHAR_H)) - anim.walkBobAnim(p),
         };
     }
 
     const offset = enemy_world_positions.len + 1;
-    for (env_obj_bitmap_indices) |bi, i| {
+    for (env_obj_bitmap_indices, 0..) |bi, i| {
         render_command_data_buffer[i + offset] = RenderCommandData{
             .bitmap_table = env_obj_bitmap_table,
             .bitmap_idx = bi,
@@ -161,10 +161,10 @@ pub fn render(
 
     //---Sort by "depth", really the y-axis. To keep sorting fast we sort indices rather than render data
     var sorted_indices = render_command_sort_order[0..buffer_end];
-    for (sorted_indices) |_, i| {
-        sorted_indices[i] = @intCast(u8, i);
+    for (sorted_indices, 0..) |_, i| {
+        sorted_indices[i] = @intCast(i);
     }
-    std.sort.sort(u8, sorted_indices, entity_screen_pos[0..buffer_end], compareBackToFront);
+    std.sort.pdq(u8, sorted_indices, entity_screen_pos[0..buffer_end], compareBackToFront);
 
     //---Render the entities
     for (sorted_indices) |idx| {

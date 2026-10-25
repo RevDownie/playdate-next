@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const pd = @import("playdate.zig").api;
 const sparse_array = @import("sparse_array.zig");
 const graphics_coords = @import("graphics_coords.zig");
@@ -31,6 +32,10 @@ var fixed_mem_buffer: [1024 * 1024]u8 = undefined;
 var crank_angle_since_fire: f32 = 0.0;
 var last_fire_time_ms: u32 = 0;
 
+/// Debug logging
+const debug_logging = builtin.mode == .debug;
+var last_log_time_ms: u32 = 0;
+
 /// Player
 var player_world_pos: Vec2f = undefined;
 var player_velocity: Vec2f = undefined;
@@ -53,7 +58,7 @@ var level_map_data: level_loader.LevelMapData = undefined;
 
 /// Exposed via the shared library to the Playdate runner which forwards on events
 ///
-pub export fn eventHandler(playdate: [*c]pd.PlaydateAPI, event: pd.PDSystemEvent, _: c_ulong) callconv(.C) c_int {
+pub export fn eventHandler(playdate: [*c]pd.PlaydateAPI, event: pd.PDSystemEvent, _: c_ulong) callconv(.c) c_int {
     switch (event) {
         pd.kEventInit => gameInit(playdate),
         else => {},
@@ -78,6 +83,10 @@ fn createEnemyIds() [consts.MAX_ENEMIES]u8 {
 fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     playdate_api = playdate;
     const sys = playdate_api.system.*;
+    if (debug_logging) {
+        //Start each run with a fresh log file
+        if (playdate_api.file.*.open.?("log.txt", pd.kFileWrite)) |h| _ = playdate_api.file.*.close.?(h);
+    }
 
     var fba = std.heap.FixedBufferAllocator.init(&fixed_mem_buffer);
 
@@ -105,25 +114,26 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
 
     time_last_tick = sys.getCurrentTimeMilliseconds.?();
     reset();
+    debugLog("init complete", .{});
 }
 
 /// Called from the system menu by the user if they want to restart
 ///
-fn restartLevel(_: ?*anyopaque) callconv(.C) void {
+fn restartLevel(_: ?*anyopaque) callconv(.c) void {
     reset();
 }
 
 /// Reinit this on game restart
 ///
 fn reset() void {
-    player_world_pos = @splat(2, @as(f32, 0));
-    player_velocity = @splat(2, @as(f32, 0));
-    player_facing_dir = @splat(2, @as(f32, 0));
+    player_world_pos = @splat(0);
+    player_velocity = @splat(0);
+    player_facing_dir = @splat(0);
     player_health = 100;
     player_score = 0;
     player_kill_streak = 0;
 
-    camera_pos = @splat(2, @as(f32, 0));
+    camera_pos = @splat(0);
 
     renderer.reset();
     enemy_spawn_sys.reset();
@@ -140,7 +150,7 @@ fn reset() void {
 
 /// Ticks the main game update and render loops
 ///
-fn gameUpdateWrapper(_: ?*anyopaque) callconv(.C) c_int {
+fn gameUpdateWrapper(_: ?*anyopaque) callconv(.c) c_int {
     update();
     renderer.render(camera_pos, player_world_pos, player_facing_dir, enemy_world_positions.toDataSlice(), enemy_velocities.toDataSlice(), level_map_data.obj_world_positions, level_map_data.obj_bitmap_indices, player_score, player_health, bullet_sys.getRemainingBullets());
     return 1; //Inform the SDK we have stuff to render
@@ -152,7 +162,7 @@ fn update() void {
     const sys = playdate_api.system.*;
 
     const time_this_tick = sys.getCurrentTimeMilliseconds.?();
-    const dt = @intToFloat(f32, time_this_tick - time_last_tick) * 0.001;
+    const dt = @as(f32, @floatFromInt(time_this_tick - time_last_tick)) * 0.001;
     time_last_tick = time_this_tick;
 
     var current: pd.PDButtons = undefined;
@@ -174,7 +184,7 @@ fn update() void {
 
     //Move the player based on input and move any enemies that are in the seeking or bumping back state
     player_move_sys.update(current, level_map_data.collision_grid, dt, &player_world_pos, &player_velocity);
-    enemy_move_sys.update(player_world_pos, dt, enemy_world_positions, enemy_velocities) catch @panic("enemyMove: Update error");
+    enemy_move_sys.update(player_world_pos, dt, enemy_world_positions, enemy_velocities) catch |err| @panic(@errorName(err));
 
     //Move any fired projectiles and check for collisions
     var num_hits: u8 = 0;
@@ -190,7 +200,7 @@ fn update() void {
                 enemy_healths.remove(info.entity_id) catch @panic("enemyDestroy: Failed to remove health");
                 enemy_move_sys.remove(info.entity_id) catch @panic("enemyDestroy: Failed to remove from move sys");
                 player_kill_streak += 1;
-                player_score = std.math.min(player_score + 10 * player_kill_streak, consts.MAX_SCORE);
+                player_score = @min(player_score + 10 * player_kill_streak, consts.MAX_SCORE);
 
                 enemy_free_id_head += 1;
                 enemy_free_id_stack[enemy_free_id_head] = info.entity_id;
@@ -206,7 +216,7 @@ fn update() void {
     //Check for collisions with enemies and player and deduct damage
     var num_hits_on_player: u8 = undefined;
     checkPlayerCollision(player_world_pos, enemy_world_positions, enemy_collision_info[0..], &num_hits_on_player) catch @panic("playerCollision: Failed collision check");
-    const deduct_health = std.math.min(num_hits_on_player * 5, player_health);
+    const deduct_health = @min(num_hits_on_player * 5, player_health);
     if (deduct_health > 0) {
         player_health -= deduct_health;
         player_kill_streak = 0;
@@ -219,7 +229,7 @@ fn update() void {
     for (enemy_collision_info[0..num_hits_on_player]) |enemy_id| {
         const pos = enemy_world_positions.lookup(enemy_id) catch @panic("playerHit: failed to find pos");
         const vel = enemy_velocities.lookup(enemy_id) catch @panic("playerHit: failed to find vel");
-        enemy_move_sys.startBumpBack(enemy_id, pos, maths.normaliseSafe(vel, Vec2f{ 1, 0 }) * @splat(2, @as(f32, -1)), consts.BUMP_DISTANCE_SMALL) catch @panic("playerHit: Failed to bump back");
+        enemy_move_sys.startBumpBack(enemy_id, pos, maths.normaliseSafe(vel, Vec2f{ 1, 0 }) * @as(Vec2f, @splat(-1)), consts.BUMP_DISTANCE_SMALL) catch @panic("playerHit: Failed to bump back");
     }
 
     //Now that the enemy positions have been updated - the player can re-evaluate the hottest one to target
@@ -235,6 +245,34 @@ fn update() void {
     player_facing_dir = target_dir; //Player facing the way they are firing
 
     renderer.update(dt);
+
+    logStatus(time_this_tick);
+}
+
+/// Once a second write a status line so a run can be inspected from the logs
+///
+fn logStatus(now_ms: u32) void {
+    if (!debug_logging or now_ms -% last_log_time_ms < 1000) return;
+    last_log_time_ms = now_ms;
+
+    debugLog("t={d}ms enemies={d} health={d} score={d} pos=({d:.2},{d:.2}) bullets={d} crank={d:.1}", .{ now_ms, enemy_world_positions.len, player_health, player_score, player_world_pos[0], player_world_pos[1], bullet_sys.getRemainingBullets(), playdate_api.system.*.getCrankAngle.?() });
+}
+
+/// Debug builds only: write to the Playdate console and append to `log.txt` in the game's data folder.
+/// In the simulator that is `<PlaydateSDK>/Disk/Data/<bundleID>/log.txt`
+///
+fn debugLog(comptime fmt: []const u8, args: anytype) void {
+    if (!debug_logging) return;
+
+    var buf: [160]u8 = undefined;
+    const msg = std.mem.printSentinel(&buf, "until-none: " ++ fmt, args, 0) catch return;
+    playdate_api.system.*.logToConsole.?("%s", msg.ptr);
+
+    const file = playdate_api.file.*;
+    const handle = file.open.?("log.txt", pd.kFileAppend) orelse return;
+    defer _ = file.close.?(handle);
+    _ = file.write.?(handle, msg.ptr, @intCast(msg.len));
+    _ = file.write.?(handle, "\n", 1);
 }
 
 /// Fire everytime the crank moves through 60 degrees (6 bullets per revolution)
@@ -268,7 +306,7 @@ fn firingSystemUpdate(current_input: pd.PDButtons, sys: pd.playdate_sys) bool {
 fn checkPlayerCollision(player_pos: Vec2f, enemy_positions: SparseArray(Vec2f, u8), collision_data: []u8, num_collisions: *u8) !void {
     num_collisions.* = 0;
 
-    for (enemy_positions.toDataSlice()) |enemy_pos, enemy_idx| {
+    for (enemy_positions.toDataSlice(), 0..) |enemy_pos, enemy_idx| {
         const delta = enemy_pos - player_pos;
         if (maths.magnitudeSqrd(delta) <= CHAR_ENEMY_COLL_RADIUS_SQRD) {
             collision_data[num_collisions.*] = try enemy_positions.lookupKeyByIndex(enemy_idx);

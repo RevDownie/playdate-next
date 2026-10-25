@@ -9,7 +9,7 @@ const Vec2f = @Vector(2, f32);
 const Vec2i = @Vector(2, i32);
 
 const BULLET_POOL_SIZE = consts.BULLET_MAG_SIZE + 10; //TODO: Calculate better approx based on fire rate and lifetime
-const BULLET_MAX_SPEED_V = @splat(2, consts.BULLET_MAX_SPEED);
+const BULLET_MAX_SPEED_V: Vec2f = @splat(consts.BULLET_MAX_SPEED);
 const CHAR_BULLET_COLL_RADIUS_SQRD = consts.CHAR_BULLET_COLL_RADIUS * consts.CHAR_BULLET_COLL_RADIUS;
 
 const State = enum {
@@ -87,7 +87,7 @@ pub fn update(dt: f32, entity_world_positions: SparseArray(Vec2f, u8), collision
 
     i = 0;
     while (i < num_active) : (i += 1) {
-        bullet_world_pos_pool[i] += bullet_dir_pool[i] * BULLET_MAX_SPEED_V * @splat(2, dt);
+        bullet_world_pos_pool[i] += bullet_dir_pool[i] * BULLET_MAX_SPEED_V * @as(Vec2f, @splat(dt));
     }
 
     try checkForCollisions(entity_world_positions, collision_data, num_collisions);
@@ -100,7 +100,7 @@ pub fn render(graphics: pd.playdate_graphics, disp: pd.playdate_display, camera_
     var bullet_screen_pos: [BULLET_POOL_SIZE]Vec2i = undefined;
     graphics_coords.worldSpaceToScreenSpace(camera_pos, active, bullet_screen_pos[0..num_active], disp.getWidth.?(), disp.getHeight.?());
 
-    for (active) |_, i| {
+    for (active, 0..) |_, i| {
         graphics.fillRect.?(bullet_screen_pos[i][0], bullet_screen_pos[i][1], 6, 6, pd.kColorBlack);
     }
 }
@@ -117,8 +117,8 @@ pub fn getRemainingBullets() u32 {
 fn checkForCollisions(entity_world_positions: SparseArray(Vec2f, u8), collision_data: []CollisionInfo, num_collisions: *u8) !void {
     var out_idx: u8 = 0;
 
-    for (bullet_world_pos_pool[0..num_active]) |bullet_pos, bullet_idx| {
-        for (entity_world_positions.toDataSlice()) |entity_pos, entity_idx| {
+    for (bullet_world_pos_pool[0..num_active], 0..) |bullet_pos, bullet_idx| {
+        for (entity_world_positions.toDataSlice(), 0..) |entity_pos, entity_idx| {
             const delta = entity_pos - bullet_pos;
             if (maths.magnitudeSqrd(delta) <= CHAR_BULLET_COLL_RADIUS_SQRD) {
                 collision_data[out_idx] = CollisionInfo{ .entity_id = try entity_world_positions.lookupKeyByIndex(entity_idx), .impact_dir = bullet_dir_pool[bullet_idx] };

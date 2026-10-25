@@ -11,13 +11,13 @@ pub const CollisionGrid = struct {
     cell_height: u8,
 
     pub fn isOccupied(self: *const CollisionGrid, world_pos: Vec2f) bool {
-        const screen = world_pos * @splat(2, consts.METRES_TO_PIXELS);
-        const cellx = @floatToInt(i32, @round(screen[0] / @intToFloat(f32, self.cell_width)));
-        const celly = @floatToInt(i32, @round(screen[1] / @intToFloat(f32, self.cell_height)));
+        const screen = world_pos * @as(Vec2f, @splat(consts.METRES_TO_PIXELS));
+        const cellx: i32 = @intFromFloat(@round(screen[0] / @as(f32, @floatFromInt(self.cell_width))));
+        const celly: i32 = @intFromFloat(@round(screen[1] / @as(f32, @floatFromInt(self.cell_height))));
         const xi: i32 = cellx + self.width / 2;
         const yi: i32 = -celly + self.height / 2;
-        const x = @intCast(u32, xi);
-        const y = @intCast(u32, yi);
+        const x: u32 = @intCast(xi);
+        const y: u32 = @intCast(yi);
         const idx = x + self.width * y;
 
         return self.collision_grid.isSet(idx);

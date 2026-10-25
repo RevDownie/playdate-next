@@ -17,10 +17,10 @@ fn buildLookupTable() [36]BitmapFrame {
 
     var i: usize = 0;
     while (i <= 18) : (i += 1) {
-        table[i] = BitmapFrame{ .index = @intCast(i32, i), .flip = pd.kBitmapUnflipped };
+        table[i] = BitmapFrame{ .index = @intCast(i), .flip = pd.kBitmapUnflipped };
     }
     while (i < 36) : (i += 1) {
-        table[i] = BitmapFrame{ .index = @intCast(i32, 36 - i), .flip = pd.kBitmapFlippedX };
+        table[i] = BitmapFrame{ .index = @intCast(36 - i), .flip = pd.kBitmapFlippedX };
     }
     return table;
 }
@@ -29,7 +29,7 @@ fn buildLookupTable() [36]BitmapFrame {
 ///
 pub fn bitmapFrameForDir(dir: Vec2f) BitmapFrame {
     const deg = maths.angleDegrees360(@Vector(2, f32){ 0, -1 }, dir);
-    const index = @floatToInt(usize, deg * 0.1);
+    const index: usize = @intFromFloat(deg * 0.1);
     return BITMAP_INDEX_MAP[index];
 }
 
@@ -42,5 +42,5 @@ pub fn walkBobAnim(world_pos: Vec2f) i32 {
     const x = (std.math.sin(t1 * freq) + 1.0) * 0.5;
     const t2 = world_pos[1];
     const y = (std.math.sin(t2 * freq) + 1.0) * 0.5;
-    return @floatToInt(i32, (x * 0.5 + y * 0.5) * amp);
+    return @intFromFloat((x * 0.5 + y * 0.5) * amp);
 }

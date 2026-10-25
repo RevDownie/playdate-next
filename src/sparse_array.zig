@@ -31,7 +31,7 @@ pub fn SparseArray(comptime T: type, comptime TKey: type) type {
                 .allocator = allocator,
             };
 
-            for (s.key_to_index) |_, i| {
+            for (s.key_to_index, 0..) |_, i| {
                 s.key_to_index[i] = capacity;
             }
 
@@ -41,12 +41,12 @@ pub fn SparseArray(comptime T: type, comptime TKey: type) type {
         /// Reset the array
         ///
         pub fn clear(self: *Self) void {
-            const capacity = @intCast(TKey, self.key_to_index.len);
-            for (self.key_to_index) |_, i| {
+            const capacity: TKey = @intCast(self.key_to_index.len);
+            for (self.key_to_index, 0..) |_, i| {
                 self.key_to_index[i] = capacity;
             }
 
-            for (self.index_to_key) |_, i| {
+            for (self.index_to_key, 0..) |_, i| {
                 self.index_to_key[i] = capacity;
             }
 
@@ -67,7 +67,7 @@ pub fn SparseArray(comptime T: type, comptime TKey: type) type {
                 return;
             }
 
-            self.key_to_index[key] = @intCast(TKey, self.len);
+            self.key_to_index[key] = @intCast(self.len);
             self.index_to_key[self.len] = key;
             self.data[self.len] = element;
             self.len += 1;
@@ -86,7 +86,7 @@ pub fn SparseArray(comptime T: type, comptime TKey: type) type {
                 return Error.KeyAlreadyExists;
             }
 
-            self.key_to_index[key] = @intCast(TKey, self.len);
+            self.key_to_index[key] = @intCast(self.len);
             self.index_to_key[self.len] = key;
             self.data[self.len] = element;
             self.len += 1;
@@ -181,7 +181,7 @@ pub fn SparseArray(comptime T: type, comptime TKey: type) type {
             const moved_key = self.index_to_key[self.len - 1];
             self.key_to_index[moved_key] = existing_idx;
 
-            self.key_to_index[key] = @intCast(TKey, self.key_to_index.len);
+            self.key_to_index[key] = @intCast(self.key_to_index.len);
             self.index_to_key[existing_idx] = moved_key;
 
             self.len -= 1;
@@ -206,7 +206,7 @@ pub fn SparseArray(comptime T: type, comptime TKey: type) type {
             const moved_key = self.index_to_key[self.len - 1];
             self.key_to_index[moved_key] = existing_idx;
 
-            self.key_to_index[key] = @intCast(TKey, self.key_to_index.len);
+            self.key_to_index[key] = @intCast(self.key_to_index.len);
             self.index_to_key[existing_idx] = moved_key;
 
             self.len -= 1;

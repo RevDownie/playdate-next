@@ -9,11 +9,11 @@ var max_active_allowed: u8 = 0;
 var spawn_time: f32 = 0;
 var next_spawn_timer: f32 = 0;
 var spawn_buffer: [5]SpawnData = undefined;
-var rand: std.rand.DefaultPrng = undefined;
+var rand: std.Random.DefaultPrng = undefined;
 
 pub fn init(max_active: u8) void {
     max_active_allowed = max_active;
-    rand = std.rand.DefaultPrng.init(42);
+    rand = std.Random.DefaultPrng.init(42);
 }
 
 pub fn reset() void {
@@ -35,7 +35,7 @@ pub fn update(dt: f32, num_active: usize, player_world_pos: Vec2f) []SpawnData {
         //Spawn
         next_spawn_timer = spawn_time;
         spawn_time -= consts.SPAWN_TIME_REDUCTION;
-        const to_spawn = std.math.min(consts.ENEMIES_PER_SPAWN, max_active_allowed - num_active);
+        const to_spawn = @min(consts.ENEMIES_PER_SPAWN, max_active_allowed - num_active);
         var i: u32 = 0;
         while (i < to_spawn) : (i += 1) {
             const x = player_world_pos[0] + (rand.random().float(f32) * 2.0 - 1.0) * 10;
