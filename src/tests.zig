@@ -14,6 +14,7 @@ test {
     _ = @import("bullet_system.zig");
     _ = @import("enemy_movement_system.zig");
     _ = @import("enemy_spawn_system.zig");
+    _ = @import("enemy_separation_system.zig");
     _ = @import("combat_system.zig");
     _ = @import("firing_system.zig");
     _ = @import("auto_targetting_system.zig");

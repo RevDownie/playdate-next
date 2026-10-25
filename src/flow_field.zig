@@ -84,6 +84,28 @@ pub const FlowField = struct {
         return @intCast(@as(i32, cell) + o[0] + @as(i32, o[1]) * self.width);
     }
 
+    /// Is `world_pos` inside scenery or off the map, as far as the enemies are concerned. Walls are read from
+    /// the field (one byte per cell) rather than the collision grid, so enemy loops only touch `dir` at
+    /// random; the grid just supplies the cell maths
+    ///
+    pub inline fn isBlocked(self: *const FlowField, grid: *const CollisionGrid, world_pos: Vec2f) bool {
+        return self.at(grid.cellIndex(world_pos)) == DIR_BLOCKED;
+    }
+
+    /// Move an enemy from `pos` to `new_pos`, dropping whichever axis would enter a blocked cell (X then Y,
+    /// like the player) so it slides along walls. One already inside a blocked cell moves freely to get out.
+    /// Only the destination is tested, so a step must stay shorter than a cell (seeking moves at most
+    /// ENEMY_MAX_SPEED * MAX_FRAME_DT = 0.12m, a bump's biggest frame about half of BUMP_DISTANCE, and a
+    /// separation push at most ENEMY_SEPARATION_MAX_PUSH)
+    ///
+    pub fn slide(self: *const FlowField, grid: *const CollisionGrid, pos: Vec2f, new_pos: Vec2f, start_blocked: bool) Vec2f {
+        if (start_blocked) return new_pos;
+        var p = new_pos;
+        if (self.isBlocked(grid, Vec2f{ p[0], pos[1] })) p[0] = pos[0];
+        if (self.isBlocked(grid, p)) p[1] = pos[1];
+        return p;
+    }
+
     /// Can an enemy standing in `cell` path to the goal
     ///
     pub fn isReachable(self: *const FlowField, cell: ?u16) bool {

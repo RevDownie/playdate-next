@@ -6,6 +6,9 @@ pub const MAX_ENEMIES: u8 = 100;
 pub const PLAYER_ACC: f32 = 2.0;
 pub const PLAYER_MAX_SPEED: f32 = 1.5;
 pub const ENEMY_MAX_SPEED: f32 = 1.2;
+pub const ENEMY_SEPARATION_DIST: f32 = CHAR_WIDTH_M * 0.75; //Enemies are pushed apart when their centres are closer than this
+pub const ENEMY_SEPARATION_MAX_PUSH: f32 = 0.1; //Most an enemy is moved by separation in one frame (must stay under a cell)
+pub const PLAYER_RING_RADIUS: f32 = CHAR_ENEMY_COLL_RADIUS * 0.8; //Enemies are kept this far from the player (inside contact range)
 pub const ENEMY_TURN_RATE: f32 = 6.0; //How quickly enemies steer onto a new heading (fraction of the change per second)
 
 /// Flow field cells settled per frame while it is being rebuilt. Bounds the pathfinding cost of any one frame;

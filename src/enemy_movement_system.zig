@@ -12,8 +12,8 @@ const Vec2f = @Vector(2, f32);
 /// * Entities moving towards the player target, following the flow field around obstacles
 /// * Entities bumping back in response to a collision
 ///
-/// Walls are read from the flow field (one byte per cell) rather than the collision grid so the only
-/// per-cell data this loop touches at random is `field.dir`; the grid only supplies the cell maths
+/// Walls come from the flow field (see `FlowField.slide`) so the only per-cell data this loop touches at
+/// random is `field.dir`
 ///
 pub fn update(enemies: *Enemies, field: *const FlowField, grid: *const CollisionGrid, player_world_pos: Vec2f, dt: f32) void {
     for (0..enemies.len) |i| {
@@ -45,7 +45,7 @@ fn updateSeeking(enemies: *Enemies, i: usize, field: *const FlowField, grid: *co
 
     const vel = enemies.vel[i] + (desired - enemies.vel[i]) * @as(Vec2f, @splat(@min(consts.ENEMY_TURN_RATE * dt, 1.0)));
     enemies.vel[i] = vel;
-    enemies.pos[i] = slide(field, grid, pos, pos + vel * @as(Vec2f, @splat(dt)), dir == flow.DIR_BLOCKED);
+    enemies.pos[i] = field.slide(grid, pos, pos + vel * @as(Vec2f, @splat(dt)), dir == flow.DIR_BLOCKED);
 }
 
 /// Animated push back. Seeking resumes once the timer reaches BUMP_TIME. Each frame moves by this frame's
@@ -58,24 +58,7 @@ fn updateBumpBack(enemies: *Enemies, i: usize, field: *const FlowField, grid: *c
     const y = easeOutBack(enemies.bump_timer[i] / consts.BUMP_TIME);
     const pos = enemies.pos[i];
     const step = enemies.bump_offset[i] * @as(Vec2f, @splat(y - prev_y));
-    enemies.pos[i] = slide(field, grid, pos, pos + step, isBlocked(field, grid, pos));
-}
-
-/// Move from `pos` to `new_pos`, dropping whichever axis would enter a blocked cell (X then Y, like the
-/// player) so enemies slide along walls. One that is already inside a blocked cell moves freely to get out.
-/// Only the destination is tested, so a step must stay shorter than a cell (seeking moves at most
-/// ENEMY_MAX_SPEED * MAX_FRAME_DT = 0.12m, and a bump's biggest frame about half of BUMP_DISTANCE)
-///
-fn slide(field: *const FlowField, grid: *const CollisionGrid, pos: Vec2f, new_pos: Vec2f, start_blocked: bool) Vec2f {
-    if (start_blocked) return new_pos;
-    var p = new_pos;
-    if (isBlocked(field, grid, Vec2f{ p[0], pos[1] })) p[0] = pos[0];
-    if (isBlocked(field, grid, p)) p[1] = pos[1];
-    return p;
-}
-
-inline fn isBlocked(field: *const FlowField, grid: *const CollisionGrid, world_pos: Vec2f) bool {
-    return field.at(grid.cellIndex(world_pos)) == flow.DIR_BLOCKED;
+    enemies.pos[i] = field.slide(grid, pos, pos + step, field.isBlocked(grid, pos));
 }
 
 /// Easing function to animate the bump back

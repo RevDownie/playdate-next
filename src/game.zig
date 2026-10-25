@@ -8,6 +8,7 @@ const flow_field = @import("flow_field.zig");
 const player_move_sys = @import("player_movement_system.zig");
 const enemy_spawn_sys = @import("enemy_spawn_system.zig");
 const enemy_move_sys = @import("enemy_movement_system.zig");
+const enemy_separation_sys = @import("enemy_separation_system.zig");
 const bullet_sys = @import("bullet_system.zig");
 const combat_sys = @import("combat_system.zig");
 const auto_target_sys = @import("auto_targetting_system.zig");
@@ -32,6 +33,7 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     player_move_sys.update(&game.player, input, grid, dt);
     flow_field.update(field, grid, grid.cellIndex(game.player.pos), consts.FLOW_FIELD_CELLS_PER_FRAME);
     enemy_move_sys.update(&game.enemies, field, grid, game.player.pos, dt);
+    enemy_separation_sys.update(&game.enemies, game.player.pos, field, grid, frame_arena.alloc(Vec2f, game.enemies.len));
 
     //3. Move projectiles and resolve bullet -> enemy hits (kills are flagged then compacted out)
     bullet_sys.update(&game.bullets, dt);

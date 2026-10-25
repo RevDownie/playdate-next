@@ -10,6 +10,7 @@ const Arena = @import("../memory.zig").Arena;
 const Level = @import("../level_loader.zig").Level;
 const FlowField = @import("../flow_field.zig").FlowField;
 const level_loader = @import("../level_loader.zig");
+const maths = @import("../maths.zig");
 
 /// Level used by the tests: a 30x30 grid of 64px (0.5m) cells, centred on the origin. With `walls` there is
 /// a vertical wall at column 19 (x = 2m) from row 5 to 24 and a horizontal one along row 8 (y = 3.5m) from
@@ -72,6 +73,38 @@ test "[scenario] worst case: max enemies and bullets fit the frame arena and poo
     }
     try std.testing.expect(game.player.score > 0);
     try std.testing.expect(max_enemies == state.Enemies.capacity);
+}
+
+test "[scenario] a full horde surrounds the player without stacking" {
+    var t: TestLevel = .{};
+    t.init(true);
+    var game = state.GameState{};
+
+    //No firing and no dying: let the pool fill and pile in on the player for a while
+    var frames: usize = 0;
+    while (frames < 60 * 90) : (frames += 1) {
+        game.player.health = consts.PLAYER_MAX_HEALTH;
+        _ = t.tick(&game, .{});
+    }
+    try std.testing.expect(game.enemies.len == state.Enemies.capacity);
+
+    const pos = game.enemies.positions();
+    var stacked: usize = 0;
+    var min_pair: f32 = std.math.inf(f32);
+    var min_player: f32 = std.math.inf(f32);
+    for (pos, 0..) |p, i| {
+        min_player = @min(min_player, maths.magnitude(p - game.player.pos));
+        for (pos[i + 1 ..]) |q| {
+            const d = maths.magnitude(q - p);
+            min_pair = @min(min_pair, d);
+            if (d < consts.ENEMY_SEPARATION_DIST * 0.5) stacked += 1;
+        }
+    }
+    //Without separation about a fifth of all pairs (~1000 of 4950) end up on top of each other. With it only
+    //the odd pair caught mid knock-back (bumping enemies aren't pushed) is closer than half the spacing
+    try std.testing.expect(stacked < 20);
+    try std.testing.expect(min_pair > 0.05);
+    try std.testing.expect(min_player >= consts.PLAYER_RING_RADIUS - 0.01);
 }
 
 test "[scenario] an enemy behind a wall paths around it and reaches the player" {
