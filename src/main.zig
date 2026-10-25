@@ -9,8 +9,8 @@ const level_loader = @import("level_loader.zig");
 const memory = @import("memory.zig");
 const Arena = memory.Arena;
 
-/// Platform layer: owns all memory and state, talks to the Playdate API, and each frame turns its input into
-/// a `state.Input`, ticks the game and renders it. Control flows one way: main -> game -> systems.
+// Platform layer: owns all memory and state, talks to the Playdate API, and each frame turns its input into
+// a `state.Input`, ticks the game and renders it. Control flows one way: main -> game -> systems.
 
 /// Memory. Everything is carved from one static buffer up front; nothing is allocated from the heap.
 /// app (whole run) -> level (reset when a level loads) and frame (reset at the start of every frame)

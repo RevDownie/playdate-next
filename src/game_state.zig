@@ -4,11 +4,11 @@ const memory = @import("memory.zig");
 
 const Vec2f = @Vector(2, f32);
 
-/// All of the game's mutable simulation state lives here, owned by main and passed to the systems.
-/// Entity stores are fixed capacity structure-of-arrays: the index is the handle, entities are packed
-/// densely into 0..len so systems iterate contiguous data, and removal is "flag then compact" once per frame.
-/// Each array starts on a cache line, and fields only read in rare cases (e.g. bump back) sit in their own
-/// arrays so the common loops never pull them into the 4 KB L1 cache (see memory.HOT_SET_BUDGET).
+// All of the game's mutable simulation state lives here, owned by main and passed to the systems.
+// Entity stores are fixed capacity structure-of-arrays: the index is the handle, entities are packed
+// densely into 0..len so systems iterate contiguous data, and removal is "flag then compact" once per frame.
+// Each array starts on a cache line, and fields only read in rare cases (e.g. bump back) sit in their own
+// arrays so the common loops never pull them into the 4 KB L1 cache (see memory.HOT_SET_BUDGET).
 
 /// Platform independent snapshot of the player's input for one frame (built from the Playdate API by main)
 ///

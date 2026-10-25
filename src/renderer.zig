@@ -57,9 +57,9 @@ pub fn loadAssets(playdate_api: *pd.PlaydateAPI, level_bitmap_name: [*:0]const u
     const graphics = playdate_api.graphics.*;
     var assets: Assets = undefined;
     assets.bg_bitmap = graphics.loadBitmap.?("bg", null) orelse @panic("loadAssets: Failed to load bg");
-    assets.tables[@intFromEnum(Sheet.player)] = graphics.loadBitmapTable.?("hero1", null) orelse @panic("loadAssets: Failed to load hero1");
-    assets.tables[@intFromEnum(Sheet.enemy)] = graphics.loadBitmapTable.?("enemy1", null) orelse @panic("loadAssets: Failed to load enemy1");
-    assets.tables[@intFromEnum(Sheet.env)] = graphics.loadBitmapTable.?(level_bitmap_name, null) orelse @panic("loadAssets: Failed to load level bitmaps");
+    assets.tables[@backingInt(Sheet.player)] = graphics.loadBitmapTable.?("hero1", null) orelse @panic("loadAssets: Failed to load hero1");
+    assets.tables[@backingInt(Sheet.enemy)] = graphics.loadBitmapTable.?("enemy1", null) orelse @panic("loadAssets: Failed to load enemy1");
+    assets.tables[@backingInt(Sheet.env)] = graphics.loadBitmapTable.?(level_bitmap_name, null) orelse @panic("loadAssets: Failed to load level bitmaps");
     return assets;
 }
 
@@ -98,7 +98,7 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     std.sort.pdq(SortKey, keys, {}, std.sort.asc(SortKey));
     for (keys) |key| {
         const item = list.items[@as(u16, @truncate(key))];
-        const bitmap = graphics.getTableBitmap.?(assets.tables[@intFromEnum(item.sheet)], item.frame) orelse @panic("render: Bitmap index out of range for its table");
+        const bitmap = graphics.getTableBitmap.?(assets.tables[@backingInt(item.sheet)], item.frame) orelse @panic("render: Bitmap index out of range for its table");
         graphics.drawBitmap.?(bitmap, item.x, item.y, if (item.flipped) pd.kBitmapFlippedX else pd.kBitmapUnflipped);
     }
 
