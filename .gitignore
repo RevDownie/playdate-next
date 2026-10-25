@@ -4,10 +4,6 @@ zig-out/
 raw-images/
 raw-levels/
 map-tiles/*.json
-map-tiles/kenney_sketchtownexpansion/Tiles/
-map-tiles/kenney_sketchtownexpansion/Visit Kenney.url
-map-tiles/kenney_sketchtownexpansion/Visit Patreon.url
-map-tiles/kenney_sketchtownexpansion/
 logs/
 .sentry-native/
 .zig-cache/
