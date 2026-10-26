@@ -1,9 +1,10 @@
 # Launch the game in the Playdate Simulator, capture its output and screenshot the window.
-#   powershell -File tools/sim.ps1 [-Seconds 8] [-NoBuild]
+#   powershell -File tools/sim.ps1 [-Seconds 8] [-NoBuild] [-Invincible]
 # Outputs (git-ignored) in logs/: sim-stdout.log, sim-stderr.log, screenshot.png
 param(
     [int]$Seconds = 8,
-    [switch]$NoBuild
+    [switch]$NoBuild,
+    [switch]$Invincible # Debug build where enemies can't hurt the player (also a system menu checkmark)
 )
 
 . "$PSScriptRoot\sim-common.ps1"
@@ -22,7 +23,9 @@ Start-Sleep -Milliseconds 500
 
 if (-not $NoBuild) {
     Push-Location $root
-    zig build 2>&1 | Where-Object { $_ -notmatch '^\s*[+|]|^Copying|^Unrecognized' }
+    $buildArgs = @("build")
+    if ($Invincible) { $buildArgs += "-Dinvincible=true" }
+    zig @buildArgs 2>&1 | Where-Object { $_ -notmatch '^\s*[+|]|^Copying|^Unrecognized' }
     $buildOk = $LASTEXITCODE -eq 0
     Pop-Location
     if (-not $buildOk) { Write-Output "BUILD FAILED"; exit 1 }

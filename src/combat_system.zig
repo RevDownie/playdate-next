@@ -29,10 +29,10 @@ pub fn applyBulletHits(hits: []const Hit, enemies: *state.Enemies, player: *stat
     }
 }
 
-/// Enemies that walk into the player hurt them and recoil. An enemy that is still recoiling can't hurt the
-/// player again, so damage is per contact rather than per frame
+/// Enemies that walk into the player hurt them by `damage` (CONTACT_DMG, or 0 when invincible) and recoil.
+/// An enemy that is still recoiling can't hurt the player again, so damage is per contact rather than per frame
 ///
-pub fn applyEnemyContact(enemies: *state.Enemies, player: *state.Player) void {
+pub fn applyEnemyContact(enemies: *state.Enemies, player: *state.Player, damage: u8) void {
     var num_hits: u32 = 0;
     for (0..enemies.len) |i| {
         if (enemies.isBumping(i)) continue;
@@ -44,8 +44,8 @@ pub fn applyEnemyContact(enemies: *state.Enemies, player: *state.Player) void {
     }
 
     if (num_hits == 0) return;
-    const damage = @min(num_hits * consts.CONTACT_DMG, player.health);
-    player.health -= @intCast(damage);
+    const total = @min(num_hits * damage, player.health);
+    player.health -= @intCast(total);
     player.kill_streak = 0;
     player.hit_flash_timer = consts.FLASH_HIT_EFFECT_DURATION;
 }
@@ -81,7 +81,7 @@ test "[combat_system] many enemies in contact can't overflow the damage" {
     var player = state.Player{};
     while (!enemies.isFull()) enemies.add(Vec2f{ 0, 0 });
 
-    applyEnemyContact(&enemies, &player);
+    applyEnemyContact(&enemies, &player, consts.CONTACT_DMG);
     try std.testing.expect(player.health == 0);
 }
 
@@ -90,9 +90,18 @@ test "[combat_system] recoiling enemies don't damage every frame" {
     var player = state.Player{};
     enemies.add(Vec2f{ 0, 0 });
 
-    applyEnemyContact(&enemies, &player);
+    applyEnemyContact(&enemies, &player, consts.CONTACT_DMG);
     const after_first = player.health;
     try std.testing.expect(after_first == consts.PLAYER_MAX_HEALTH - consts.CONTACT_DMG);
-    applyEnemyContact(&enemies, &player);
+    applyEnemyContact(&enemies, &player, consts.CONTACT_DMG);
     try std.testing.expect(player.health == after_first);
+}
+
+test "[combat_system] an invincible player still gets bumped but takes no damage" {
+    var enemies = state.Enemies{};
+    var player = state.Player{};
+    enemies.add(Vec2f{ 0, 0 });
+    applyEnemyContact(&enemies, &player, 0);
+    try std.testing.expect(player.health == consts.PLAYER_MAX_HEALTH);
+    try std.testing.expect(enemies.isBumping(0));
 }
