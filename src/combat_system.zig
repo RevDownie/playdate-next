@@ -64,6 +64,18 @@ test "[combat_system] a second hit on a killed enemy is ignored" {
     try std.testing.expect(player.score == consts.SCORE_PER_KILL);
 }
 
+test "[combat_system] a fresh enemy is knocked back by the first hit and killed by the second" {
+    var enemies = state.Enemies{};
+    var player = state.Player{};
+    enemies.add(Vec2f{ 0, 0 });
+
+    const hit = [_]Hit{.{ .enemy_idx = 0, .impact_dir = Vec2f{ 1, 0 } }};
+    applyBulletHits(&hit, &enemies, &player);
+    try std.testing.expect(enemies.health[0] > 0 and enemies.isBumping(0));
+    applyBulletHits(&hit, &enemies, &player);
+    try std.testing.expect(enemies.health[0] == 0);
+}
+
 test "[combat_system] many enemies in contact can't overflow the damage" {
     var enemies = state.Enemies{};
     var player = state.Player{};

@@ -136,3 +136,26 @@ test "[scenario] the player dies if left alone" {
     }
     try std.testing.expect(result == .player_died);
 }
+
+test "[scenario] balance: a steadily cranked gun holds the horde off for a while, but is overrun in the end" {
+    //A player standing still in the open turning the crank once a second, at the device's 50 FPS. Measured
+    //at the time of tuning: ~74s survived and ~125 kills, against ~13s and none without firing
+    const dt: f32 = 1.0 / 50.0;
+    var t: TestLevel = .{};
+    t.init(true);
+    var game = state.GameState{};
+
+    var result = game_mod.TickResult.playing;
+    var frames: usize = 0;
+    var kills: u32 = 0;
+    while (result == .playing and frames < 50 * 300) : (frames += 1) {
+        const streak = game.player.kill_streak;
+        t.frame_arena.reset();
+        result = game_mod.tick(&game, &t.level, &t.field, .{ .crank_delta = 360.0 * dt }, dt, &t.frame_arena);
+        if (game.player.kill_streak > streak) kills += game.player.kill_streak - streak;
+    }
+    const secs = @as(f32, @floatFromInt(frames)) * dt;
+    try std.testing.expect(result == .player_died);
+    try std.testing.expect(secs > 50 and secs < 150);
+    try std.testing.expect(kills > 80);
+}

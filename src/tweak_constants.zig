@@ -21,28 +21,33 @@ pub const CONTACT_DMG: u8 = 5; //Damage an enemy does to the player when it walk
 pub const SCORE_PER_KILL: u64 = 10; //Multiplied by the kill streak
 
 pub const FIRST_SPAWN_TIME: f32 = 0.25;
-pub const INIT_SPAWN_TIME: f32 = 8.0;
-pub const SPAWN_TIME_REDUCTION: f32 = 1.0;
-pub const MIN_SPAWN_TIME: f32 = 1.0; //Spawn interval never drops below this (it used to reach 0 and spawn every frame)
+/// Spawning speeds up from one wave every INIT_SPAWN_TIME to one every MIN_SPAWN_TIME (7.5 enemies a second) after
+/// about 55s, more than a steady crank of 1-1.5 turns a second can clear, so most runs end in being overrun
+pub const INIT_SPAWN_TIME: f32 = 5.0;
+pub const SPAWN_TIME_REDUCTION: f32 = 0.25; //Taken off the interval after every wave
+pub const MIN_SPAWN_TIME: f32 = 0.4; //Spawn interval never drops below this (it used to reach 0 and spawn every frame)
 pub const ENEMIES_PER_SPAWN: u8 = 3;
 pub const SPAWN_EDGE_BAND: f32 = 1.0; //Enemies drop in on free cells within this many metres of the map's edge
 pub const SPAWN_MIN_PLAYER_DIST: f32 = 3.0; //...but never closer than this to the player
 pub const SPAWN_ATTEMPTS: u8 = 4; //Random spawn cells tried per enemy before giving up (they must be reachable and far enough away)
 pub const RNG_SEED: u64 = 42;
 
-pub const FIRE_ANGLE_DELTA: f32 = 60;
-pub const FIRE_BUTTON_DELAY: f32 = 0.5;
+pub const FIRE_ANGLE_DELTA: f32 = 30; //12 bullets per crank revolution
+pub const FIRE_BUTTON_DELAY: f32 = 0.25; //Button fire is the fallback: well under the rate of a steadily turned crank
 
 pub const BUMP_DISTANCE = 0.2;
 pub const BUMP_DISTANCE_SMALL = 0.125;
 pub const BUMP_TIME = 0.5;
 
-pub const DMG_PER_HIT: u8 = 35;
-pub const BULLET_MAG_SIZE: u8 = 60;
+pub const DMG_PER_HIT: u8 = 50; //Two hits per enemy: the first knocks it back (and it can't hurt the player while recoiling), the second kills
+pub const BULLET_MAG_SIZE: u8 = 80;
 pub const BULLET_POOL_SIZE: u8 = BULLET_MAG_SIZE + 10; //A full mag lives at most BULLET_LIFETIME, which is no longer than RELOAD_TIME
 pub const BULLET_MAX_SPEED: f32 = 10;
-pub const BULLET_LIFETIME = 3;
-pub const RELOAD_TIME = 3.0;
+pub const BULLET_LIFETIME = 1.0; //10m of range, about 3 screen widths
+pub const RELOAD_TIME = 1.5;
+comptime {
+    if (BULLET_LIFETIME > RELOAD_TIME) @compileError("BULLET_POOL_SIZE assumes a mag's bullets are gone by the time it has reloaded");
+}
 
 pub const FLASH_HIT_EFFECT_DURATION: f32 = 0.3;
 

@@ -2,7 +2,7 @@ const std = @import("std");
 const consts = @import("tweak_constants.zig");
 const state = @import("game_state.zig");
 
-/// Fire every time the crank moves forward through FIRE_ANGLE_DELTA degrees (6 bullets per revolution)
+/// Fire every time the crank moves forward through FIRE_ANGLE_DELTA degrees (12 bullets per revolution)
 /// Alternatively fire every FIRE_BUTTON_DELAY while A or B is held. Returns true if the gun should fire this frame
 ///
 pub fn update(trigger: *state.Trigger, input: state.Input, dt: f32) bool {

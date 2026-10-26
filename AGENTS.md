@@ -50,7 +50,7 @@ Steps run in order, comma separated:
 | Step | Meaning |
 |------|---------|
 | `up` `down` `left` `right` `a` `b` `[:ms]` | hold that button for ms (default 300) |
-| `crank:<degrees>` | turn the crank, positive = forward; 60 degrees fires one bullet |
+| `crank:<degrees>` | turn the crank, positive = forward; 30 degrees (`FIRE_ANGLE_DELTA`) fires one bullet |
 | `wait:<ms>` | pause |
 | `shot[:name]` | screenshot to `logs/<name>.png` (default `screenshot`) |
 | `log[:n]` | print last n lines of the game log (default 5) |
@@ -58,8 +58,8 @@ Steps run in order, comma separated:
 How it works / gotchas:
 - Buttons are Windows key messages posted to the simulator window (no focus needed). Simulator bindings: arrows = D-pad, **`A` key = B button, `S` key = A button**. Arrow keys must carry the "extended key" bit (handled in `tools/sim-common.ps1`).
 - The crank is the mouse wheel: each notch is 4 degrees (`$CrankDegreesPerNotch`, calibrated against `getCrankAngle`; the log's `crank=` field confirms it).
-- Verify results from the log line (`pos`, `bullets`, `health`, `score`, `crank`), not only screenshots. World +y is up: `down` decreases y. Holding A or B fires every `FIRE_BUTTON_DELAY` (0.5s).
-- The player dies if left alone (enemies spawn around them and close in; contact damage is 5 per touch) and the game resets (health back to 100, bullets 60, position 0,0), which can confuse a long test. Keep sequences short or check `health`.
+- Verify results from the log line (`pos`, `bullets`, `health`, `score`, `crank`), not only screenshots. World +y is up: `down` decreases y. Holding A or B fires every `FIRE_BUTTON_DELAY` (0.25s).
+- The player dies if left alone (enemies spawn around them and close in; contact damage is 5 per touch) and the game resets (health back to 100, bullets 80, position 0,0), which can confuse a long test. Keep sequences short or check `health`.
 - The simulator window takes ~3s to appear; use `-Seconds 4` or more with `tools/sim.ps1` if you want the launch screenshot.
 - Don't pipe `tools/sim.ps1` into something that waits for EOF (e.g. `| tail`): the simulator inherits the pipe and stays alive, so the command never returns. Redirect to a file (`> out.txt`) or use `| head -1`.
 - Debug builds also reach `logs/sim-stdout.log` (console output, flushed late); prefer the game's `log.txt` for timing.
