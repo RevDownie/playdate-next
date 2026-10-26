@@ -167,6 +167,61 @@ pub const Trigger = struct {
     button_cooldown: f32 = 0, //Seconds until holding A/B fires again
 };
 
+pub const PopupKind = enum(u8) {
+    combo, //A kill that grew the combo
+    milestone, //A kill that reached a combo milestone
+    lost, //A combo of COMBO_LOST_MIN or more was broken
+
+    pub fn duration(self: PopupKind) f32 {
+        return if (self == .combo) consts.POPUP_TIME else consts.POPUP_BIG_TIME;
+    }
+};
+
+/// Short-lived messages in the world (the combo as it grows, where the kill happened). Fixed capacity: when full a
+/// new one replaces the oldest, as only the latest matter
+///
+pub const Popups = struct {
+    pub const capacity = consts.MAX_POPUPS;
+
+    len: u8 = 0,
+    pos: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined,
+    life: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined, //Seconds left showing
+    value: [capacity]u32 align(memory.CACHE_LINE_SIZE) = undefined, //The combo it is about
+    kind: [capacity]PopupKind align(memory.CACHE_LINE_SIZE) = undefined,
+
+    pub fn add(self: *Popups, world_pos: Vec2f, kind: PopupKind, value: u32) void {
+        var i = self.len;
+        if (i < capacity) {
+            self.len += 1;
+        } else {
+            i = @intCast(std.mem.indexOfMin(f32, &self.life)); //The oldest has the least life left
+        }
+        self.pos[i] = world_pos;
+        self.life[i] = kind.duration();
+        self.value[i] = value;
+        self.kind[i] = kind;
+    }
+
+    /// Count down, then swap-remove the ones that have finished showing
+    ///
+    pub fn update(self: *Popups, dt: f32) void {
+        for (self.life[0..self.len]) |*l| l.* -= dt;
+        var i: u8 = 0;
+        while (i < self.len) {
+            if (self.life[i] > 0) {
+                i += 1;
+                continue;
+            }
+            const last = self.len - 1;
+            self.pos[i] = self.pos[last];
+            self.life[i] = self.life[last];
+            self.value[i] = self.value[last];
+            self.kind[i] = self.kind[last];
+            self.len = last;
+        }
+    }
+};
+
 pub const WavePhase = enum(u8) { lull, wave };
 
 /// Where the run is in its waves (see the WAVE_* constants and enemy_spawn_system). A lull counts down to the next
@@ -256,6 +311,7 @@ pub const GameState = struct {
     enemies: Enemies = .{},
     bullets: Bullets = .{},
     drops: Drops = .{},
+    popups: Popups = .{},
     trigger: Trigger = .{},
     spawner: Spawner = .{},
     camera_pos: Vec2f = @splat(0),
@@ -325,6 +381,23 @@ test "[game_state] drops removeDead keeps the live ones with their data" {
     try std.testing.expect(d.len == 2);
     try std.testing.expect(d.pos[0][0] == 2 and d.kind[0] == .ammo_large and d.point[0] == 2);
     try std.testing.expect(d.pos[1][0] == 1 and d.kind[1] == .health_large and d.point[1] == 1);
+}
+
+test "[game_state] popups replace the oldest when full and go once shown" {
+    var p = Popups{};
+    for (0..Popups.capacity) |i| {
+        p.add(Vec2f{ @floatFromInt(i), 0 }, .combo, @intCast(i));
+        p.update(0.01); //Each one older than the next
+    }
+    p.add(Vec2f{ 99, 0 }, .milestone, 99);
+    try std.testing.expect(p.len == Popups.capacity);
+    try std.testing.expect(std.mem.indexOfScalar(u32, p.value[0..p.len], 0) == null); //The oldest went
+    try std.testing.expect(std.mem.indexOfScalar(u32, p.value[0..p.len], 99) != null);
+
+    p.update(consts.POPUP_TIME);
+    try std.testing.expect(p.len == 1 and p.kind[0] == .milestone); //Milestones show for longer
+    p.update(consts.POPUP_BIG_TIME);
+    try std.testing.expect(p.len == 0);
 }
 
 test "[game_state] reset keeps rng sequence" {

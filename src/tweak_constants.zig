@@ -18,7 +18,17 @@ pub const FLOW_FIELD_CELLS_PER_FRAME: u32 = 300;
 pub const PLAYER_MAX_HEALTH: u8 = 100;
 pub const ENEMY_MAX_HEALTH: u8 = 100;
 pub const CONTACT_DMG: u8 = 5; //Damage an enemy does to the player when it walks into them
-pub const SCORE_PER_KILL: u64 = 10; //Multiplied by the kill streak
+pub const SCORE_PER_KILL: u64 = 10; //Multiplied by the kill streak (the combo), which resets when the player is hurt
+
+/// Combo messages. Each kill shows the combo where the enemy fell; milestones get a big message, and losing a
+/// good combo says so at the player
+pub const COMBO_SHOW_FROM: u32 = 2; //Combos below this aren't shown
+pub const COMBO_MILESTONE_FIRST: u32 = 5;
+pub const COMBO_MILESTONE_EVERY: u32 = 10; //...then every multiple of this
+pub const COMBO_LOST_MIN: u32 = 5; //Losing a combo at least this long shows "COMBO LOST"
+pub const MAX_POPUPS: u8 = 8; //Messages in the world at once; a new one replaces the oldest
+pub const POPUP_TIME: f32 = 0.7; //Seconds a combo message shows
+pub const POPUP_BIG_TIME: f32 = 1.4; //...and a milestone or COMBO LOST
 
 /// Waves. The horde comes in waves with a lull between them: a wave spawns its enemies in bursts from one or two
 /// sides of the map, and is survived once it has all spawned and at most WAVE_CLEAR_LEFT enemies are left. The

@@ -92,6 +92,11 @@ pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameSt
     } else {
         drawBoxed(graphics, fonts.small, format(&buf, "Best {d}", .{hud.best_score}), right, BOX_PAD_Y + small_h, .right, .normal);
     }
+    //...and the combo multiplying each kill's score, louder once it is worth protecting
+    const combo = game.player.kill_streak;
+    if (combo >= consts.COMBO_SHOW_FROM) {
+        drawBoxed(graphics, fonts.small, format(&buf, "Combo x{d}", .{combo}), right, BOX_PAD_Y + small_h * 2, .right, if (combo >= consts.COMBO_LOST_MIN) .loud else .normal);
+    }
 
     //Bottom centre: ammo
     const ammo_y = height - small_h;
@@ -106,8 +111,19 @@ pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameSt
     if (game.invincible) drawBoxed(graphics, fonts.small, "INVINCIBLE", BOX_PAD_X, height - small_h, .left, .loud); //Debug, so screenshots don't mislead
 }
 
+/// A combo message in the world, centred on `x` with its bottom at `y`
+///
+pub fn drawPopup(graphics: pd.playdate_graphics, fonts: Fonts, kind: state.PopupKind, value: u32, x: c_int, y: c_int) void {
+    var buf: [24]u8 = undefined;
+    switch (kind) {
+        .combo => drawBoxed(graphics, fonts.small, format(&buf, "x{d}", .{value}), x, y - graphics.getFontHeight.?(fonts.small), .centre, .normal),
+        .milestone => drawBoxed(graphics, fonts.big, format(&buf, "COMBO x{d}!", .{value}), x, y - graphics.getFontHeight.?(fonts.big), .centre, .loud),
+        .lost => drawBoxed(graphics, fonts.small, "COMBO LOST", x, y - graphics.getFontHeight.?(fonts.small), .centre, .loud),
+    }
+}
+
 const WAVE_LABEL_X = 34; //Clear of the FPS counter
-const BANNER_Y = 24; //Under the top HUD row and clear of the player, who is in the middle of the screen
+const BANNER_Y = 140; //Below the player (in the middle of the screen), clear of the HUD at the top and bottom
 
 /// Whole seconds left on a countdown, rounded up so it never shows 0 while still counting
 ///

@@ -44,6 +44,9 @@ const DrawItem = extern struct {
 /// index in the low half. Sorting plain u32s needs no indirection, and as keys are unique the order is stable
 const SortKey = u32;
 
+/// How fast combo messages float up
+const POPUP_RISE_PX_PER_SEC: f32 = 30;
+
 /// Seconds per on/off cycle of a drop that is about to vanish
 const DROP_BLINK_PERIOD: f32 = 0.25;
 
@@ -141,6 +144,16 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
 
     //---Text is never inverted by the hit flash, so it stays readable
     _ = graphics.setDrawMode.?(pd.kDrawModeCopy);
+
+    //---Combo messages float up from above where they happened
+    const popups = &game.popups;
+    for (popups.pos[0..popups.len], popups.life[0..popups.len], popups.value[0..popups.len], popups.kind[0..popups.len]) |p, life, value, kind| {
+        const rise: i32 = @intFromFloat((kind.duration() - life) * POPUP_RISE_PX_PER_SEC);
+        const at = screen.toScreen(p) - Vec2i{ 0, @as(i32, bitmap_descs.CHAR_H) + rise };
+        if (at[0] < -50 or at[0] > screen.width + 50 or at[1] < -30 or at[1] > screen.height) continue;
+        hud_mod.drawPopup(graphics, assets.fonts, kind, value, at[0], at[1]);
+    }
+
     if (hud.game_over) |over| {
         hud_mod.drawGameOver(graphics, assets.fonts, game, hud, over, screen.width, screen.height);
     } else {

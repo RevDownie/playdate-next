@@ -244,7 +244,7 @@ fn logStatus(now_ms: u32) void {
         if (maths.magnitudeSqrd(d - p.pos) < maths.magnitudeSqrd(drops.pos[near] - p.pos)) near = i;
     }
     const near_pos = if (drops.len > 0) drops.pos[near] else p.pos;
-    debugLog("t={d}ms wave={d}:{s} enemies={d} health={d} score={d} pos=({d:.2},{d:.2}) bullets={d} reload={d:.1} drops={d} invincible={} near={s}({d:.2},{d:.2}) aim=({d:.2},{d:.2}) target={s} crank={d:.1} frame_mem={d} drawn={d} sim_ms_max={d:.2}", .{ now_ms, game_state.spawner.wave, @tagName(game_state.spawner.phase), game_state.enemies.len, p.health, p.score, p.pos[0], p.pos[1], game_state.bullets.ammo, @max(game_state.bullets.reload_timer, 0), drops.len, game_state.invincible, if (drops.len > 0) @tagName(drops.kind[near]) else "none", near_pos[0], near_pos[1], p.facing_dir[0], p.facing_dir[1], if (p.target_pos != null) "yes" else "no", playdate_api.system.*.getCrankAngle.?(), frame_arena.high_water, last_render_stats.drawn, sim_ms_max });
+    debugLog("t={d}ms wave={d}:{s} enemies={d} health={d} score={d} combo={d} pos=({d:.2},{d:.2}) bullets={d} reload={d:.1} drops={d} invincible={} near={s}({d:.2},{d:.2}) aim=({d:.2},{d:.2}) target={s} crank={d:.1} frame_mem={d} drawn={d} sim_ms_max={d:.2}", .{ now_ms, game_state.spawner.wave, @tagName(game_state.spawner.phase), game_state.enemies.len, p.health, p.score, p.kill_streak, p.pos[0], p.pos[1], game_state.bullets.ammo, @max(game_state.bullets.reload_timer, 0), drops.len, game_state.invincible, if (drops.len > 0) @tagName(drops.kind[near]) else "none", near_pos[0], near_pos[1], p.facing_dir[0], p.facing_dir[1], if (p.target_pos != null) "yes" else "no", playdate_api.system.*.getCrankAngle.?(), frame_arena.high_water, last_render_stats.drawn, sim_ms_max });
     sim_ms_max = 0;
 }
 

@@ -49,12 +49,12 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     //3. Move projectiles (walls stop them) and resolve bullet -> enemy hits (kills are flagged then compacted out)
     bullet_sys.update(&game.bullets, grid, dt);
     const hits = bullet_sys.collide(&game.bullets, game.enemies.positions(), frame_arena.alloc(state.Hit, game.bullets.len));
-    combat_sys.applyBulletHits(hits, &game.enemies, &game.player);
+    combat_sys.applyBulletHits(hits, &game.enemies, &game.player, &game.popups);
     game.bullets.removeDead();
     game.enemies.removeDead();
 
     //4. Enemies touching the player hurt them
-    combat_sys.applyEnemyContact(&game.enemies, &game.player, if (game.invincible) 0 else consts.CONTACT_DMG);
+    combat_sys.applyEnemyContact(&game.enemies, &game.player, if (game.invincible) 0 else consts.CONTACT_DMG, &game.popups);
     if (game.player.health == 0) {
         game.player.hit_flash_timer = 0; //The run end screen shows the last frame, so don't leave it inverted
         return .player_died;
@@ -76,6 +76,7 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
 
     //7. Effects
     game.player.hit_flash_timer = @max(game.player.hit_flash_timer - dt, 0);
+    game.popups.update(dt);
 
     return .playing;
 }
