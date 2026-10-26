@@ -65,6 +65,12 @@ pub inline fn abs(v: Vec2f) Vec2f {
     return Vec2f{ if (v[0] >= 0) v[0] else -v[0], if (v[1] >= 0) v[1] else -v[1] };
 }
 
+/// Dot product: the cosine of the angle between two unit vectors
+///
+pub inline fn dot(v1: Vec2f, v2: Vec2f) f32 {
+    return v1[0] * v2[0] + v1[1] * v2[1];
+}
+
 test "[maths] normaliseSafe - regular" {
     const n = normaliseSafe(Vec2f{ 10, 10 }, Vec2f{ 0, 0 });
     const expected = Vec2f{ 0.707, 0.707 };

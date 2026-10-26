@@ -157,6 +157,8 @@ test "[scenario] bullets can't go through walls" {
     var game = state.GameState{};
     game.spawner.next_spawn_timer = std.math.inf(f32);
     game.enemies.add(.{ 4, 0 }); //Behind the vertical wall at x = 2m
+    //It is off screen and behind the wall so the gun keeps its aim: point that at the wall
+    game.player.facing_dir = .{ 1, 0 };
 
     //Crank flat out the whole time the enemy is behind the wall (it is pathing round the end)
     var frames: usize = 0;
@@ -166,9 +168,32 @@ test "[scenario] bullets can't go through walls" {
         const before = game.bullets.magazine;
         _ = t.tick(&game, .{ .crank_delta = consts.FIRE_ANGLE_DELTA });
         if (game.bullets.magazine < before) shots += 1;
+        for (game.bullets.dir[0..game.bullets.len]) |d| try std.testing.expect(d[0] > 0.99); //At the wall
         const p = game.enemies.pos[0];
         if (p[0] < 2.3 or @abs(p[1]) > 4) break;
         try std.testing.expect(game.enemies.health[0] == consts.ENEMY_MAX_HEALTH);
     }
     try std.testing.expect(shots > 30);
+}
+
+test "[scenario] the gun shoots the enemy it can see, not a closer one behind a wall" {
+    var t: TestLevel = .{};
+    t.init(true);
+    var game = state.GameState{};
+    game.spawner.next_spawn_timer = std.math.inf(f32);
+    game.player.pos = .{ 1, 0 };
+    game.enemies.add(.{ 2.5, 0 }); //1.5m away, on screen but behind the vertical wall at x = 2m
+    game.enemies.add(.{ -0.6, 0 }); //1.6m away in the open
+
+    var frames: usize = 0;
+    while (frames < 60) : (frames += 1) {
+        game.bullets.magazine = consts.BULLET_MAG_SIZE;
+        _ = t.tick(&game, .{ .crank_delta = consts.FIRE_ANGLE_DELTA });
+        for (game.enemies.positions(), game.enemies.health[0..game.enemies.len]) |p, h| {
+            if (p[0] > 1.75) try std.testing.expect(h == consts.ENEMY_MAX_HEALTH); //Never wasted a shot on the wall
+        }
+    }
+    //The one in the open is dead and the gun has stopped aiming at anything
+    try std.testing.expect(game.enemies.len == 1 and game.enemies.pos[0][0] > 1.75);
+    try std.testing.expect(game.player.target_pos == null);
 }

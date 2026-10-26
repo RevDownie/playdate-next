@@ -30,6 +30,15 @@ pub const SPAWN_MIN_PLAYER_DIST: f32 = 3.0; //...but never closer than this to t
 pub const SPAWN_ATTEMPTS: u8 = 4; //Random spawn cells tried per enemy before giving up (they must be reachable and far enough away)
 pub const RNG_SEED: u64 = 42;
 
+/// Auto targetting. The gun only aims at enemies the player can see: inside the camera's view and with a
+/// clear line from the player's feet. Candidates are ranked by distance, scaled down by the weights below
+pub const VIEW_HALF_WIDTH: f32 = 200.0 / METRES_TO_PIXELS; //Half the 400x240 screen in metres, around the camera
+pub const VIEW_HALF_HEIGHT: f32 = 120.0 / METRES_TO_PIXELS;
+pub const TARGET_VIEW_MARGIN: f32 = 0.1; //Metres beyond the screen edge an enemy can be targeted (as it walks on)
+pub const TARGET_AHEAD_WEIGHT: f32 = 0.6; //An enemy dead ahead of the player's movement counts as 60% closer
+pub const TARGET_STICKY_WEIGHT: f32 = 0.15; //...and one along the current aim 15% closer, so the aim doesn't flick
+pub const TARGET_MAX_LOS_TESTS: u8 = 8; //Line of sight tests per frame, on the best candidates first
+
 pub const FIRE_ANGLE_DELTA: f32 = 60;
 pub const FIRE_BUTTON_DELAY: f32 = 0.5;
 

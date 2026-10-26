@@ -40,6 +40,10 @@ const DrawItem = extern struct {
 /// index in the low half. Sorting plain u32s needs no indirection, and as keys are unique the order is stable
 const SortKey = u32;
 
+/// Size in pixels of the ring drawn at the gun's target's feet
+const TARGET_RING_W = 30;
+const TARGET_RING_H = 12;
+
 pub const BYTES_PER_DRAW_ITEM = @sizeOf(DrawItem) + @sizeOf(SortKey);
 comptime {
     std.debug.assert(@sizeOf(DrawItem) == 8);
@@ -80,6 +84,12 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     const bg_screen_pos = screen.toScreen(Vec2f{ 0, 0 });
     const bg_size = level.bg_size_pixels;
     graphics.tileBitmap.?(assets.bg_bitmap, bg_screen_pos[0] - @divTrunc(bg_size[0], 2), bg_screen_pos[1] - @divTrunc(bg_size[1], 2), bg_size[0], bg_size[1], pd.kBitmapUnflipped);
+
+    //---Ring on the ground under the gun's target, below the sprites. XOR so it reads on light and dark ground
+    if (game.player.target_pos) |t| {
+        const feet = screen.toScreen(t);
+        graphics.drawEllipse.?(feet[0] - TARGET_RING_W / 2, feet[1] - TARGET_RING_H / 2, TARGET_RING_W, TARGET_RING_H, 2, 0, 360, pd.kColorXOR);
+    }
 
     //---Build the draw list of visible sprites. Characters face the way they are aiming / moving
     const max_items = 1 + game.enemies.len + level.obj_world_positions.len;

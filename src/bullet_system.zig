@@ -52,8 +52,7 @@ pub fn update(bullets: *Bullets, grid: *const CollisionGrid, dt: f32) void {
     }
 
     const step = consts.BULLET_MAX_SPEED * dt;
-    const sample_len = @as(f32, @floatFromInt(@min(grid.cell_width, grid.cell_height))) / consts.METRES_TO_PIXELS * 0.5;
-    const num_samples: u32 = @intFromFloat(@max(@ceil(step / sample_len), 1));
+    const num_samples: u32 = @intFromFloat(@max(@ceil(step / grid.sampleLength()), 1));
     const sample_step: Vec2f = @splat(step / @as(f32, @floatFromInt(num_samples)));
 
     for (bullets.pos[0..bullets.len], bullets.dir[0..bullets.len], bullets.lifetime[0..bullets.len]) |*p, d, *l| {
