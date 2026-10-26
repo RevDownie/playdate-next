@@ -54,7 +54,7 @@ pub const MUZZLE_FORWARD: f32 = 0.14; //Metres ahead of the player the barrels e
 pub const MUZZLE_SIDE: f32 = 0.08; //Metres to the player's right the gun is held
 pub const BARREL_RADIUS: f32 = 0.02; //Metres from the gun's axis to each barrel
 pub const MUZZLE_CONVERGE_DIST: f32 = 1.5; //The drawn muzzle offset fades out over this many metres so tracers meet the aim line
-pub const TRACER_LENGTH: f32 = 0.2; //Metres of streak drawn behind each bullet
+pub const TRACER_LENGTH: f32 = 0.3; //Metres of trail drawn behind each bullet (longer than a 50 FPS step so the stream looks unbroken)
 
 pub const FLASH_HIT_EFFECT_DURATION: f32 = 0.3;
 

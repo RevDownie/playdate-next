@@ -102,8 +102,7 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
         graphics.drawBitmap.?(bitmap, item.x, item.y, if (item.flipped) pd.kBitmapFlippedX else pd.kBitmapUnflipped);
     }
 
-    //---Bullets are tracer streaks on top, at gun height: a black core in a white outline so they read over
-    //the dark enemies as well as the light ground. TODO: Interleave bullets
+    //---Bullets are comet tracers on top, at gun height. TODO: Interleave bullets
     const bullets = &game.bullets;
     const gun_height = Vec2i{ 0, consts.GUN_HEIGHT_PX };
     for (bullets.pos[0..bullets.len], bullets.dir[0..bullets.len], bullets.lifetime[0..bullets.len], bullets.barrel[0..bullets.len]) |p, d, l, b| {
@@ -111,8 +110,7 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
         const tracer = anim.bulletTracer(p, d, travelled, b);
         const head = screen.toScreen(tracer.head) - gun_height;
         const tail = screen.toScreen(tracer.tail) - gun_height;
-        graphics.drawLine.?(tail[0], tail[1], head[0], head[1], 4, pd.kColorWhite);
-        graphics.drawLine.?(tail[0], tail[1], head[0], head[1], 2, pd.kColorBlack);
+        drawTracer(graphics, head, tail);
     }
 
     //---HUD. TODO: Replace with bitmap font
@@ -174,4 +172,27 @@ fn drawLabel(graphics: pd.playdate_graphics, comptime fmt: []const u8, value: an
     var buffer: [32]u8 = undefined;
     const text = std.fmt.bufPrint(&buffer, fmt, .{value}) catch buffer[0..];
     _ = graphics.drawText.?(text.ptr, text.len, pd.kASCIIEncoding, x, y);
+}
+
+/// 8x8 dither patterns for the fading tracer tail: 8 rows of image (1 = white) then 8 rows of mask
+const PATTERN_HALF: pd.LCDPattern = .{ 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+const PATTERN_QUARTER: pd.LCDPattern = .{ 0xEE, 0xBB, 0xEE, 0xBB, 0xEE, 0xBB, 0xEE, 0xBB, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+
+/// Draw a bullet as a comet: a solid head fading through 50% then 25% dither towards the tail, over a white
+/// glow so it reads on the dark enemies as well as the light ground
+///
+fn drawTracer(graphics: pd.playdate_graphics, head: Vec2i, tail: Vec2i) void {
+    const front = lerpPoint(head, tail, 0.33);
+    const back = lerpPoint(head, tail, 0.66);
+    graphics.drawLine.?(tail[0], tail[1], head[0], head[1], 7, pd.kColorWhite);
+    graphics.drawLine.?(tail[0], tail[1], back[0], back[1], 3, @intFromPtr(&PATTERN_QUARTER));
+    graphics.drawLine.?(back[0], back[1], front[0], front[1], 4, @intFromPtr(&PATTERN_HALF));
+    graphics.drawLine.?(front[0], front[1], head[0], head[1], 4, pd.kColorBlack);
+    graphics.fillEllipse.?(head[0] - 3, head[1] - 3, 6, 6, 0, 360, pd.kColorBlack);
+}
+
+fn lerpPoint(a: Vec2i, b: Vec2i, t: f32) Vec2i {
+    const af: Vec2f = @floatFromInt(a);
+    const bf: Vec2f = @floatFromInt(b);
+    return @intFromFloat(@round(af + (bf - af) * @as(Vec2f, @splat(t))));
 }
