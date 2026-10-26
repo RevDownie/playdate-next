@@ -56,7 +56,6 @@ pub fn collide(bullets: *Bullets, enemy_positions: []const Vec2f, hits_out: []Hi
     std.debug.assert(hits_out.len >= bullets.len);
     var num_hits: usize = 0;
 
-    //Only positions and lifetimes are touched per test (see state.COLLISION_HOT_SET_BYTES); dir is read on a hit
     for (bullets.pos[0..bullets.len], bullets.lifetime[0..bullets.len], 0..) |bullet_pos, *lifetime, bullet_idx| {
         if (lifetime.* <= 0) continue;
         for (enemy_positions, 0..) |enemy_pos, enemy_idx| {

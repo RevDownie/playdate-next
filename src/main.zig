@@ -70,7 +70,7 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     sys.setUpdateCallback.?(gameUpdateWrapper, null);
     _ = sys.addMenuItem.?("Restart Level", restartLevel, null);
 
-    playdate_api.display.*.setRefreshRate.?(0); //Temp unleashing the frame limit to measure performance
+    playdate_api.display.*.setRefreshRate.?(0);
 
     //TODO: Decide if we change level on restart and also decide if we have shared bitmap atlas
     loadLevel("lvl1.bin");

@@ -29,12 +29,11 @@ fn buildLookupTable() [36]BitmapFrame {
 ///
 pub fn bitmapFrameForDir(dir: Vec2f) BitmapFrame {
     const deg = maths.angleDegrees360(@Vector(2, f32){ 0, -1 }, dir);
-    //Clamp in float space - rounding can land exactly on 360, and @min/@max drop a NaN so the cast is always safe
     const index: usize = @intFromFloat(std.math.clamp(deg * 0.1, 0, @as(f32, BITMAP_INDEX_MAP.len - 1)));
     return BITMAP_INDEX_MAP[index];
 }
 
-/// Given the world pos calculate a screen height offset do have the charater bob
+/// Given the world pos calculate a screen height offset to have the charater bob
 ///
 pub fn walkBobAnim(world_pos: Vec2f) i32 {
     const freq: f32 = 24.0;

@@ -12,8 +12,7 @@ const Vec2f = @Vector(2, f32);
 /// * Entities moving towards the player target, following the flow field around obstacles
 /// * Entities bumping back in response to a collision
 ///
-/// Walls come from the flow field (see `FlowField.slide`) so the only per-cell data this loop touches at
-/// random is `field.dir`
+/// Walls come from the flow field
 ///
 pub fn update(enemies: *Enemies, field: *const FlowField, grid: *const CollisionGrid, player_world_pos: Vec2f, dt: f32) void {
     for (0..enemies.len) |i| {
