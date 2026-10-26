@@ -101,7 +101,7 @@ pub const Enemies = struct {
     }
 };
 
-/// Live bullets plus the magazine they are fired from. Bullets are dead once their lifetime reaches zero
+/// Live bullets plus the ammo they are fired from. Bullets are dead once their lifetime reaches zero
 ///
 pub const Bullets = struct {
     pub const capacity = consts.BULLET_POOL_SIZE;
@@ -112,8 +112,8 @@ pub const Bullets = struct {
     dir: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined, //Only read when moving or on a hit
     barrel: [capacity]u8 align(memory.CACHE_LINE_SIZE) = undefined, //Gatling barrel it left from, only read when drawn
 
-    magazine: u8 = consts.BULLET_MAG_SIZE,
-    reload_timer: f32 = 0, //Reloading while > 0
+    ammo: u8 = consts.START_AMMO,
+    reload_timer: f32 = 0, //Reloading an ammo drop while > 0, and can't fire
     next_barrel: u8 = 0, //Barrel the next shot leaves from, turns with every shot
 
     pub fn isReloading(self: *const Bullets) bool {
@@ -169,20 +169,91 @@ pub const Spawner = struct {
     next_spawn_timer: f32 = consts.FIRST_SPAWN_TIME,
 };
 
+/// What a drop gives, in the order of the drops bitmap table (see drop_sprites.py)
+///
+pub const DropKind = enum(u8) {
+    ammo_small,
+    ammo_large,
+    health_small,
+    health_large,
+
+    pub fn isAmmo(self: DropKind) bool {
+        return self == .ammo_small or self == .ammo_large;
+    }
+
+    pub fn isLarge(self: DropKind) bool {
+        return self == .ammo_large or self == .health_large;
+    }
+};
+
+/// Ammo and health lying on the level's drop points, waiting to be picked up. Dead once their lifetime runs
+/// out or they are collected (lifetime set to 0)
+///
+pub const Drops = struct {
+    pub const capacity = consts.MAX_DROPS;
+
+    len: u8 = 0,
+    pos: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined,
+    lifetime: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined,
+    kind: [capacity]DropKind align(memory.CACHE_LINE_SIZE) = undefined,
+    point: [capacity]u8 align(memory.CACHE_LINE_SIZE) = undefined, //Index of the level drop point it is on, so two never share one
+
+    spawn_timer: f32 = consts.FIRST_DROP_TIME, //Counts down to the next drop while there is room for one
+
+    pub fn add(self: *Drops, world_pos: Vec2f, kind: DropKind, point: u8) void {
+        std.debug.assert(self.len < capacity);
+        const i = self.len;
+        self.pos[i] = world_pos;
+        self.lifetime[i] = consts.DROP_LIFETIME;
+        self.kind[i] = kind;
+        self.point[i] = point;
+        self.len += 1;
+    }
+
+    pub fn isFull(self: *const Drops) bool {
+        return self.len >= capacity;
+    }
+
+    /// Swap-remove every drop that has expired or been collected
+    ///
+    pub fn removeDead(self: *Drops) void {
+        var i: u8 = 0;
+        while (i < self.len) {
+            if (self.lifetime[i] > 0) {
+                i += 1;
+                continue;
+            }
+            const last = self.len - 1;
+            self.pos[i] = self.pos[last];
+            self.lifetime[i] = self.lifetime[last];
+            self.kind[i] = self.kind[last];
+            self.point[i] = self.point[last];
+            self.len = last;
+        }
+    }
+
+    pub fn positions(self: *const Drops) []const Vec2f {
+        return self.pos[0..self.len];
+    }
+};
+
 pub const GameState = struct {
     player: Player = .{},
     enemies: Enemies = .{},
     bullets: Bullets = .{},
+    drops: Drops = .{},
     trigger: Trigger = .{},
     spawner: Spawner = .{},
     camera_pos: Vec2f = @splat(0),
     rng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(consts.RNG_SEED), //Not reset between runs
+    invincible: bool = false, //Debug: enemies can't hurt the player (set from the debug menu). Not reset between runs
 
-    /// Back to the start of a run, keeping the random sequence going
+    /// Back to the start of a run, keeping the random sequence going and the debug settings
     ///
     pub fn reset(self: *GameState) void {
         const rng = self.rng;
-        self.* = .{ .rng = rng };
+        const invincible = self.invincible;
+        self.* = .{ .rng = rng, .invincible = invincible };
     }
 };
 
@@ -227,6 +298,18 @@ test "[game_state] bullets removeDead" {
     b.removeDead();
     try std.testing.expect(b.len == 2);
     for (b.lifetime[0..b.len]) |l| try std.testing.expect(l > 0);
+}
+
+test "[game_state] drops removeDead keeps the live ones with their data" {
+    var d = Drops{};
+    d.add(Vec2f{ 0, 0 }, .ammo_small, 0);
+    d.add(Vec2f{ 1, 0 }, .health_large, 1);
+    d.add(Vec2f{ 2, 0 }, .ammo_large, 2);
+    d.lifetime[0] = 0;
+    d.removeDead();
+    try std.testing.expect(d.len == 2);
+    try std.testing.expect(d.pos[0][0] == 2 and d.kind[0] == .ammo_large and d.point[0] == 2);
+    try std.testing.expect(d.pos[1][0] == 1 and d.kind[1] == .health_large and d.point[1] == 1);
 }
 
 test "[game_state] reset keeps rng sequence" {

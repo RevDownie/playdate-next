@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<map version="1.9" tiledversion="1.9.2" orientation="orthogonal" renderorder="right-down" width="30" height="30" tilewidth="231" tileheight="110" infinite="0" nextlayerid="2" nextobjectid="1">
+<map version="1.9" tiledversion="1.9.2" orientation="orthogonal" renderorder="right-down" width="30" height="30" tilewidth="231" tileheight="110" infinite="0" nextlayerid="3" nextobjectid="15">
  <editorsettings>
   <export target="lvl1.json" format="json"/>
  </editorsettings>
@@ -38,4 +38,48 @@
 226,226,226,226,226,226,226,226,226,226,226,226,226,226,226,226,226,226,226,226,226,226,226,226,226,226,226,226,226,226
 </data>
  </layer>
+ <objectgroup id="2" name="drops">
+  <object id="1" name="small" x="1039.5" y="1155">
+   <point/>
+  </object>
+  <object id="2" name="small" x="1039.5" y="2145">
+   <point/>
+  </object>
+  <object id="3" name="small" x="2656.5" y="1155">
+   <point/>
+  </object>
+  <object id="4" name="small" x="3349.5" y="2145">
+   <point/>
+  </object>
+  <object id="5" name="small" x="5890.5" y="1155">
+   <point/>
+  </object>
+  <object id="6" name="small" x="5659.5" y="2145">
+   <point/>
+  </object>
+  <object id="7" name="small" x="2425.5" y="1595">
+   <point/>
+  </object>
+  <object id="8" name="small" x="4735.5" y="1375">
+   <point/>
+  </object>
+  <object id="9" name="large" x="1270.5" y="275">
+   <point/>
+  </object>
+  <object id="10" name="large" x="3580.5" y="275">
+   <point/>
+  </object>
+  <object id="11" name="large" x="5659.5" y="275">
+   <point/>
+  </object>
+  <object id="12" name="large" x="1270.5" y="3025">
+   <point/>
+  </object>
+  <object id="13" name="large" x="3811.5" y="2915">
+   <point/>
+  </object>
+  <object id="14" name="large" x="5659.5" y="3025">
+   <point/>
+  </object>
+ </objectgroup>
 </map>

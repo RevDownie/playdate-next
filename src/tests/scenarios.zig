@@ -12,6 +12,8 @@ const FlowField = @import("../flow_field.zig").FlowField;
 const level_loader = @import("../level_loader.zig");
 const maths = @import("../maths.zig");
 
+const Vec2f = @Vector(2, f32);
+
 /// Level used by the tests: a 30x30 grid of 64px (0.5m) cells, centred on the origin. With `walls` there is
 /// a vertical wall at column 19 (x = 2m) from row 5 to 24 and a horizontal one along row 8 (y = 3.5m) from
 /// column 3 to 12, so enemies have something to path around; the player at the origin is in the open
@@ -36,6 +38,8 @@ const TestLevel = struct {
             .obj_bitmap_indices = &.{},
             .collision_grid = .{ .cells = &self.cells, .width = 30, .height = 30, .cell_width = 64, .cell_height = 64 },
             .spawn_cells = &.{},
+            .drop_cells = &.{},
+            .drop_sizes = &.{},
             .bg_size_pixels = .{ 0, 0 },
         };
         self.level_arena = Arena.init("level", &self.level_buffer);
@@ -57,11 +61,11 @@ test "[scenario] worst case: max enemies and bullets fit the frame arena and poo
     var game = state.GameState{};
 
     //Hold fire until the horde is full (the gun otherwise keeps the count low), then spin the crank flat out
-    //with an endless magazine. The player walks a loop the whole time so the flow field keeps rebuilding
+    //with endless ammo. The player walks a loop the whole time so the flow field keeps rebuilding
     var frames: usize = 0;
     var max_enemies: usize = 0;
     while (frames < 60 * 120) : (frames += 1) {
-        game.bullets.magazine = consts.BULLET_MAG_SIZE;
+        game.bullets.ammo = consts.MAX_AMMO;
         game.player.health = consts.PLAYER_MAX_HEALTH;
         const phase = (frames / 120) % 4;
         const firing = max_enemies == state.Enemies.capacity;
@@ -138,8 +142,9 @@ test "[scenario] the player dies if left alone" {
 }
 
 test "[scenario] balance: a steadily cranked gun holds the horde off for a while, but is overrun in the end" {
-    //A player standing still in the open turning the crank once a second, at the device's 50 FPS. Measured
-    //at the time of tuning: ~68s survived and ~95 kills, against ~13s and none without firing
+    //A player standing still in the open turning the crank once a second, at the device's 50 FPS, with ammo
+    //kept topped up (this measures the gun against the horde; ammo comes from drops, see the drop scenarios).
+    //Measured at the time of tuning: ~68s survived and ~95 kills, against ~13s and none without firing
     const dt: f32 = 1.0 / 50.0;
     var t: TestLevel = .{};
     t.init(true);
@@ -150,6 +155,7 @@ test "[scenario] balance: a steadily cranked gun holds the horde off for a while
     var kills: u32 = 0;
     while (result == .playing and frames < 50 * 300) : (frames += 1) {
         const streak = game.player.kill_streak;
+        game.bullets.ammo = consts.MAX_AMMO;
         t.frame_arena.reset();
         result = game_mod.tick(&game, &t.level, &t.field, .{ .crank_delta = 360.0 * dt }, dt, &t.frame_arena);
         if (game.player.kill_streak > streak) kills += game.player.kill_streak - streak;
@@ -187,10 +193,10 @@ test "[scenario] bullets can't go through walls" {
     var frames: usize = 0;
     var shots: usize = 0;
     while (frames < 60 * 3) : (frames += 1) {
-        game.bullets.magazine = consts.BULLET_MAG_SIZE;
-        const before = game.bullets.magazine;
+        game.bullets.ammo = consts.MAX_AMMO;
+        const before = game.bullets.ammo;
         _ = t.tick(&game, .{ .crank_delta = consts.FIRE_ANGLE_DELTA });
-        if (game.bullets.magazine < before) shots += 1;
+        if (game.bullets.ammo < before) shots += 1;
         for (game.bullets.dir[0..game.bullets.len]) |d| try std.testing.expect(d[0] > 0.99); //At the wall
         const p = game.enemies.pos[0];
         if (p[0] < 2.3 or @abs(p[1]) > 4) break;
@@ -210,7 +216,7 @@ test "[scenario] the gun shoots the enemy it can see, not a closer one behind a 
 
     var frames: usize = 0;
     while (frames < 60) : (frames += 1) {
-        game.bullets.magazine = consts.BULLET_MAG_SIZE;
+        game.bullets.ammo = consts.MAX_AMMO;
         _ = t.tick(&game, .{ .crank_delta = consts.FIRE_ANGLE_DELTA });
         for (game.bullets.dir[0..game.bullets.len]) |d| try std.testing.expect(d[0] < 0); //Never a shot at the wall
         for (game.enemies.positions(), game.enemies.health[0..game.enemies.len]) |p, h| {
@@ -236,4 +242,105 @@ test "[scenario] with nothing in sight the gun aims the way the player moves, or
     _ = t.tick(&game, .{}); //Stopped: keeps aiming right rather than snapping back
     try std.testing.expect(game.player.facing_dir[0] == 1 and game.player.facing_dir[1] == 0);
     try std.testing.expect(game.player.target_pos == null);
+}
+
+/// Drop points for the drop scenarios: small ones 3m out on each side of the player's start, large ones further
+/// out in two corners
+const TEST_DROP_POSITIONS = [_]Vec2f{ .{ 3, 0 }, .{ -3, 0 }, .{ 0, 3 }, .{ 0, -3 }, .{ 5, 5 }, .{ -5, -5 } };
+const TEST_DROP_SIZES = [_]level_loader.DropSize{ .small, .small, .small, .small, .large, .large };
+
+/// Crank steadily for `secs` with no enemies, either standing still or walking to the nearest ammo drop.
+/// Returns the shots fired
+fn shotsFiredWithDrops(walk_to_drops: bool, secs: f32) !u32 {
+    const dt: f32 = 1.0 / 50.0;
+    var t: TestLevel = .{};
+    t.init(false);
+    var drop_cells: [TEST_DROP_POSITIONS.len]u16 = undefined;
+    for (TEST_DROP_POSITIONS, &drop_cells) |p, *c| c.* = t.level.collision_grid.cellIndex(p).?;
+    t.level.drop_cells = &drop_cells;
+    t.level.drop_sizes = &TEST_DROP_SIZES;
+    var game = state.GameState{};
+    game.spawner.next_spawn_timer = std.math.inf(f32);
+
+    var shots: u32 = 0;
+    var frames: usize = 0;
+    while (@as(f32, @floatFromInt(frames)) * dt < secs) : (frames += 1) {
+        var input = state.Input{ .crank_delta = 360.0 * dt };
+        if (walk_to_drops) {
+            var nearest: ?Vec2f = null;
+            for (game.drops.positions(), game.drops.kind[0..game.drops.len]) |p, k| {
+                if (!k.isAmmo()) continue;
+                if (nearest == null or maths.magnitude(p - game.player.pos) < maths.magnitude(nearest.? - game.player.pos)) nearest = p;
+            }
+            if (nearest) |n| {
+                const d = n - game.player.pos;
+                input.right = d[0] > 0.05;
+                input.left = d[0] < -0.05;
+                input.up = d[1] > 0.05;
+                input.down = d[1] < -0.05;
+            }
+        }
+        const before = game.bullets.ammo;
+        t.frame_arena.reset();
+        _ = game_mod.tick(&game, &t.level, &t.field, input, dt, &t.frame_arena);
+        if (game.bullets.ammo < before) shots += 1;
+        try std.testing.expect(game.drops.len <= state.Drops.capacity);
+    }
+    return shots;
+}
+
+test "[scenario] the gun never reloads by itself: standing still it runs dry" {
+    const shots = try shotsFiredWithDrops(false, 60);
+    try std.testing.expect(shots == consts.START_AMMO);
+}
+
+test "[scenario] a player who goes out for ammo drops keeps firing" {
+    const standing = try shotsFiredWithDrops(false, 60);
+    const walking = try shotsFiredWithDrops(true, 60);
+    //A steady crank wants 12 shots a second; walking to drops should keep the gun going much longer
+    try std.testing.expect(walking > standing * 3);
+}
+
+/// Survive the horde in the open test level, cranking steadily the whole time, either standing still or
+/// walking to the nearest useful drop (ammo, or health once hurt). Returns the seconds survived
+fn secondsSurvivedWithDrops(walk_to_drops: bool) f32 {
+    const dt: f32 = 1.0 / 50.0;
+    var t: TestLevel = .{};
+    t.init(false);
+    var drop_cells: [TEST_DROP_POSITIONS.len]u16 = undefined;
+    for (TEST_DROP_POSITIONS, &drop_cells) |p, *c| c.* = t.level.collision_grid.cellIndex(p).?;
+    t.level.drop_cells = &drop_cells;
+    t.level.drop_sizes = &TEST_DROP_SIZES;
+    var game = state.GameState{};
+
+    var frames: usize = 0;
+    var result = game_mod.TickResult.playing;
+    while (result == .playing and frames < 50 * 600) : (frames += 1) {
+        var input = state.Input{ .crank_delta = 360.0 * dt };
+        if (walk_to_drops) {
+            const hurt = game.player.health < consts.PLAYER_MAX_HEALTH - consts.HEALTH_DROP_SMALL;
+            var nearest: ?Vec2f = null;
+            for (game.drops.positions(), game.drops.kind[0..game.drops.len]) |p, k| {
+                if (!k.isAmmo() and !hurt) continue;
+                if (nearest == null or maths.magnitude(p - game.player.pos) < maths.magnitude(nearest.? - game.player.pos)) nearest = p;
+            }
+            if (nearest) |n| {
+                const d = n - game.player.pos;
+                input.right = d[0] > 0.05;
+                input.left = d[0] < -0.05;
+                input.up = d[1] > 0.05;
+                input.down = d[1] < -0.05;
+            }
+        }
+        t.frame_arena.reset();
+        result = game_mod.tick(&game, &t.level, &t.field, input, dt, &t.frame_arena);
+    }
+    return @as(f32, @floatFromInt(frames)) * dt;
+}
+
+test "[scenario] under the horde, a player who goes out for drops outlives one who stands still" {
+    const standing = secondsSurvivedWithDrops(false);
+    const walking = secondsSurvivedWithDrops(true);
+    //Measured at the time of tuning: ~16s standing still, ~88s walking to drops
+    try std.testing.expect(walking > standing * 1.5);
 }

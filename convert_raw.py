@@ -2,6 +2,7 @@ import subprocess
 import argparse
 import os
 import shutil
+import drop_sprites
 
 """
 Simple script for running Imagemagick on source images to convert them to 1 bit images for Playdate
@@ -44,6 +45,8 @@ def createDescFile():
         f.write(f"pub const CHAR_H: u32 = {CHAR_H};\n")
         f.write(f"pub const ENV_OBJ_W: u32 = {ENV_W};\n")
         f.write(f"pub const ENV_OBJ_H: u32 = {ENV_H};\n")
+        f.write(f"pub const DROP_W: u32 = {drop_sprites.DROP_W};\n")
+        f.write(f"pub const DROP_H: u32 = {drop_sprites.DROP_H};\n")
         f.close();
 
 
@@ -63,6 +66,9 @@ if __name__ == "__main__":
 
     # Environment
     convertEnvironmentSprites(args.imagemagick, "raw-levels")
+
+    # Drops (hand authored 1-bit, written directly)
+    drop_sprites.write('images')
 
     # BGs
     cmds = [args.imagemagick, "raw-images\\bg.png", "-colorspace", "gray", "-ordered-dither", "h4x4a", "images\\bg.png"]

@@ -1,7 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const build_options = @import("build_options");
 const pd = @import("playdate.zig").api;
 const consts = @import("tweak_constants.zig");
+const maths = @import("maths.zig");
 const state = @import("game_state.zig");
 const game = @import("game.zig");
 const renderer = @import("renderer.zig");
@@ -34,6 +36,7 @@ var game_state: state.GameState = .{};
 /// Frame timing and requests from outside the frame loop
 var time_last_tick_ms: u32 = 0;
 var restart_requested = false;
+var invincible_menu_item: ?*pd.PDMenuItem = null; //Debug builds only
 
 /// Debug logging
 const debug_logging = builtin.mode == .debug;
@@ -69,6 +72,11 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
 
     sys.setUpdateCallback.?(gameUpdateWrapper, null);
     _ = sys.addMenuItem.?("Restart Level", restartLevel, null);
+    if (builtin.mode == .debug) {
+        //Debug only: `zig build -Dinvincible` (or `tools/sim.ps1 -Invincible`) starts with it ticked
+        game_state.invincible = build_options.invincible;
+        invincible_menu_item = sys.addCheckmarkMenuItem.?("Invincible", @intFromBool(game_state.invincible), toggleInvincible, null);
+    }
 
     playdate_api.display.*.setRefreshRate.?(0);
 
@@ -95,6 +103,12 @@ fn loadLevel(file_name: [*:0]const u8) void {
 ///
 fn restartLevel(_: ?*anyopaque) callconv(.c) void {
     restart_requested = true;
+}
+
+/// Debug system menu checkmark: read back its state, so enemies stop (or start) hurting the player
+///
+fn toggleInvincible(_: ?*anyopaque) callconv(.c) void {
+    game_state.invincible = playdate_api.system.*.getMenuItemValue.?(invincible_menu_item) != 0;
 }
 
 fn resetFrameTimer() void {
@@ -154,7 +168,14 @@ fn logStatus(now_ms: u32) void {
     last_log_time_ms = now_ms;
 
     const p = game_state.player;
-    debugLog("t={d}ms enemies={d} health={d} score={d} pos=({d:.2},{d:.2}) bullets={d} aim=({d:.2},{d:.2}) target={s} crank={d:.1} frame_mem={d} drawn={d} sim_ms_max={d:.2}", .{ now_ms, game_state.enemies.len, p.health, p.score, p.pos[0], p.pos[1], game_state.bullets.magazine, p.facing_dir[0], p.facing_dir[1], if (p.target_pos != null) "yes" else "no", playdate_api.system.*.getCrankAngle.?(), frame_arena.high_water, last_render_stats.drawn, sim_ms_max });
+    //The nearest drop, so a scripted run can walk to it
+    const drops = &game_state.drops;
+    var near: usize = 0;
+    for (drops.positions(), 0..) |d, i| {
+        if (maths.magnitudeSqrd(d - p.pos) < maths.magnitudeSqrd(drops.pos[near] - p.pos)) near = i;
+    }
+    const near_pos = if (drops.len > 0) drops.pos[near] else p.pos;
+    debugLog("t={d}ms enemies={d} health={d} score={d} pos=({d:.2},{d:.2}) bullets={d} reload={d:.1} drops={d} invincible={} near={s}({d:.2},{d:.2}) aim=({d:.2},{d:.2}) target={s} crank={d:.1} frame_mem={d} drawn={d} sim_ms_max={d:.2}", .{ now_ms, game_state.enemies.len, p.health, p.score, p.pos[0], p.pos[1], game_state.bullets.ammo, @max(game_state.bullets.reload_timer, 0), drops.len, game_state.invincible, if (drops.len > 0) @tagName(drops.kind[near]) else "none", near_pos[0], near_pos[1], p.facing_dir[0], p.facing_dir[1], if (p.target_pos != null) "yes" else "no", playdate_api.system.*.getCrankAngle.?(), frame_arena.high_water, last_render_stats.drawn, sim_ms_max });
     sim_ms_max = 0;
 }
 
@@ -164,7 +185,7 @@ fn logStatus(now_ms: u32) void {
 fn debugLog(comptime fmt: []const u8, args: anytype) void {
     if (!debug_logging) return;
 
-    var buf: [256]u8 = undefined;
+    var buf: [384]u8 = undefined;
     const msg = std.mem.printSentinel(&buf, "until-none: " ++ fmt, args, 0) catch return;
     playdate_api.system.*.logToConsole.?("%s", msg.ptr);
 

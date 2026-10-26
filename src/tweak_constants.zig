@@ -50,16 +50,41 @@ pub const BUMP_DISTANCE_SMALL = 0.125;
 pub const BUMP_TIME = 0.5;
 
 pub const DMG_PER_HIT: u8 = 50; //Two hits per enemy: the first knocks it back (and it can't hurt the player while recoiling), the second kills
-pub const BULLET_MAG_SIZE: u8 = 80;
-pub const BULLET_POOL_SIZE: u8 = BULLET_MAG_SIZE + 10; //A full mag lives at most BULLET_LIFETIME, which is no longer than RELOAD_TIME
+pub const BULLET_POOL_SIZE: u8 = 90; //The gun fires at most once a frame, so this covers BULLET_LIFETIME at up to 200 FPS
 pub const BULLET_MAX_SPEED: f32 = 14; //Must not step over an enemy's hit circle in one frame (checked in bullet_system)
 pub const BULLET_RANGE: f32 = 6.0; //Metres a bullet flies before it is spent (about two screen widths)
 pub const BULLET_LIFETIME: f32 = BULLET_RANGE / BULLET_MAX_SPEED;
 pub const BULLET_SPREAD: f32 = 0.035; //Most a shot strays sideways per metre travelled (about 2 degrees)
-pub const RELOAD_TIME = 1.5;
 comptime {
-    if (BULLET_LIFETIME > RELOAD_TIME) @compileError("BULLET_POOL_SIZE assumes a mag's bullets are gone by the time it has reloaded");
+    if (BULLET_LIFETIME * 200.0 > @as(f32, @floatFromInt(BULLET_POOL_SIZE))) @compileError("BULLET_POOL_SIZE can't hold every bullet in flight at 200 FPS");
 }
+
+/// Ammo. Nothing reloads the gun on its own: it only refills from ammo drops, so the player has to go out and
+/// find them. Picking one up reloads for a while (longer for a large drop) and the gun can't fire meanwhile
+pub const START_AMMO: u8 = 80; //About 7s of a steady crank
+pub const MAX_AMMO: u8 = 250; //Most the player can carry (ammo is a u8). An ammo drop is left lying while full
+
+/// Drops appear one at a time on the level's drop points (an object layer in the Tiled map). Small points sit in
+/// the middle of the map, outside the enemies' spawn band; large ones in the rooms at the top and bottom, where
+/// the horde arrives, behind the gaps in the walls. Big rewards mean going where the enemies come from
+pub const MAX_DROPS: u8 = 5; //Live at once. The timer waits while this many are lying around
+pub const FIRST_DROP_TIME: f32 = 3.0;
+pub const DROP_INTERVAL: f32 = 3.0; //Seconds between drops while there is room for one
+pub const DROP_LIFETIME: f32 = 20.0; //Uncollected drops vanish, so the map keeps changing and hoarding a spot doesn't pay
+pub const DROP_BLINK_TIME: f32 = 4.0; //A drop blinks for its last few seconds
+pub const DROP_LARGE_CHANCE: f32 = 0.35; //Chance a new drop goes on a large point rather than a small one
+pub const DROP_MIN_PLAYER_DIST: f32 = 2.0; //Drops never appear this close to the player: they have to go and get them
+pub const DROP_SPAWN_ATTEMPTS: u8 = 4; //Random points tried per drop (must be free and far enough away), then retried next frame
+pub const DROP_PICKUP_RADIUS: f32 = CHAR_WIDTH_M * 0.5;
+/// The chance a drop is ammo leans towards whichever of ammo and health the player is shorter of, within these
+pub const DROP_AMMO_CHANCE_MIN: f32 = 0.3;
+pub const DROP_AMMO_CHANCE_MAX: f32 = 0.75;
+pub const AMMO_DROP_SMALL: u8 = 40;
+pub const AMMO_DROP_LARGE: u8 = 150;
+pub const RELOAD_TIME_SMALL: f32 = 0.6; //Picking up ammo takes this long before the gun fires again
+pub const RELOAD_TIME_LARGE: f32 = 2.0; //...a large crate leaves the player defenceless for a while, out where the enemies spawn
+pub const HEALTH_DROP_SMALL: u8 = 15;
+pub const HEALTH_DROP_LARGE: u8 = 45;
 
 /// Gatling gun. Only affects where bullets are drawn: they are simulated from the player's feet so enemies
 /// right up against the player can still be hit

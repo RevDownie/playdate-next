@@ -18,15 +18,11 @@ comptime {
 }
 
 /// Spawn a new bullet at `world_pos` (the player's feet) heading along `world_dir`, turned sideways by
-/// `stray` (-1 to 1) times BULLET_SPREAD for a little machine gun scatter. Firing an empty magazine starts the reload
+/// `stray` (-1 to 1) times BULLET_SPREAD for a little machine gun scatter. Nothing fires while an ammo drop is
+/// reloading or when out of ammo: the gun never reloads by itself, only from drops (see drop_system)
 ///
 pub fn fire(bullets: *Bullets, world_pos: Vec2f, world_dir: Vec2f, stray: f32) void {
-    if (bullets.isReloading()) return;
-
-    if (bullets.magazine == 0) {
-        bullets.reload_timer = consts.RELOAD_TIME;
-        return;
-    }
+    if (bullets.isReloading() or bullets.ammo == 0) return;
 
     if (bullets.len >= Bullets.capacity) return; //Pool exhausted - drop the shot rather than overrun
 
@@ -37,19 +33,16 @@ pub fn fire(bullets: *Bullets, world_pos: Vec2f, world_dir: Vec2f, stray: f32) v
     bullets.barrel[i] = bullets.next_barrel;
     bullets.lifetime[i] = consts.BULLET_LIFETIME;
     bullets.len += 1;
-    bullets.magazine -= 1;
+    bullets.ammo -= 1;
     bullets.next_barrel = (bullets.next_barrel + 1) % consts.GUN_BARRELS;
 }
 
-/// Reload, age the bullets and move them along their trajectories. Each move is sampled at least every half
+/// Count down any reload, age the bullets and move them along their trajectories. Each move is sampled at least every half
 /// cell so a bullet can't tunnel through a wall; one that reaches a blocked cell (or leaves the map) stops
 /// at its last free point. Expired and blocked bullets are flagged (lifetime <= 0) and removed by `Bullets.removeDead`
 ///
 pub fn update(bullets: *Bullets, grid: *const CollisionGrid, dt: f32) void {
-    if (bullets.isReloading()) {
-        bullets.reload_timer -= dt;
-        if (!bullets.isReloading()) bullets.magazine = consts.BULLET_MAG_SIZE;
-    }
+    if (bullets.isReloading()) bullets.reload_timer -= dt;
 
     const step = consts.BULLET_MAX_SPEED * dt;
     const num_samples: u32 = @intFromFloat(@max(@ceil(step / grid.sampleLength()), 1));
@@ -101,22 +94,28 @@ pub fn collide(bullets: *Bullets, enemy_positions: []const Vec2f, hits_out: []Hi
 const open_cells: [30 * 30]bool = @splat(false);
 const OPEN_GRID = CollisionGrid{ .cells = &open_cells, .width = 30, .height = 30, .cell_width = 64, .cell_height = 64 };
 
-test "[bullet_system] fire drains the magazine then reloads" {
+test "[bullet_system] an empty gun stays empty, and a reload holds fire until it is done" {
     var b = Bullets{};
-    b.magazine = 1;
+    b.ammo = 1;
     fire(&b, @splat(0), Vec2f{ 1, 0 }, 0);
-    try std.testing.expect(b.len == 1 and b.magazine == 0);
+    try std.testing.expect(b.len == 1 and b.ammo == 0);
 
-    fire(&b, @splat(0), Vec2f{ 1, 0 }, 0); //Empty - starts the reload instead
-    try std.testing.expect(b.len == 1 and b.isReloading());
+    fire(&b, @splat(0), Vec2f{ 1, 0 }, 0); //Empty: nothing happens, and it never reloads by itself
+    update(&b, &OPEN_GRID, 10);
+    try std.testing.expect(b.len == 1 and b.ammo == 0 and !b.isReloading());
 
-    update(&b, &OPEN_GRID, consts.RELOAD_TIME + 0.01);
-    try std.testing.expect(!b.isReloading() and b.magazine == consts.BULLET_MAG_SIZE);
+    b.ammo = 10; //As if an ammo drop was picked up
+    b.reload_timer = consts.RELOAD_TIME_SMALL;
+    fire(&b, @splat(0), Vec2f{ 1, 0 }, 0);
+    try std.testing.expect(b.ammo == 10);
+    update(&b, &OPEN_GRID, consts.RELOAD_TIME_SMALL + 0.01);
+    fire(&b, @splat(0), Vec2f{ 1, 0 }, 0);
+    try std.testing.expect(b.ammo == 9);
 }
 
 test "[bullet_system] fire never overruns the pool" {
     var b = Bullets{};
-    b.magazine = 255;
+    b.ammo = 255;
     for (0..@as(usize, Bullets.capacity) + 5) |_| fire(&b, @splat(0), Vec2f{ 1, 0 }, 0);
     try std.testing.expect(b.len == Bullets.capacity);
 }

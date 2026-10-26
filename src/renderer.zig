@@ -14,7 +14,7 @@ const Vec2f = @Vector(2, f32);
 
 /// Which bitmap table a sprite is drawn from
 ///
-const Sheet = enum(u8) { player, enemy, env };
+const Sheet = enum(u8) { player, enemy, env, drop };
 
 /// Bitmaps owned by the Playdate runtime, loaded once up front
 ///
@@ -40,6 +40,9 @@ const DrawItem = extern struct {
 /// index in the low half. Sorting plain u32s needs no indirection, and as keys are unique the order is stable
 const SortKey = u32;
 
+/// Seconds per on/off cycle of a drop that is about to vanish
+const DROP_BLINK_PERIOD: f32 = 0.25;
+
 /// Size in pixels of the ring drawn at the gun's target's feet
 const TARGET_RING_W = 30;
 const TARGET_RING_H = 12;
@@ -47,8 +50,8 @@ const TARGET_RING_H = 12;
 pub const BYTES_PER_DRAW_ITEM = @sizeOf(DrawItem) + @sizeOf(SortKey);
 comptime {
     std.debug.assert(@sizeOf(DrawItem) == 8);
-    //Every character on screen at once must fit, leaving room for the environment objects in view
-    if ((1 + @as(usize, consts.MAX_ENEMIES)) * BYTES_PER_DRAW_ITEM > memory.HOT_SET_BUDGET * 3 / 4) @compileError("Character draw list no longer fits the L1 hot set budget");
+    //Every character and drop on screen at once must fit, leaving room for the environment objects in view
+    if ((1 + @as(usize, consts.MAX_ENEMIES) + consts.MAX_DROPS) * BYTES_PER_DRAW_ITEM > memory.HOT_SET_BUDGET * 3 / 4) @compileError("Character draw list no longer fits the L1 hot set budget");
 }
 
 pub const RenderStats = struct {
@@ -64,6 +67,7 @@ pub fn loadAssets(playdate_api: *pd.PlaydateAPI, level_bitmap_name: [*:0]const u
     assets.tables[@backingInt(Sheet.player)] = graphics.loadBitmapTable.?("hero1", null) orelse @panic("loadAssets: Failed to load hero1");
     assets.tables[@backingInt(Sheet.enemy)] = graphics.loadBitmapTable.?("enemy1", null) orelse @panic("loadAssets: Failed to load enemy1");
     assets.tables[@backingInt(Sheet.env)] = graphics.loadBitmapTable.?(level_bitmap_name, null) orelse @panic("loadAssets: Failed to load level bitmaps");
+    assets.tables[@backingInt(Sheet.drop)] = graphics.loadBitmapTable.?("drops", null) orelse @panic("loadAssets: Failed to load drops");
     return assets;
 }
 
@@ -92,12 +96,19 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     }
 
     //---Build the draw list of visible sprites. Characters face the way they are aiming / moving
-    const max_items = 1 + game.enemies.len + level.obj_world_positions.len;
+    const max_items = 1 + game.enemies.len + game.drops.len + level.obj_world_positions.len;
     var list = DrawList{ .items = frame_arena.alloc(DrawItem, max_items), .keys = frame_arena.alloc(SortKey, max_items) };
 
     list.addCharacter(screen, .player, game.player.pos, game.player.facing_dir);
     for (game.enemies.positions(), game.enemies.velocities()) |p, v| {
         list.addCharacter(screen, .enemy, p, v);
+    }
+    //Drops sit on the ground at their point, blinking for their last few seconds before they vanish
+    const drops = &game.drops;
+    for (drops.pos[0..drops.len], drops.kind[0..drops.len], drops.lifetime[0..drops.len]) |p, k, l| {
+        //Integer half periods: a float @mod would call libc's fmodf, which drags newlib's malloc into the device link
+        if (l < consts.DROP_BLINK_TIME and @as(u32, @intFromFloat(@max(l, 0) / (DROP_BLINK_PERIOD / 2))) % 2 == 0) continue;
+        list.add(screen, .drop, p, .{ .index = @backingInt(k), .flipped = false }, .{ bitmap_descs.DROP_W / 2, bitmap_descs.DROP_H - 2 });
     }
     for (level.obj_world_positions, level.obj_bitmap_indices) |p, bi| {
         list.add(screen, .env, p, .{ .index = bi, .flipped = false }, .{ bitmap_descs.ENV_OBJ_W / 2, bitmap_descs.ENV_OBJ_H });
@@ -126,8 +137,17 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     //---HUD. TODO: Replace with bitmap font
     drawLabel(graphics, "Score: {d}", game.player.score, screen.width - 100, 0);
     drawLabel(graphics, "Health: {d}", game.player.health, @divTrunc(screen.width, 2), 0);
-    drawLabel(graphics, "Bullets: {d}", game.bullets.magazine, @divTrunc(screen.width, 2), screen.height - 30);
+    const ammo_x = @divTrunc(screen.width, 2);
+    const ammo_y = screen.height - 30;
+    if (game.bullets.isReloading()) {
+        drawLabel(graphics, "Reloading {d}", game.bullets.ammo, ammo_x, ammo_y);
+    } else if (game.bullets.ammo == 0) {
+        drawLabel(graphics, "{s}", "OUT OF AMMO", ammo_x, ammo_y);
+    } else {
+        drawLabel(graphics, "Ammo: {d}", game.bullets.ammo, ammo_x, ammo_y);
+    }
 
+    if (game.invincible) _ = graphics.drawText.?("INVINCIBLE", 10, pd.kASCIIEncoding, 0, 20); //Debug, so screenshots don't mislead
     sys.drawFPS.?(0, 0);
     return .{ .drawn = @intCast(list.len) };
 }
@@ -173,6 +193,7 @@ fn sheetSize(sheet: Sheet) Vec2i {
     return switch (sheet) {
         .player, .enemy => .{ bitmap_descs.CHAR_W, bitmap_descs.CHAR_H },
         .env => .{ bitmap_descs.ENV_OBJ_W, bitmap_descs.ENV_OBJ_H },
+        .drop => .{ bitmap_descs.DROP_W, bitmap_descs.DROP_H },
     };
 }
 

@@ -6,6 +6,9 @@ const arm_toolchain_version = "11.3.1";
 pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const is_release = optimize != .debug;
+    const invincible = b.option(bool, "invincible", "Debug builds: start with the player invincible (toggle it from the system menu)") orelse false;
+    const build_options = b.addOptions();
+    build_options.addOption(bool, "invincible", invincible);
 
     const environ = b.graph.environ_map;
     const sdk_path = environ.get("PLAYDATE_SDK_PATH") orelse @panic("PLAYDATE_SDK_PATH is not set");
@@ -26,7 +29,7 @@ pub fn build(b: *std.Build) void {
     //Device: the game compiled to an object that is linked with the SDK's setup.c into an elf
     const device_game = b.addObject(.{
         .name = game_name,
-        .root_module = createGameModule(b, device_target, optimize, c_sdk_path, arm_toolchain_path, .device, is_release),
+        .root_module = createGameModule(b, device_target, optimize, c_sdk_path, arm_toolchain_path, .device, is_release, build_options),
     });
     configureDevice(b, device_game.root_module, c_sdk_path, arm_toolchain_path);
 
@@ -82,7 +85,7 @@ pub fn build(b: *std.Build) void {
     const simulator = b.addLibrary(.{
         .name = "pdex",
         .linkage = .dynamic,
-        .root_module = createGameModule(b, sim_target, optimize, c_sdk_path, arm_toolchain_path, .simulator, is_release),
+        .root_module = createGameModule(b, sim_target, optimize, c_sdk_path, arm_toolchain_path, .simulator, is_release, build_options),
     });
     pdc_inputs.dependOn(&b.addInstallArtifact(simulator, .{ .dest_dir = .{ .override = .lib }, .pdb_dir = .disabled, .implib_dir = .disabled }).step);
 
@@ -155,6 +158,7 @@ fn createGameModule(
     arm_toolchain_path: []const u8,
     game_target: GameTarget,
     is_release: bool,
+    build_options: *std.Build.Step.Options,
 ) *std.Build.Module {
     const translate_c = b.addTranslateC(.{
         .root_source_file = b.path("src/playdate_c.h"),
@@ -181,6 +185,7 @@ fn createGameModule(
         .omit_frame_pointer = if (game_target == .device and is_release) true else null,
     });
     module.addImport("playdate_c", translate_c.createModule());
+    module.addOptions("build_options", build_options);
     return module;
 }
 

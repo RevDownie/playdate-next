@@ -27,16 +27,10 @@
 - Feels like there is too much chance of enemies failing to spawn
 - Perhaps spawn locations should be specified on the map - like player spawn is
 
-## Health Drops
-- Based on predefined spawn locations in the map
-- Drop periodically with visuals and animation
-- Different sized drops restore different amounts of health
-
-## Ammo drops
-- Based on predefined spawn locations in the map
-- Drop periodically with visuals and animation
-- Different sized drops restore different amounts of ammo
-- Reloading on collection takes time based on size of ammo drop
+## Drops follow-up
+- Playtest the tuning on device (`DROP_*`, `AMMO_DROP_*`, `HEALTH_DROP_*`, `RELOAD_TIME_*` in tweak_constants.zig)
+- Decide whether off-screen drops need an edge-of-screen indicator, or if searching for them is the point
+- Reload feedback on the player (the HUD says "Reloading")
 
 ## Camera improvements
 - With input from design
@@ -67,6 +61,7 @@
 - Blood impact / spatter
 - Spawn
 - Disappear / despawn
+- Drops appearing and being picked up (they spawn instantly for now)
 
 ## Implement Audio system for VFX and Music
 - Using the Playdate audio sdk

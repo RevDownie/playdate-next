@@ -13,6 +13,7 @@ const bullet_sys = @import("bullet_system.zig");
 const combat_sys = @import("combat_system.zig");
 const auto_target_sys = @import("auto_targetting_system.zig");
 const firing_sys = @import("firing_system.zig");
+const drop_sys = @import("drop_system.zig");
 
 const Vec2f = @Vector(2, f32);
 
@@ -29,8 +30,14 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     //1. Spawn new enemies around the player
     enemy_spawn_sys.update(&game.spawner, &game.enemies, game.rng.random(), game.player.pos, level.spawn_cells, field, grid, dt);
 
-    //2. Movement. The flow field follows the player, a bounded slice of a rebuild per frame
+    //Ammo and health drops on the level's drop points
+    drop_sys.update(&game.drops, game.rng.random(), game.player.pos, game.player.health, game.bullets.ammo, level.drop_cells, level.drop_sizes, grid, dt);
+
+    //2. Movement. The flow field follows the player, a bounded slice of a rebuild per frame. The player picks up
+    //the drops they walk over
     player_move_sys.update(&game.player, input, grid, dt);
+    drop_sys.collect(&game.drops, &game.player, &game.bullets);
+    game.drops.removeDead();
     flow_field.update(field, grid, grid.cellIndex(game.player.pos), consts.FLOW_FIELD_CELLS_PER_FRAME);
     enemy_move_sys.update(&game.enemies, field, grid, game.player.pos, dt);
     enemy_separation_sys.update(&game.enemies, game.player.pos, field, grid, frame_arena.alloc(Vec2f, game.enemies.len));
@@ -43,7 +50,7 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     game.enemies.removeDead();
 
     //4. Enemies touching the player hurt them
-    combat_sys.applyEnemyContact(&game.enemies, &game.player);
+    combat_sys.applyEnemyContact(&game.enemies, &game.player, if (game.invincible) 0 else consts.CONTACT_DMG);
     if (game.player.health == 0) return .player_died;
 
     //5. Camera. Before targeting, as the gun only aims at what is on screen
