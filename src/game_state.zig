@@ -24,7 +24,8 @@ pub const Input = struct {
 pub const Player = struct {
     pos: Vec2f = @splat(0),
     vel: Vec2f = @splat(0),
-    facing_dir: Vec2f = @splat(0),
+    facing_dir: Vec2f = .{ 1, 0 }, //Unit length: the way the gun is aimed, kept while there is nothing to aim at
+    target_pos: ?Vec2f = null, //The enemy the gun is aimed at this frame, if any
     health: u8 = consts.PLAYER_MAX_HEALTH,
     score: u64 = 0,
     kill_streak: u32 = 0,
@@ -109,9 +110,11 @@ pub const Bullets = struct {
     pos: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined,
     lifetime: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined,
     dir: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined, //Only read when moving or on a hit
+    barrel: [capacity]u8 align(memory.CACHE_LINE_SIZE) = undefined, //Gatling barrel it left from, only read when drawn
 
     magazine: u8 = consts.BULLET_MAG_SIZE,
     reload_timer: f32 = 0, //Reloading while > 0
+    next_barrel: u8 = 0, //Barrel the next shot leaves from, turns with every shot
 
     pub fn isReloading(self: *const Bullets) bool {
         return self.reload_timer > 0;
@@ -129,6 +132,7 @@ pub const Bullets = struct {
             const last = self.len - 1;
             self.pos[i] = self.pos[last];
             self.dir[i] = self.dir[last];
+            self.barrel[i] = self.barrel[last];
             self.lifetime[i] = self.lifetime[last];
             self.len = last;
         }

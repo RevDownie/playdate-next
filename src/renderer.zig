@@ -40,6 +40,10 @@ const DrawItem = extern struct {
 /// index in the low half. Sorting plain u32s needs no indirection, and as keys are unique the order is stable
 const SortKey = u32;
 
+/// Size in pixels of the ring drawn at the gun's target's feet
+const TARGET_RING_W = 30;
+const TARGET_RING_H = 12;
+
 pub const BYTES_PER_DRAW_ITEM = @sizeOf(DrawItem) + @sizeOf(SortKey);
 comptime {
     std.debug.assert(@sizeOf(DrawItem) == 8);
@@ -81,6 +85,12 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     const bg_size = level.bg_size_pixels;
     graphics.tileBitmap.?(assets.bg_bitmap, bg_screen_pos[0] - @divTrunc(bg_size[0], 2), bg_screen_pos[1] - @divTrunc(bg_size[1], 2), bg_size[0], bg_size[1], pd.kBitmapUnflipped);
 
+    //---Ring on the ground under the gun's target, below the sprites. XOR so it reads on light and dark ground
+    if (game.player.target_pos) |t| {
+        const feet = screen.toScreen(t);
+        graphics.drawEllipse.?(feet[0] - TARGET_RING_W / 2, feet[1] - TARGET_RING_H / 2, TARGET_RING_W, TARGET_RING_H, 2, 0, 360, pd.kColorXOR);
+    }
+
     //---Build the draw list of visible sprites. Characters face the way they are aiming / moving
     const max_items = 1 + game.enemies.len + level.obj_world_positions.len;
     var list = DrawList{ .items = frame_arena.alloc(DrawItem, max_items), .keys = frame_arena.alloc(SortKey, max_items) };
@@ -102,10 +112,15 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
         graphics.drawBitmap.?(bitmap, item.x, item.y, if (item.flipped) pd.kBitmapFlippedX else pd.kBitmapUnflipped);
     }
 
-    //---Bullets are rendered as geometry on top. TODO: Interleave bullets
-    for (game.bullets.positions()) |p| {
-        const sp = screen.toScreen(p);
-        graphics.fillRect.?(sp[0], sp[1], 6, 6, pd.kColorBlack);
+    //---Bullets are comet tracers on top, at gun height. TODO: Interleave bullets
+    const bullets = &game.bullets;
+    const gun_height = Vec2i{ 0, consts.GUN_HEIGHT_PX };
+    for (bullets.pos[0..bullets.len], bullets.dir[0..bullets.len], bullets.lifetime[0..bullets.len], bullets.barrel[0..bullets.len]) |p, d, l, b| {
+        const travelled = (consts.BULLET_LIFETIME - l) * consts.BULLET_MAX_SPEED;
+        const tracer = anim.bulletTracer(p, d, travelled, b);
+        const head = screen.toScreen(tracer.head) - gun_height;
+        const tail = screen.toScreen(tracer.tail) - gun_height;
+        drawTracer(graphics, head, tail);
     }
 
     //---HUD. TODO: Replace with bitmap font
@@ -167,4 +182,27 @@ fn drawLabel(graphics: pd.playdate_graphics, comptime fmt: []const u8, value: an
     var buffer: [32]u8 = undefined;
     const text = std.fmt.bufPrint(&buffer, fmt, .{value}) catch buffer[0..];
     _ = graphics.drawText.?(text.ptr, text.len, pd.kASCIIEncoding, x, y);
+}
+
+/// 8x8 dither patterns for the fading tracer tail: 8 rows of image (1 = white) then 8 rows of mask
+const PATTERN_HALF: pd.LCDPattern = .{ 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+const PATTERN_QUARTER: pd.LCDPattern = .{ 0xEE, 0xBB, 0xEE, 0xBB, 0xEE, 0xBB, 0xEE, 0xBB, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+
+/// Draw a bullet as a comet: a solid head fading through 50% then 25% dither towards the tail, over a white
+/// glow so it reads on the dark enemies as well as the light ground
+///
+fn drawTracer(graphics: pd.playdate_graphics, head: Vec2i, tail: Vec2i) void {
+    const front = lerpPoint(head, tail, 0.33);
+    const back = lerpPoint(head, tail, 0.66);
+    graphics.drawLine.?(tail[0], tail[1], head[0], head[1], 7, pd.kColorWhite);
+    graphics.drawLine.?(tail[0], tail[1], back[0], back[1], 3, @intFromPtr(&PATTERN_QUARTER));
+    graphics.drawLine.?(back[0], back[1], front[0], front[1], 4, @intFromPtr(&PATTERN_HALF));
+    graphics.drawLine.?(front[0], front[1], head[0], head[1], 4, pd.kColorBlack);
+    graphics.fillEllipse.?(head[0] - 3, head[1] - 3, 6, 6, 0, 360, pd.kColorBlack);
+}
+
+fn lerpPoint(a: Vec2i, b: Vec2i, t: f32) Vec2i {
+    const af: Vec2f = @floatFromInt(a);
+    const bf: Vec2f = @floatFromInt(b);
+    return @intFromFloat(@round(af + (bf - af) * @as(Vec2f, @splat(t))));
 }

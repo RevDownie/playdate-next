@@ -32,6 +32,16 @@ pub const SPAWN_MIN_PLAYER_DIST: f32 = 3.0; //...but never closer than this to t
 pub const SPAWN_ATTEMPTS: u8 = 4; //Random spawn cells tried per enemy before giving up (they must be reachable and far enough away)
 pub const RNG_SEED: u64 = 42;
 
+/// Auto targetting. The gun only aims at enemies the player can see: inside the camera's view and with a
+/// clear line from the player's feet. Candidates are ranked by distance, scaled down by the weights below
+pub const VIEW_HALF_WIDTH: f32 = 200.0 / METRES_TO_PIXELS; //Half the 400x240 screen in metres, around the camera
+pub const VIEW_HALF_HEIGHT: f32 = 120.0 / METRES_TO_PIXELS;
+pub const TARGET_VIEW_MARGIN: f32 = 0.1; //Metres beyond the screen edge an enemy can be targeted (as it walks on)
+pub const TARGET_AHEAD_WEIGHT: f32 = 0.6; //An enemy dead ahead of the player's movement counts as 60% closer
+pub const TARGET_FINISH_WEIGHT: f32 = 0.5; //...a nearly dead one up to 50% closer, so the gun finishes it off
+pub const TARGET_STICKY_WEIGHT: f32 = 0.15; //...and one along the current aim 15% closer, so the aim doesn't flick
+pub const TARGET_MAX_LOS_TESTS: u8 = 8; //Line of sight tests per frame, on the best candidates first
+
 pub const FIRE_ANGLE_DELTA: f32 = 30; //12 bullets per crank revolution
 pub const FIRE_BUTTON_DELAY: f32 = 0.25; //Button fire is the fallback: well under the rate of a steadily turned crank
 
@@ -42,12 +52,24 @@ pub const BUMP_TIME = 0.5;
 pub const DMG_PER_HIT: u8 = 50; //Two hits per enemy: the first knocks it back (and it can't hurt the player while recoiling), the second kills
 pub const BULLET_MAG_SIZE: u8 = 80;
 pub const BULLET_POOL_SIZE: u8 = BULLET_MAG_SIZE + 10; //A full mag lives at most BULLET_LIFETIME, which is no longer than RELOAD_TIME
-pub const BULLET_MAX_SPEED: f32 = 10;
-pub const BULLET_LIFETIME = 1.0; //10m of range, about 3 screen widths
+pub const BULLET_MAX_SPEED: f32 = 14; //Must not step over an enemy's hit circle in one frame (checked in bullet_system)
+pub const BULLET_RANGE: f32 = 6.0; //Metres a bullet flies before it is spent (about two screen widths)
+pub const BULLET_LIFETIME: f32 = BULLET_RANGE / BULLET_MAX_SPEED;
+pub const BULLET_SPREAD: f32 = 0.035; //Most a shot strays sideways per metre travelled (about 2 degrees)
 pub const RELOAD_TIME = 1.5;
 comptime {
     if (BULLET_LIFETIME > RELOAD_TIME) @compileError("BULLET_POOL_SIZE assumes a mag's bullets are gone by the time it has reloaded");
 }
+
+/// Gatling gun. Only affects where bullets are drawn: they are simulated from the player's feet so enemies
+/// right up against the player can still be hit
+pub const GUN_BARRELS: u8 = 6; //One shot per FIRE_ANGLE_DELTA of crank, so the barrels turn twice per crank revolution
+pub const GUN_HEIGHT_PX: i32 = 16; //Height of the barrels above the player's feet
+pub const MUZZLE_FORWARD: f32 = 0.14; //Metres ahead of the player the barrels end
+pub const MUZZLE_SIDE: f32 = 0.08; //Metres to the player's right the gun is held
+pub const BARREL_RADIUS: f32 = 0.02; //Metres from the gun's axis to each barrel
+pub const MUZZLE_CONVERGE_DIST: f32 = 1.5; //The drawn muzzle offset fades out over this many metres so tracers meet the aim line
+pub const TRACER_LENGTH: f32 = 0.3; //Metres of trail drawn behind each bullet (longer than a 50 FPS step so the stream looks unbroken)
 
 pub const FLASH_HIT_EFFECT_DURATION: f32 = 0.3;
 

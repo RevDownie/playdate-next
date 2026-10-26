@@ -35,8 +35,8 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     enemy_move_sys.update(&game.enemies, field, grid, game.player.pos, dt);
     enemy_separation_sys.update(&game.enemies, game.player.pos, field, grid, frame_arena.alloc(Vec2f, game.enemies.len));
 
-    //3. Move projectiles and resolve bullet -> enemy hits (kills are flagged then compacted out)
-    bullet_sys.update(&game.bullets, dt);
+    //3. Move projectiles (walls stop them) and resolve bullet -> enemy hits (kills are flagged then compacted out)
+    bullet_sys.update(&game.bullets, grid, dt);
     const hits = bullet_sys.collide(&game.bullets, game.enemies.positions(), frame_arena.alloc(state.Hit, game.bullets.len));
     combat_sys.applyBulletHits(hits, &game.enemies, &game.player);
     game.bullets.removeDead();
@@ -46,15 +46,21 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     combat_sys.applyEnemyContact(&game.enemies, &game.player);
     if (game.player.health == 0) return .player_died;
 
-    //5. Now that the enemy positions are final, aim at the hottest target and fire
-    const target_dir = auto_target_sys.calculateHottestTargetDir(game.player.pos, game.enemies.positions()) orelse maths.normaliseSafe(game.player.vel, Vec2f{ 1, 0 });
-    if (firing_sys.update(&game.trigger, input, dt)) {
-        bullet_sys.fire(&game.bullets, game.player.pos, target_dir);
-    }
-    game.player.facing_dir = target_dir; //Player faces the way they are firing
-
-    //6. Camera and effects
+    //5. Camera. Before targeting, as the gun only aims at what is on screen
     game.camera_pos = game.player.pos; //Follow the player directly for now
+
+    //6. Now that the enemy positions are final, aim at the best target the player can see and fire.
+    //With nothing in sight aim the way the player is moving, or keep the last aim while standing still
+    const move_dir = maths.normaliseSafe(game.player.vel, @splat(0));
+    const target = auto_target_sys.findTarget(game.player.pos, move_dir, game.player.facing_dir, game.camera_pos, game.enemies.positions(), game.enemies.health[0..game.enemies.len], grid, frame_arena.alloc(f32, game.enemies.len));
+    const aim_dir = if (target) |t| t.dir else maths.normaliseSafe(move_dir, game.player.facing_dir);
+    if (firing_sys.update(&game.trigger, input, dt)) {
+        bullet_sys.fire(&game.bullets, game.player.pos, aim_dir, game.rng.random().float(f32) * 2 - 1);
+    }
+    game.player.facing_dir = aim_dir; //Player faces the way they are firing
+    game.player.target_pos = if (target) |t| t.pos else null;
+
+    //7. Effects
     game.player.hit_flash_timer = @max(game.player.hit_flash_timer - dt, 0);
 
     return .playing;

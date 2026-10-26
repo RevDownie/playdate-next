@@ -1,5 +1,6 @@
 const std = @import("std");
 const consts = @import("tweak_constants.zig");
+const maths = @import("maths.zig");
 
 const Vec2f = @Vector(2, f32);
 
@@ -16,6 +17,29 @@ pub const CollisionGrid = struct {
     pub fn isOccupied(self: *const CollisionGrid, world_pos: Vec2f) bool {
         const idx = self.cellIndex(world_pos) orelse return true;
         return self.cells[idx];
+    }
+
+    /// Spacing that moving points and lines sample the grid at: half the smaller cell side, so no blocked
+    /// cell can be stepped over
+    ///
+    pub fn sampleLength(self: *const CollisionGrid) f32 {
+        return @as(f32, @floatFromInt(@min(self.cell_width, self.cell_height))) / consts.METRES_TO_PIXELS * 0.5;
+    }
+
+    /// True if no blocked cell lies on the line from `from` to `to`, sampled every `sampleLength` (the spacing
+    /// bullets move at, so a bullet fired along a clear line isn't stopped by a wall). `from` itself isn't tested.
+    /// Like a bullet, a line exactly through the corner where two blocked cells meet diagonally may slip through
+    ///
+    pub fn isSegmentClear(self: *const CollisionGrid, from: Vec2f, to: Vec2f) bool {
+        const delta = to - from;
+        const num_samples: u32 = @intFromFloat(@max(@ceil(maths.magnitude(delta) / self.sampleLength()), 1));
+        const step = delta / @as(Vec2f, @splat(@floatFromInt(num_samples)));
+        var p = from;
+        for (0..num_samples) |_| {
+            p += step;
+            if (self.isOccupied(p)) return false;
+        }
+        return true;
     }
 
     /// Index of the cell containing `world_pos`, or null outside the grid. Cell centres sit on multiples
@@ -71,4 +95,18 @@ test "[collision_grid] cell index and centre round trip with non-square cells an
     try std.testing.expect(grid.cellIndex(Vec2f{ 0, 27.0 / 128.0 }).? == centre - 5);
     try std.testing.expect(grid.cellIndex(Vec2f{ 57.0 / 128.0, 0 }).? == centre + 1);
     try std.testing.expect(grid.cellIndex(Vec2f{ 100, 0 }) == null);
+}
+
+test "[collision_grid] line of sight is blocked by walls, with lvl1's cell size" {
+    //30x30 grid of lvl1's 57x27px cells with a wall down column 17 (x = 0.67m to 1.11m)
+    var cells: [30 * 30]bool = @splat(false);
+    for (0..30) |row| cells[row * 30 + 17] = true;
+    const grid = CollisionGrid{ .cells = &cells, .width = 30, .height = 30, .cell_width = 57, .cell_height = 27 };
+
+    try std.testing.expect(!grid.isSegmentClear(Vec2f{ 0, 0 }, Vec2f{ 1.3, 0 })); //Through the wall
+    try std.testing.expect(!grid.isSegmentClear(Vec2f{ 0, 0 }, Vec2f{ 1.3, 0.9 })); //Diagonally through it
+    try std.testing.expect(grid.isSegmentClear(Vec2f{ 0, 0 }, Vec2f{ 0.6, 0.9 })); //Short of it
+    try std.testing.expect(grid.isSegmentClear(Vec2f{ -1, -0.5 }, Vec2f{ -1.5, 0.5 }));
+    try std.testing.expect(grid.isSegmentClear(Vec2f{ 0.2, 0.1 }, Vec2f{ 0.2, 0.1 })); //Zero length
+    try std.testing.expect(!grid.isSegmentClear(Vec2f{ 0, 0 }, Vec2f{ -20, 0 })); //Off the map
 }
