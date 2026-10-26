@@ -28,11 +28,14 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     const grid = &level.collision_grid;
     game.run_time += dt;
 
-    //1. Spawn new enemies around the player
-    enemy_spawn_sys.update(&game.spawner, &game.enemies, game.rng.random(), game.player.pos, level.spawn_cells, field, grid, dt);
+    //1. Waves of enemies spawn in from the edges of the map
+    enemy_spawn_sys.update(&game.spawner, &game.enemies, game.rng.random(), game.player.pos, &level.spawn_cells, field, grid, dt);
 
-    //Ammo and health drops on the level's drop points
-    drop_sys.update(&game.drops, game.rng.random(), game.player.pos, game.player.health, game.bullets.ammo, level.drop_cells, level.drop_sizes, grid, dt);
+    //Ammo and health drops on the level's drop points, faster and bigger between waves
+    const lull = game.spawner.phase == .lull;
+    const drop_interval = if (lull) consts.DROP_LULL_INTERVAL else consts.DROP_INTERVAL;
+    const drop_large_chance = if (lull) consts.DROP_LULL_LARGE_CHANCE else consts.DROP_LARGE_CHANCE;
+    drop_sys.update(&game.drops, game.rng.random(), game.player.pos, game.player.health, game.bullets.ammo, level.drop_cells, level.drop_sizes, grid, drop_interval, drop_large_chance, dt);
 
     //2. Movement. The flow field follows the player, a bounded slice of a rebuild per frame. The player picks up
     //the drops they walk over

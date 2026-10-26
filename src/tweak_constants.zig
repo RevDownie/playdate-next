@@ -20,13 +20,43 @@ pub const ENEMY_MAX_HEALTH: u8 = 100;
 pub const CONTACT_DMG: u8 = 5; //Damage an enemy does to the player when it walks into them
 pub const SCORE_PER_KILL: u64 = 10; //Multiplied by the kill streak
 
-pub const FIRST_SPAWN_TIME: f32 = 0.25;
-/// Spawning speeds up from one wave every INIT_SPAWN_TIME to one every MIN_SPAWN_TIME (7.5 enemies a second) after
-/// about 55s, more than a steady crank of 1-1.5 turns a second can clear, so most runs end in being overrun
-pub const INIT_SPAWN_TIME: f32 = 5.0;
-pub const SPAWN_TIME_REDUCTION: f32 = 0.25; //Taken off the interval after every wave
-pub const MIN_SPAWN_TIME: f32 = 0.4; //Spawn interval never drops below this (it used to reach 0 and spawn every frame)
-pub const ENEMIES_PER_SPAWN: u8 = 3;
+/// Waves. The horde comes in waves with a lull between them: a wave spawns its enemies in bursts from one or two
+/// sides of the map, and is survived once it has all spawned and at most WAVE_CLEAR_LEFT enemies are left. The
+/// lull after it is the time to go out for drops (they come faster and bigger then, see DROP_LULL_*).
+/// Difficulty rises and falls but trends up: the table runs in fours of a build up, a step back, a peak and a
+/// breather, each four bigger and faster than the last
+pub const WaveDef = struct {
+    size: u16, //Enemies in the wave
+    burst_interval: f32, //Seconds between bursts of WAVE_BURST_SIZE
+    lull: f32, //Seconds of quiet after it is survived
+};
+pub const WAVES = [_]WaveDef{
+    .{ .size = 10, .burst_interval = 1.2, .lull = 6 }, //1: a gentle start from one side (2.5 enemies a second)
+    .{ .size = 18, .burst_interval = 1.0, .lull = 6 },
+    .{ .size = 14, .burst_interval = 1.0, .lull = 5 }, //Step back
+    .{ .size = 34, .burst_interval = 0.65, .lull = 8 }, //Peak, then a longer lull to recover
+    .{ .size = 26, .burst_interval = 0.7, .lull = 6 },
+    .{ .size = 46, .burst_interval = 0.5, .lull = 6 },
+    .{ .size = 36, .burst_interval = 0.5, .lull = 5 },
+    .{ .size = 64, .burst_interval = 0.38, .lull = 8 }, //8: peak, faster than a steady crank can kill
+};
+/// Past the table the last four repeat, each repeat this much bigger, faster and with shorter lulls
+pub const WAVE_REPEAT_EXTRA_SIZE: u16 = 28;
+pub const WAVE_REPEAT_FASTER: f32 = 0.06; //Off the burst interval
+pub const WAVE_REPEAT_SHORTER_LULL: f32 = 1.0;
+pub const WAVE_MIN_BURST_INTERVAL: f32 = 0.25;
+pub const WAVE_MIN_LULL: f32 = 4.0;
+pub const WAVE_SIZE_SCALE: f32 = 1.0; //Every wave's size is multiplied by this (raise it for a stress test)
+pub const WAVE_BURST_SIZE: u8 = 3; //Enemies per burst
+/// Waves come from one side of the map, then from one more side every this many waves until they come from all
+/// four. One side is easy to read and to back away from; a horde on a single front walks into the gun in single
+/// file, so the surround is what eventually overruns the player
+pub const WAVES_PER_EXTRA_SIDE: u16 = 3;
+pub const WAVE_CLEAR_LEFT: u8 = 3; //A wave is survived once it has all spawned and no more than this many enemies are left
+pub const WAVE_MAX_TIME: f32 = 45.0; //A wave not survived by then is followed straight away by the next (no lull)
+pub const FIRST_WAVE_DELAY: f32 = 3.0;
+pub const WAVE_BANNER_TIME: f32 = 2.0; //How long "WAVE N" shows when a wave starts
+pub const WAVE_SURVIVED_BANNER_TIME: f32 = 2.5; //...and "WAVE N SURVIVED" when it is survived
 pub const SPAWN_EDGE_BAND: f32 = 1.0; //Enemies drop in on free cells within this many metres of the map's edge
 pub const SPAWN_MIN_PLAYER_DIST: f32 = 3.0; //...but never closer than this to the player
 pub const SPAWN_ATTEMPTS: u8 = 4; //Random spawn cells tried per enemy before giving up (they must be reachable and far enough away)
@@ -73,6 +103,8 @@ pub const DROP_INTERVAL: f32 = 3.0; //Seconds between drops while there is room 
 pub const DROP_LIFETIME: f32 = 20.0; //Uncollected drops vanish, so the map keeps changing and hoarding a spot doesn't pay
 pub const DROP_BLINK_TIME: f32 = 4.0; //A drop blinks for its last few seconds
 pub const DROP_LARGE_CHANCE: f32 = 0.35; //Chance a new drop goes on a large point rather than a small one
+pub const DROP_LULL_INTERVAL: f32 = 1.5; //Between waves drops come faster...
+pub const DROP_LULL_LARGE_CHANCE: f32 = 0.6; //...and are more often large
 pub const DROP_MIN_PLAYER_DIST: f32 = 2.0; //Drops never appear this close to the player: they have to go and get them
 pub const DROP_SPAWN_ATTEMPTS: u8 = 4; //Random points tried per drop (must be free and far enough away), then retried next frame
 pub const DROP_PICKUP_RADIUS: f32 = CHAR_WIDTH_M * 0.5;

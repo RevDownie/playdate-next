@@ -167,9 +167,20 @@ pub const Trigger = struct {
     button_cooldown: f32 = 0, //Seconds until holding A/B fires again
 };
 
+pub const WavePhase = enum(u8) { lull, wave };
+
+/// Where the run is in its waves (see the WAVE_* constants and enemy_spawn_system). A lull counts down to the next
+/// wave; a wave spawns its enemies in bursts until it is survived (or runs out of time)
+///
 pub const Spawner = struct {
-    spawn_interval: f32 = consts.INIT_SPAWN_TIME,
-    next_spawn_timer: f32 = consts.FIRST_SPAWN_TIME,
+    wave: u16 = 0, //The current wave, or during a lull the one just fought (0 before the first)
+    phase: WavePhase = .lull,
+    phase_time: f32 = 0, //Seconds since this lull or wave began (drives the HUD's banners)
+    timer: f32 = consts.FIRST_WAVE_DELAY, //Lull: until the next wave. Wave: until the next burst. Infinite stops spawning
+    to_spawn: u16 = 0, //Enemies of this wave still to come
+    burst_interval: f32 = 0,
+    sides: u8 = 0, //Bit per level_loader.MapSide the wave comes from
+    survived: bool = false, //This lull follows a wave the player survived (rather than one that ran out of time)
 };
 
 /// What a drop gives, in the order of the drops bitmap table (see drop_sprites.py)

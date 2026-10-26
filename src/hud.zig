@@ -1,7 +1,9 @@
 const std = @import("std");
 const pd = @import("playdate.zig").api;
 const consts = @import("tweak_constants.zig");
-const GameState = @import("game_state.zig").GameState;
+const state = @import("game_state.zig");
+const GameState = state.GameState;
+const MapSide = @import("level_loader.zig").MapSide;
 
 // Screen space text drawn over the world by the renderer: the HUD, the run end screen and the helpers they share.
 // Text sits on solid boxes so it stays readable over a full horde and the dithered ground.
@@ -64,11 +66,20 @@ pub fn format(buffer: []u8, comptime fmt: []const u8, args: anytype) []const u8 
     return std.fmt.bufPrint(buffer, fmt, args) catch buffer;
 }
 
-/// The always-on HUD: health and ammo, score and the best to beat
+/// The always-on HUD: the wave, health and ammo, score and the best to beat, and the wave banners
 ///
 pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameState, hud: Hud, width: c_int, height: c_int) void {
     var buf: [48]u8 = undefined;
     const small_h: c_int = graphics.getFontHeight.?(fonts.small) + BOX_PAD_Y * 2 + 1;
+
+    //Top left (after the FPS counter): the wave, or the countdown to the next one
+    const spawner = &game.spawner;
+    const wave_text = switch (spawner.phase) {
+        .wave => format(&buf, "Wave {d}", .{spawner.wave}),
+        .lull => format(&buf, "Wave {d} in {d}", .{ spawner.wave + 1, secondsLeft(spawner.timer) }),
+    };
+    drawBoxed(graphics, fonts.small, wave_text, WAVE_LABEL_X, BOX_PAD_Y, .left, .normal);
+    drawWaveBanner(graphics, fonts, spawner, width);
 
     //Top centre: health
     drawBoxed(graphics, fonts.small, format(&buf, "Health {d}", .{game.player.health}), @divTrunc(width, 2), BOX_PAD_Y, .centre, if (game.player.health <= 25) .loud else .normal);
@@ -95,11 +106,56 @@ pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameSt
     if (game.invincible) drawBoxed(graphics, fonts.small, "INVINCIBLE", BOX_PAD_X, height - small_h, .left, .loud); //Debug, so screenshots don't mislead
 }
 
+const WAVE_LABEL_X = 34; //Clear of the FPS counter
+const BANNER_Y = 24; //Under the top HUD row and clear of the player, who is in the middle of the screen
+
+/// Whole seconds left on a countdown, rounded up so it never shows 0 while still counting
+///
+fn secondsLeft(timer: f32) u32 {
+    if (!(timer > 0) or timer > 999) return 0;
+    return @as(u32, @intFromFloat(timer)) + 1;
+}
+
+/// The start and end of a wave: "WAVE N" and where it is coming from as it starts, and "WAVE N SURVIVED" when it
+/// is cleared (not when it ran out of time: then the next wave starts straight away instead)
+///
+fn drawWaveBanner(graphics: pd.playdate_graphics, fonts: Fonts, spawner: *const state.Spawner, width: c_int) void {
+    var buf: [48]u8 = undefined;
+    const cx = @divTrunc(width, 2);
+    const big_h: c_int = graphics.getFontHeight.?(fonts.big) + BOX_PAD_Y * 2 + 2;
+    switch (spawner.phase) {
+        .wave => if (spawner.phase_time < consts.WAVE_BANNER_TIME) {
+            drawBoxed(graphics, fonts.big, format(&buf, "WAVE {d}", .{spawner.wave}), cx, BANNER_Y, .centre, .loud);
+            drawBoxed(graphics, fonts.small, sidesText(&buf, spawner.sides), cx, BANNER_Y + big_h, .centre, .normal);
+        },
+        .lull => if (spawner.survived and spawner.phase_time < consts.WAVE_SURVIVED_BANNER_TIME) {
+            drawBoxed(graphics, fonts.big, format(&buf, "WAVE {d} SURVIVED", .{spawner.wave}), cx, BANNER_Y, .centre, .normal);
+            drawBoxed(graphics, fonts.small, "Grab what you can", cx, BANNER_Y + big_h, .centre, .normal);
+        },
+    }
+}
+
+/// "From the north", "From the north and east", ... "From all sides"
+///
+fn sidesText(buffer: []u8, sides: u8) []const u8 {
+    if (@popCount(sides) == std.enums.values(MapSide).len) return "From all sides";
+    var len: usize = 0;
+    var written: u8 = 0;
+    const total = @popCount(sides);
+    for (std.enums.values(MapSide)) |side| {
+        if (sides & (@as(u8, 1) << @intCast(@backingInt(side))) == 0) continue;
+        const joiner = if (written == 0) "From the " else if (written + 1 == total) " and " else ", ";
+        len += (std.fmt.bufPrint(buffer[len..], "{s}{s}", .{ joiner, @tagName(side) }) catch return buffer[0..len]).len;
+        written += 1;
+    }
+    return buffer[0..len];
+}
+
 /// Dims the frozen last frame behind the run end screen: black on every other pixel, the rest left as it was
 const PATTERN_DIM: pd.LCDPattern = .{ 0, 0, 0, 0, 0, 0, 0, 0, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55 };
 
 const PANEL_W = 260;
-const PANEL_LINES = 5; //Below the title, including the "go again" prompt
+const PANEL_LINES = 6; //Below the title, including the "go again" prompt
 
 /// The run end screen over the frozen last frame: how the run went, the best, and how to go again
 ///
@@ -123,7 +179,9 @@ pub fn drawGameOver(graphics: pd.playdate_graphics, fonts: Fonts, game: *const G
 
     const p = game.player;
     const secs: u32 = @intFromFloat(game.run_time);
-    drawBoxed(graphics, fonts.small, format(&buf, "Survived {d}:{d:0>2}   Kills {d}", .{ secs / 60, secs % 60, p.kills }), cx, y, .centre, .normal);
+    drawBoxed(graphics, fonts.small, format(&buf, "Wave {d}   Survived {d}:{d:0>2}", .{ game.spawner.wave, secs / 60, secs % 60 }), cx, y, .centre, .normal);
+    y += small_h;
+    drawBoxed(graphics, fonts.small, format(&buf, "Kills {d}", .{p.kills}), cx, y, .centre, .normal);
     y += small_h;
     drawBoxed(graphics, fonts.small, format(&buf, "Best combo x{d}", .{p.best_streak}), cx, y, .centre, .normal);
     y += small_h;

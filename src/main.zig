@@ -96,7 +96,7 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     save = readSave();
     startRun();
     resetFrameTimer();
-    debugLog("init complete: level arena {d}/{d} bytes, L1 hot set budget {d} bytes (collision {d}, separation {d}, flow field {d}, bullet walls {d}, {d} per sprite drawn), {d} spawn cells", .{ level_arena.used(), level_arena.capacity(), memory.HOT_SET_BUDGET, state.COLLISION_HOT_SET_BYTES, enemy_separation_sys.SEPARATION_HOT_SET_BYTES, flow_field.hotSetBytes(), level.collision_grid.cells.len, renderer.BYTES_PER_DRAW_ITEM, level.spawn_cells.len });
+    debugLog("init complete: level arena {d}/{d} bytes, L1 hot set budget {d} bytes (collision {d}, separation {d}, flow field {d}, bullet walls {d}, {d} per sprite drawn), {d} spawn cells", .{ level_arena.used(), level_arena.capacity(), memory.HOT_SET_BUDGET, state.COLLISION_HOT_SET_BYTES, enemy_separation_sys.SEPARATION_HOT_SET_BYTES, flow_field.hotSetBytes(), level.collision_grid.cells.len, renderer.BYTES_PER_DRAW_ITEM, level.spawn_cells.all.len });
     if (flow_field.hotSetBytes() > memory.HOT_SET_BUDGET) debugLog("WARNING: flow field ({d} bytes) is larger than the L1 hot set budget, enemy movement will miss the cache", .{flow_field.hotSetBytes()});
     if (level.collision_grid.cells.len > memory.HOT_SET_BUDGET) debugLog("WARNING: collision grid ({d} bytes) is larger than the L1 hot set budget, bullet wall tests will miss the cache", .{level.collision_grid.cells.len});
 }
@@ -129,7 +129,7 @@ fn endRun() void {
         save.best_score = p.score;
         writeSave(save);
     }
-    debugLog("run over: score={d} best={d} new_best={} time={d:.1}s kills={d} best_streak={d}", .{ p.score, save.best_score, new_best, game_state.run_time, p.kills, p.best_streak });
+    debugLog("run over: wave={d} score={d} best={d} new_best={} time={d:.1}s kills={d} best_streak={d}", .{ game_state.spawner.wave, p.score, save.best_score, new_best, game_state.run_time, p.kills, p.best_streak });
 }
 
 /// The saved best, or a fresh save if there is none yet (or it can't be read)
@@ -244,7 +244,7 @@ fn logStatus(now_ms: u32) void {
         if (maths.magnitudeSqrd(d - p.pos) < maths.magnitudeSqrd(drops.pos[near] - p.pos)) near = i;
     }
     const near_pos = if (drops.len > 0) drops.pos[near] else p.pos;
-    debugLog("t={d}ms enemies={d} health={d} score={d} pos=({d:.2},{d:.2}) bullets={d} reload={d:.1} drops={d} invincible={} near={s}({d:.2},{d:.2}) aim=({d:.2},{d:.2}) target={s} crank={d:.1} frame_mem={d} drawn={d} sim_ms_max={d:.2}", .{ now_ms, game_state.enemies.len, p.health, p.score, p.pos[0], p.pos[1], game_state.bullets.ammo, @max(game_state.bullets.reload_timer, 0), drops.len, game_state.invincible, if (drops.len > 0) @tagName(drops.kind[near]) else "none", near_pos[0], near_pos[1], p.facing_dir[0], p.facing_dir[1], if (p.target_pos != null) "yes" else "no", playdate_api.system.*.getCrankAngle.?(), frame_arena.high_water, last_render_stats.drawn, sim_ms_max });
+    debugLog("t={d}ms wave={d}:{s} enemies={d} health={d} score={d} pos=({d:.2},{d:.2}) bullets={d} reload={d:.1} drops={d} invincible={} near={s}({d:.2},{d:.2}) aim=({d:.2},{d:.2}) target={s} crank={d:.1} frame_mem={d} drawn={d} sim_ms_max={d:.2}", .{ now_ms, game_state.spawner.wave, @tagName(game_state.spawner.phase), game_state.enemies.len, p.health, p.score, p.pos[0], p.pos[1], game_state.bullets.ammo, @max(game_state.bullets.reload_timer, 0), drops.len, game_state.invincible, if (drops.len > 0) @tagName(drops.kind[near]) else "none", near_pos[0], near_pos[1], p.facing_dir[0], p.facing_dir[1], if (p.target_pos != null) "yes" else "no", playdate_api.system.*.getCrankAngle.?(), frame_arena.high_water, last_render_stats.drawn, sim_ms_max });
     sim_ms_max = 0;
 }
 
