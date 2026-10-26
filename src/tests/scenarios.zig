@@ -189,11 +189,28 @@ test "[scenario] the gun shoots the enemy it can see, not a closer one behind a 
     while (frames < 60) : (frames += 1) {
         game.bullets.magazine = consts.BULLET_MAG_SIZE;
         _ = t.tick(&game, .{ .crank_delta = consts.FIRE_ANGLE_DELTA });
+        for (game.bullets.dir[0..game.bullets.len]) |d| try std.testing.expect(d[0] < 0); //Never a shot at the wall
         for (game.enemies.positions(), game.enemies.health[0..game.enemies.len]) |p, h| {
-            if (p[0] > 1.75) try std.testing.expect(h == consts.ENEMY_MAX_HEALTH); //Never wasted a shot on the wall
+            if (p[0] > 1.75) try std.testing.expect(h == consts.ENEMY_MAX_HEALTH);
         }
     }
     //The one in the open is dead and the gun has stopped aiming at anything
     try std.testing.expect(game.enemies.len == 1 and game.enemies.pos[0][0] > 1.75);
+    try std.testing.expect(game.player.target_pos == null);
+}
+
+test "[scenario] with nothing in sight the gun aims the way the player moves, or keeps its aim" {
+    var t: TestLevel = .{};
+    t.init(false);
+    var game = state.GameState{};
+    game.spawner.next_spawn_timer = std.math.inf(f32);
+    game.player.facing_dir = .{ 0, 1 };
+
+    _ = t.tick(&game, .{});
+    try std.testing.expect(game.player.facing_dir[0] == 0 and game.player.facing_dir[1] == 1);
+    _ = t.tick(&game, .{ .right = true });
+    try std.testing.expect(game.player.facing_dir[0] == 1 and game.player.facing_dir[1] == 0);
+    _ = t.tick(&game, .{}); //Stopped: keeps aiming right rather than snapping back
+    try std.testing.expect(game.player.facing_dir[0] == 1 and game.player.facing_dir[1] == 0);
     try std.testing.expect(game.player.target_pos == null);
 }
