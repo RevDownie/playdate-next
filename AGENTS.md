@@ -16,6 +16,7 @@
 | Build everything + package `zig-out/until-none.pdx` | `zig build` |
 | Release builds | `zig build -Doptimize=ReleaseSmall` (or `ReleaseFast`) |
 | Run in the simulator | `zig build run-sim` |
+| Install and run on a connected device | `zig build run-device -Doptimize=ReleaseSmall` |
 | Run unit tests | `zig build test` |
 
 `zig build` produces:
@@ -65,8 +66,10 @@ How it works / gotchas:
 - Helpers (`Send-SimKey`, `Send-SimCrank`, `Save-SimScreenshot`) live in `tools/sim-common.ps1` for writing custom scenarios.
 
 ### Device
-There is no build step for this yet (it is on the README TODO list). Manually:
-1. Build `zig build` (ideally `-Doptimize=ReleaseSmall` or `ReleaseFast`; the Debug device build is large).
+With the Playdate connected via USB, `zig build run-device -Doptimize=ReleaseSmall` builds, installs the pdx with `pdutil` and runs it. Add `-Dport=COM3` to name the serial port if pdutil can't find the device by itself. `pdutil install` ejects the device, so the run step retries `pdutil run` for up to 20s until the device reappears. Windows only (uses `pdutil.exe` and PowerShell). Prefer `ReleaseSmall` or `ReleaseFast`; the Debug device build is large.
+
+Manually, the equivalent is:
+1. Build `zig build` (ideally `-Doptimize=ReleaseSmall` or `ReleaseFast`).
 2. Put the Playdate in Data Disk mode or connect via USB, then use the SDK's `pdutil`:
    ```
    "%PLAYDATE_SDK_PATH%\bin\pdutil.exe" <COM port> install zig-out\until-none.pdx

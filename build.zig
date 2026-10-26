@@ -110,6 +110,27 @@ pub fn build(b: *std.Build) void {
     run_sim.step.dependOn(b.getInstallStep());
     b.step("run-sim", "Run the game on simulator").dependOn(&run_sim.step);
 
+    //Install and run on a connected device. -Dport=COM3 selects the device (pdutil's first argument)
+    const pdutil = b.pathJoin(&.{ sdk_path, "bin", "pdutil.exe" });
+    const device_port = b.option([]const u8, "port", "Playdate serial port for run-device, e.g. COM3");
+    const install_device = b.addSystemCommand(&.{pdutil});
+    if (device_port) |port| install_device.addArg(port);
+    install_device.addArg("install");
+    install_device.addDirectoryArg(pdx_path);
+    install_device.step.dependOn(b.getInstallStep());
+    //pdutil install ejects the data disk, so the device is briefly gone afterwards: retry run until it is back
+    const run_device = b.addSystemCommand(&.{ "powershell", "-NoProfile", "-Command" });
+    run_device.addArg(b.fmt(
+        \\for ($i = 0; $i -lt 20; $i++) {{
+        \\  & '{s}' {s} run /Games/{s}.pdx
+        \\  if ($LASTEXITCODE -eq 0) {{ exit 0 }}
+        \\  Start-Sleep -Seconds 1
+        \\}}
+        \\exit 1
+    , .{ pdutil, device_port orelse "", game_name }));
+    run_device.step.dependOn(&install_device.step);
+    b.step("run-device", "Install the game on a connected Playdate and run it").dependOn(&run_device.step);
+
     //Tests
     const test_step = b.step("test", "Run tests");
     //One root that imports every testable module (see src/tests.zig), so everything compiles once and each test runs once
