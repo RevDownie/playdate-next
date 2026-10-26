@@ -136,3 +136,39 @@ test "[scenario] the player dies if left alone" {
     }
     try std.testing.expect(result == .player_died);
 }
+
+test "[scenario] an enemy right up against the player can be shot" {
+    var t: TestLevel = .{};
+    t.init(false);
+    var game = state.GameState{};
+    game.spawner.next_spawn_timer = std.math.inf(f32);
+    game.enemies.add(.{ consts.PLAYER_RING_RADIUS, 0 });
+
+    //Fires at the end of the first frame, hits on the next
+    _ = t.tick(&game, .{ .crank_delta = consts.FIRE_ANGLE_DELTA });
+    _ = t.tick(&game, .{});
+    try std.testing.expect(game.enemies.len == 1);
+    try std.testing.expect(game.enemies.health[0] < consts.ENEMY_MAX_HEALTH);
+}
+
+test "[scenario] bullets can't go through walls" {
+    var t: TestLevel = .{};
+    t.init(true);
+    var game = state.GameState{};
+    game.spawner.next_spawn_timer = std.math.inf(f32);
+    game.enemies.add(.{ 4, 0 }); //Behind the vertical wall at x = 2m
+
+    //Crank flat out the whole time the enemy is behind the wall (it is pathing round the end)
+    var frames: usize = 0;
+    var shots: usize = 0;
+    while (frames < 60 * 3) : (frames += 1) {
+        game.bullets.magazine = consts.BULLET_MAG_SIZE;
+        const before = game.bullets.magazine;
+        _ = t.tick(&game, .{ .crank_delta = consts.FIRE_ANGLE_DELTA });
+        if (game.bullets.magazine < before) shots += 1;
+        const p = game.enemies.pos[0];
+        if (p[0] < 2.3 or @abs(p[1]) > 4) break;
+        try std.testing.expect(game.enemies.health[0] == consts.ENEMY_MAX_HEALTH);
+    }
+    try std.testing.expect(shots > 30);
+}

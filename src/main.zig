@@ -78,8 +78,9 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
 
     game_state.reset();
     resetFrameTimer();
-    debugLog("init complete: level arena {d}/{d} bytes, L1 hot set budget {d} bytes (collision {d}, separation {d}, flow field {d}, {d} per sprite drawn), {d} spawn cells", .{ level_arena.used(), level_arena.capacity(), memory.HOT_SET_BUDGET, state.COLLISION_HOT_SET_BYTES, enemy_separation_sys.SEPARATION_HOT_SET_BYTES, flow_field.hotSetBytes(), renderer.BYTES_PER_DRAW_ITEM, level.spawn_cells.len });
+    debugLog("init complete: level arena {d}/{d} bytes, L1 hot set budget {d} bytes (collision {d}, separation {d}, flow field {d}, bullet walls {d}, {d} per sprite drawn), {d} spawn cells", .{ level_arena.used(), level_arena.capacity(), memory.HOT_SET_BUDGET, state.COLLISION_HOT_SET_BYTES, enemy_separation_sys.SEPARATION_HOT_SET_BYTES, flow_field.hotSetBytes(), level.collision_grid.cells.len, renderer.BYTES_PER_DRAW_ITEM, level.spawn_cells.len });
     if (flow_field.hotSetBytes() > memory.HOT_SET_BUDGET) debugLog("WARNING: flow field ({d} bytes) is larger than the L1 hot set budget, enemy movement will miss the cache", .{flow_field.hotSetBytes()});
+    if (level.collision_grid.cells.len > memory.HOT_SET_BUDGET) debugLog("WARNING: collision grid ({d} bytes) is larger than the L1 hot set budget, bullet wall tests will miss the cache", .{level.collision_grid.cells.len});
 }
 
 /// Replace the current level, releasing everything the previous one allocated

@@ -35,8 +35,8 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     enemy_move_sys.update(&game.enemies, field, grid, game.player.pos, dt);
     enemy_separation_sys.update(&game.enemies, game.player.pos, field, grid, frame_arena.alloc(Vec2f, game.enemies.len));
 
-    //3. Move projectiles and resolve bullet -> enemy hits (kills are flagged then compacted out)
-    bullet_sys.update(&game.bullets, dt);
+    //3. Move projectiles (walls stop them) and resolve bullet -> enemy hits (kills are flagged then compacted out)
+    bullet_sys.update(&game.bullets, grid, dt);
     const hits = bullet_sys.collide(&game.bullets, game.enemies.positions(), frame_arena.alloc(state.Hit, game.bullets.len));
     combat_sys.applyBulletHits(hits, &game.enemies, &game.player);
     game.bullets.removeDead();
@@ -49,7 +49,7 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     //5. Now that the enemy positions are final, aim at the hottest target and fire
     const target_dir = auto_target_sys.calculateHottestTargetDir(game.player.pos, game.enemies.positions()) orelse maths.normaliseSafe(game.player.vel, Vec2f{ 1, 0 });
     if (firing_sys.update(&game.trigger, input, dt)) {
-        bullet_sys.fire(&game.bullets, game.player.pos, target_dir);
+        bullet_sys.fire(&game.bullets, game.player.pos, target_dir, game.rng.random().float(f32) * 2 - 1);
     }
     game.player.facing_dir = target_dir; //Player faces the way they are firing
 

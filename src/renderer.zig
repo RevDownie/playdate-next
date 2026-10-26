@@ -102,10 +102,17 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
         graphics.drawBitmap.?(bitmap, item.x, item.y, if (item.flipped) pd.kBitmapFlippedX else pd.kBitmapUnflipped);
     }
 
-    //---Bullets are rendered as geometry on top. TODO: Interleave bullets
-    for (game.bullets.positions()) |p| {
-        const sp = screen.toScreen(p);
-        graphics.fillRect.?(sp[0], sp[1], 6, 6, pd.kColorBlack);
+    //---Bullets are tracer streaks on top, at gun height: a black core in a white outline so they read over
+    //the dark enemies as well as the light ground. TODO: Interleave bullets
+    const bullets = &game.bullets;
+    const gun_height = Vec2i{ 0, consts.GUN_HEIGHT_PX };
+    for (bullets.pos[0..bullets.len], bullets.dir[0..bullets.len], bullets.lifetime[0..bullets.len], bullets.barrel[0..bullets.len]) |p, d, l, b| {
+        const travelled = (consts.BULLET_LIFETIME - l) * consts.BULLET_MAX_SPEED;
+        const tracer = anim.bulletTracer(p, d, travelled, b);
+        const head = screen.toScreen(tracer.head) - gun_height;
+        const tail = screen.toScreen(tracer.tail) - gun_height;
+        graphics.drawLine.?(tail[0], tail[1], head[0], head[1], 4, pd.kColorWhite);
+        graphics.drawLine.?(tail[0], tail[1], head[0], head[1], 2, pd.kColorBlack);
     }
 
     //---HUD. TODO: Replace with bitmap font

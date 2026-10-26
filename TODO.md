@@ -2,8 +2,20 @@
 
 ## Bullet behaviour
 - Bullets should be blocked by walls
+  - A bullet dies on the first blocked collision cell along its path, including when it's spawned inside one or leaves the map
+  - Never tunnels through a wall, even on a long (`MAX_FRAME_DT`) frame: the path is sampled every half cell
+  - Enemies behind a wall can't be shot through it
+  - The wall test runs on its own in `bullet_system.update` (the grid isn't added to the bullet/enemy collision hot set)
 - Improve bullet travel feel so bullets move like machine gun bullets
+  - Faster (`BULLET_MAX_SPEED` 14 m/s), but capped at compile time so a 50 FPS step can't skip over an enemy's hit circle
+  - Range based lifetime (`BULLET_RANGE`) rather than flying for 3s across the whole map
+  - Small random spread per shot (`BULLET_SPREAD`) that still hits at typical range
+  - Drawn as tracer streaks along the direction of travel (never poking back behind the gun) instead of 6px squares
 - Improve bullet spawn location so it spawns at the appropriate spot and offset for a gatling gun
+  - Bullets leave from the gun at hip height, ahead of and to the right hand side of the player, not from the feet
+  - The 6 barrels turn with the crank (one shot per 60 degrees), so each shot leaves from the next barrel
+  - The offset is visual only: the simulated bullet starts at the player's feet so enemies hugging the player can still be hit, and the drawn offset fades out over `MUZZLE_CONVERGE_DIST` so tracers meet the aim line
+- Out of scope (own TODOs): muzzle flash and impact sparks (VFX), firing shake (camera), target choice (auto-targetting)
 
 ## Improve auto-targetting
 - Needs design input

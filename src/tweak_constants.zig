@@ -40,9 +40,21 @@ pub const BUMP_TIME = 0.5;
 pub const DMG_PER_HIT: u8 = 35;
 pub const BULLET_MAG_SIZE: u8 = 60;
 pub const BULLET_POOL_SIZE: u8 = BULLET_MAG_SIZE + 10; //A full mag lives at most BULLET_LIFETIME, which is no longer than RELOAD_TIME
-pub const BULLET_MAX_SPEED: f32 = 10;
-pub const BULLET_LIFETIME = 3;
+pub const BULLET_MAX_SPEED: f32 = 14; //Must not step over an enemy's hit circle in one frame (checked in bullet_system)
+pub const BULLET_RANGE: f32 = 6.0; //Metres a bullet flies before it is spent (about two screen widths)
+pub const BULLET_LIFETIME: f32 = BULLET_RANGE / BULLET_MAX_SPEED;
+pub const BULLET_SPREAD: f32 = 0.035; //Most a shot strays sideways per metre travelled (about 2 degrees)
 pub const RELOAD_TIME = 3.0;
+
+/// Gatling gun. Only affects where bullets are drawn: they are simulated from the player's feet so enemies
+/// right up against the player can still be hit
+pub const GUN_BARRELS: u8 = 6; //One shot per FIRE_ANGLE_DELTA of crank, so the barrels turn once per crank revolution
+pub const GUN_HEIGHT_PX: i32 = 16; //Height of the barrels above the player's feet
+pub const MUZZLE_FORWARD: f32 = 0.14; //Metres ahead of the player the barrels end
+pub const MUZZLE_SIDE: f32 = 0.08; //Metres to the player's right the gun is held
+pub const BARREL_RADIUS: f32 = 0.02; //Metres from the gun's axis to each barrel
+pub const MUZZLE_CONVERGE_DIST: f32 = 1.5; //The drawn muzzle offset fades out over this many metres so tracers meet the aim line
+pub const TRACER_LENGTH: f32 = 0.2; //Metres of streak drawn behind each bullet
 
 pub const FLASH_HIT_EFFECT_DURATION: f32 = 0.3;
 
