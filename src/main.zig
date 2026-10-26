@@ -113,6 +113,7 @@ fn loadLevel(file_name: [*:0]const u8) void {
 ///
 fn startRun() void {
     game_state.reset();
+    game_state.trigger.button_cooldown = consts.FIRE_BUTTON_DELAY; //The A/B press that starts the run doesn't also fire
     phase = .playing;
     new_best = false;
 }
@@ -124,7 +125,8 @@ fn endRun() void {
     phase = .game_over;
     game_over_time = 0;
     const p = game_state.player;
-    new_best = p.score > save.best_score;
+    //Debug invincibility is a cheat, so it never sets a best
+    new_best = p.score > save.best_score and !game_state.invincible;
     if (new_best) {
         save.best_score = p.score;
         writeSave(save);
