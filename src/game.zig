@@ -52,7 +52,7 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     //6. Now that the enemy positions are final, aim at the best target the player can see and fire.
     //With nothing in sight aim the way the player is moving, or keep the last aim while standing still
     const move_dir = maths.normaliseSafe(game.player.vel, @splat(0));
-    const target = auto_target_sys.findTarget(game.player.pos, move_dir, game.player.facing_dir, game.camera_pos, game.enemies.positions(), grid, frame_arena.alloc(f32, game.enemies.len));
+    const target = auto_target_sys.findTarget(game.player.pos, move_dir, game.player.facing_dir, game.camera_pos, game.enemies.positions(), game.enemies.health[0..game.enemies.len], grid, frame_arena.alloc(f32, game.enemies.len));
     const aim_dir = if (target) |t| t.dir else maths.normaliseSafe(move_dir, game.player.facing_dir);
     if (firing_sys.update(&game.trigger, input, dt)) {
         bullet_sys.fire(&game.bullets, game.player.pos, aim_dir, game.rng.random().float(f32) * 2 - 1);
