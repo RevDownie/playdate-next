@@ -6,6 +6,7 @@ test {
     _ = @import("maths.zig");
     _ = @import("graphics_coords.zig");
     _ = @import("memory.zig");
+    _ = @import("save_data.zig");
     _ = @import("animation.zig");
     _ = @import("game_state.zig");
     _ = @import("collision_grid.zig");

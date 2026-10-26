@@ -18,6 +18,7 @@ pub const Input = struct {
     up: bool = false,
     down: bool = false,
     fire_held: bool = false, //A or B
+    fire_pressed: bool = false, //A or B went down this frame
     crank_delta: f32 = 0, //Degrees turned since last frame, positive is forward
 };
 
@@ -28,7 +29,9 @@ pub const Player = struct {
     target_pos: ?Vec2f = null, //The enemy the gun is aimed at this frame, if any
     health: u8 = consts.PLAYER_MAX_HEALTH,
     score: u64 = 0,
-    kill_streak: u32 = 0,
+    kill_streak: u32 = 0, //Kills since the player was last hurt: each kill scores SCORE_PER_KILL times this
+    kills: u32 = 0, //This run
+    best_streak: u32 = 0, //This run
     hit_flash_timer: f32 = 0, //Counts down while the hit flash effect is showing
 };
 
@@ -245,6 +248,7 @@ pub const GameState = struct {
     trigger: Trigger = .{},
     spawner: Spawner = .{},
     camera_pos: Vec2f = @splat(0),
+    run_time: f32 = 0, //Seconds survived this run
     rng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(consts.RNG_SEED), //Not reset between runs
     invincible: bool = false, //Debug: enemies can't hurt the player (set from the debug menu). Not reset between runs
 

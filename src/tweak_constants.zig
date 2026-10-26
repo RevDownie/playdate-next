@@ -99,6 +99,7 @@ pub const TRACER_LENGTH: f32 = 0.3; //Metres of trail drawn behind each bullet (
 pub const FLASH_HIT_EFFECT_DURATION: f32 = 0.3;
 
 pub const MAX_SCORE: u64 = 9999999999;
+pub const GAME_OVER_INPUT_DELAY: f32 = 1.0; //Seconds the run end screen ignores fire before A/B starts the next run
 
 /// Longest step the simulation takes in one frame. Larger gaps (e.g. returning from the system menu) are clamped
 /// so enemies and bullets don't teleport

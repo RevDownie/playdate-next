@@ -21,6 +21,8 @@ pub fn applyBulletHits(hits: []const Hit, enemies: *state.Enemies, player: *stat
             //Enemy is dead - TODO: Graceful death and not just dissappear
             enemies.health[i] = 0;
             player.kill_streak += 1;
+            player.kills += 1;
+            player.best_streak = @max(player.best_streak, player.kill_streak);
             player.score = @min(player.score + consts.SCORE_PER_KILL * player.kill_streak, consts.MAX_SCORE);
         } else {
             enemies.health[i] = health - consts.DMG_PER_HIT;
@@ -62,6 +64,7 @@ test "[combat_system] a second hit on a killed enemy is ignored" {
     try std.testing.expect(enemies.health[0] == 0);
     try std.testing.expect(player.kill_streak == 1);
     try std.testing.expect(player.score == consts.SCORE_PER_KILL);
+    try std.testing.expect(player.kills == 1 and player.best_streak == 1);
 }
 
 test "[combat_system] a fresh enemy is knocked back by the first hit and killed by the second" {

@@ -26,6 +26,7 @@ pub const TickResult = enum { playing, player_died };
 ///
 pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.FlowField, input: state.Input, dt: f32, frame_arena: *Arena) TickResult {
     const grid = &level.collision_grid;
+    game.run_time += dt;
 
     //1. Spawn new enemies around the player
     enemy_spawn_sys.update(&game.spawner, &game.enemies, game.rng.random(), game.player.pos, level.spawn_cells, field, grid, dt);
@@ -51,7 +52,10 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
 
     //4. Enemies touching the player hurt them
     combat_sys.applyEnemyContact(&game.enemies, &game.player, if (game.invincible) 0 else consts.CONTACT_DMG);
-    if (game.player.health == 0) return .player_died;
+    if (game.player.health == 0) {
+        game.player.hit_flash_timer = 0; //The run end screen shows the last frame, so don't leave it inverted
+        return .player_died;
+    }
 
     //5. Camera. Before targeting, as the gun only aims at what is on screen
     game.camera_pos = game.player.pos; //Follow the player directly for now

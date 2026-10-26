@@ -8,6 +8,7 @@ const state = @import("game_state.zig");
 const game = @import("game.zig");
 const renderer = @import("renderer.zig");
 const level_loader = @import("level_loader.zig");
+const save_data = @import("save_data.zig");
 const FlowField = @import("flow_field.zig").FlowField;
 const enemy_separation_sys = @import("enemy_separation_system.zig");
 const memory = @import("memory.zig");
@@ -32,6 +33,14 @@ var assets: renderer.Assets = undefined;
 var level: level_loader.Level = undefined;
 var flow_field: FlowField = undefined; //The enemies' path to the player, sized to the level
 var game_state: state.GameState = .{};
+var save: save_data.SaveData = .{}; //Read once at init, written when a run ends with a new best
+
+/// The simulation only ticks while playing. When the player dies the last frame stays up under the run end
+/// screen until they choose to go again
+const Phase = enum { playing, game_over };
+var phase: Phase = .playing;
+var game_over_time: f32 = 0; //Seconds on the run end screen
+var new_best = false; //The run that just ended beat the saved best
 
 /// Frame timing and requests from outside the frame loop
 var time_last_tick_ms: u32 = 0;
@@ -84,7 +93,8 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     loadLevel("lvl1.bin");
     assets = renderer.loadAssets(playdate_api, "lvl1");
 
-    game_state.reset();
+    save = readSave();
+    startRun();
     resetFrameTimer();
     debugLog("init complete: level arena {d}/{d} bytes, L1 hot set budget {d} bytes (collision {d}, separation {d}, flow field {d}, bullet walls {d}, {d} per sprite drawn), {d} spawn cells", .{ level_arena.used(), level_arena.capacity(), memory.HOT_SET_BUDGET, state.COLLISION_HOT_SET_BYTES, enemy_separation_sys.SEPARATION_HOT_SET_BYTES, flow_field.hotSetBytes(), level.collision_grid.cells.len, renderer.BYTES_PER_DRAW_ITEM, level.spawn_cells.len });
     if (flow_field.hotSetBytes() > memory.HOT_SET_BUDGET) debugLog("WARNING: flow field ({d} bytes) is larger than the L1 hot set budget, enemy movement will miss the cache", .{flow_field.hotSetBytes()});
@@ -97,6 +107,52 @@ fn loadLevel(file_name: [*:0]const u8) void {
     level_arena.reset();
     level = level_loader.load(playdate_api, file_name, &level_arena) catch |err| std.debug.panic("loadLevel: {s}", .{@errorName(err)});
     flow_field = FlowField.init(&level_arena, &level.collision_grid, level.collision_grid.cellIndex(game_state.player.pos));
+}
+
+/// Start a fresh run (also leaves the run end screen)
+///
+fn startRun() void {
+    game_state.reset();
+    phase = .playing;
+    new_best = false;
+}
+
+/// The player died: freeze on the run end screen, and save the score if it is a new best (the one file write
+/// in the frame loop, once per run)
+///
+fn endRun() void {
+    phase = .game_over;
+    game_over_time = 0;
+    const p = game_state.player;
+    new_best = p.score > save.best_score;
+    if (new_best) {
+        save.best_score = p.score;
+        writeSave(save);
+    }
+    debugLog("run over: score={d} best={d} new_best={} time={d:.1}s kills={d} best_streak={d}", .{ p.score, save.best_score, new_best, game_state.run_time, p.kills, p.best_streak });
+}
+
+/// The saved best, or a fresh save if there is none yet (or it can't be read)
+///
+fn readSave() save_data.SaveData {
+    const file = playdate_api.file.*;
+    const handle = file.open.?(save_data.FILE_NAME, pd.kFileReadData) orelse return .{};
+    defer _ = file.close.?(handle);
+    var bytes: [save_data.SIZE]u8 = undefined;
+    const n = file.read.?(handle, &bytes, bytes.len);
+    if (n != bytes.len) return .{};
+    return save_data.decode(&bytes);
+}
+
+fn writeSave(data: save_data.SaveData) void {
+    const file = playdate_api.file.*;
+    const handle = file.open.?(save_data.FILE_NAME, pd.kFileWrite) orelse {
+        debugLog("WARNING: couldn't open {s} to save the best score", .{save_data.FILE_NAME});
+        return;
+    };
+    defer _ = file.close.?(handle);
+    const bytes = save_data.encode(data);
+    if (file.write.?(handle, &bytes, bytes.len) != bytes.len) debugLog("WARNING: couldn't write {s}", .{save_data.FILE_NAME});
 }
 
 /// Called from the system menu by the user if they want to restart. Handled at the start of the next frame
@@ -123,20 +179,32 @@ fn gameUpdateWrapper(_: ?*anyopaque) callconv(.c) c_int {
 
     if (restart_requested) {
         restart_requested = false;
-        game_state.reset();
+        startRun();
     }
 
     const now_ms = sys.getCurrentTimeMilliseconds.?();
     const dt = @min(@as(f32, @floatFromInt(now_ms -% time_last_tick_ms)) * 0.001, consts.MAX_FRAME_DT);
     time_last_tick_ms = now_ms;
 
-    if (debug_logging) sys.resetElapsedTime.?();
-    const result = game.tick(&game_state, &level, &flow_field, readInput(), dt, &frame_arena);
-    if (debug_logging) sim_ms_max = @max(sim_ms_max, sys.getElapsedTime.?() * 1000);
-    if (result == .player_died) {
-        game_state.reset();
+    const input = readInput();
+    switch (phase) {
+        .playing => {
+            if (debug_logging) sys.resetElapsedTime.?();
+            const result = game.tick(&game_state, &level, &flow_field, input, dt, &frame_arena);
+            if (debug_logging) sim_ms_max = @max(sim_ms_max, sys.getElapsedTime.?() * 1000);
+            if (result == .player_died) endRun();
+        },
+        .game_over => {
+            //A short pause first, so a player still hammering fire doesn't skip the screen
+            game_over_time += dt;
+            if (game_over_time >= consts.GAME_OVER_INPUT_DELAY and input.fire_pressed) startRun();
+        },
     }
-    last_render_stats = renderer.render(playdate_api, &assets, &game_state, &level, &frame_arena);
+    const hud = renderer.Hud{
+        .best_score = save.best_score,
+        .game_over = if (phase == .game_over) .{ .new_best = new_best, .can_restart = game_over_time >= consts.GAME_OVER_INPUT_DELAY } else null,
+    };
+    last_render_stats = renderer.render(playdate_api, &assets, &game_state, &level, hud, &frame_arena);
 
     logStatus(now_ms);
     return 1; //Inform the SDK we have stuff to render
@@ -157,6 +225,7 @@ fn readInput() state.Input {
         .up = (current & pd.kButtonUp) != 0,
         .down = (current & pd.kButtonDown) != 0,
         .fire_held = (current & (pd.kButtonA | pd.kButtonB)) != 0,
+        .fire_pressed = (pushed & (pd.kButtonA | pd.kButtonB)) != 0,
         .crank_delta = sys.getCrankChange.?(),
     };
 }

@@ -5,12 +5,15 @@ const anim = @import("animation.zig");
 const bitmap_descs = @import("bitmap_descs.zig");
 const consts = @import("tweak_constants.zig");
 const memory = @import("memory.zig");
+const hud_mod = @import("hud.zig");
 const GameState = @import("game_state.zig").GameState;
 const Level = @import("level_loader.zig").Level;
 const Arena = memory.Arena;
 
 const Vec2i = @Vector(2, i32);
 const Vec2f = @Vector(2, f32);
+
+pub const Hud = hud_mod.Hud;
 
 /// Which bitmap table a sprite is drawn from
 ///
@@ -21,6 +24,7 @@ const Sheet = enum(u8) { player, enemy, env, drop };
 pub const Assets = struct {
     bg_bitmap: *pd.LCDBitmap,
     tables: [std.enums.values(Sheet).len]*pd.LCDBitmapTable, //Indexed by Sheet
+    fonts: hud_mod.Fonts,
 };
 
 /// One entry in the per frame draw list, already in screen space with the sprite's anchor applied.
@@ -68,13 +72,14 @@ pub fn loadAssets(playdate_api: *pd.PlaydateAPI, level_bitmap_name: [*:0]const u
     assets.tables[@backingInt(Sheet.enemy)] = graphics.loadBitmapTable.?("enemy1", null) orelse @panic("loadAssets: Failed to load enemy1");
     assets.tables[@backingInt(Sheet.env)] = graphics.loadBitmapTable.?(level_bitmap_name, null) orelse @panic("loadAssets: Failed to load level bitmaps");
     assets.tables[@backingInt(Sheet.drop)] = graphics.loadBitmapTable.?("drops", null) orelse @panic("loadAssets: Failed to load drops");
+    assets.fonts = hud_mod.loadFonts(playdate_api);
     return assets;
 }
 
-/// Build a draw list of everything on screen, sort it by "depth order" and draw it, then the bullets and HUD.
-/// Per frame buffers come from the frame arena
+/// Build a draw list of everything on screen, sort it by "depth order" and draw it, then the bullets, the HUD
+/// and (when the run is over) the run end screen. Per frame buffers come from the frame arena
 ///
-pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const GameState, level: *const Level, frame_arena: *Arena) RenderStats {
+pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const GameState, level: *const Level, hud: Hud, frame_arena: *Arena) RenderStats {
     const sys = playdate_api.system.*;
     const disp = playdate_api.display.*;
     const graphics = playdate_api.graphics.*;
@@ -134,20 +139,13 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
         drawTracer(graphics, head, tail);
     }
 
-    //---HUD. TODO: Replace with bitmap font
-    drawLabel(graphics, "Score: {d}", game.player.score, screen.width - 100, 0);
-    drawLabel(graphics, "Health: {d}", game.player.health, @divTrunc(screen.width, 2), 0);
-    const ammo_x = @divTrunc(screen.width, 2);
-    const ammo_y = screen.height - 30;
-    if (game.bullets.isReloading()) {
-        drawLabel(graphics, "Reloading {d}", game.bullets.ammo, ammo_x, ammo_y);
-    } else if (game.bullets.ammo == 0) {
-        drawLabel(graphics, "{s}", "OUT OF AMMO", ammo_x, ammo_y);
+    //---Text is never inverted by the hit flash, so it stays readable
+    _ = graphics.setDrawMode.?(pd.kDrawModeCopy);
+    if (hud.game_over) |over| {
+        hud_mod.drawGameOver(graphics, assets.fonts, game, hud, over, screen.width, screen.height);
     } else {
-        drawLabel(graphics, "Ammo: {d}", game.bullets.ammo, ammo_x, ammo_y);
+        hud_mod.drawHud(graphics, assets.fonts, game, hud, screen.width, screen.height);
     }
-
-    if (game.invincible) _ = graphics.drawText.?("INVINCIBLE", 10, pd.kASCIIEncoding, 0, 20); //Debug, so screenshots don't mislead
     sys.drawFPS.?(0, 0);
     return .{ .drawn = @intCast(list.len) };
 }
@@ -195,14 +193,6 @@ fn sheetSize(sheet: Sheet) Vec2i {
         .env => .{ bitmap_descs.ENV_OBJ_W, bitmap_descs.ENV_OBJ_H },
         .drop => .{ bitmap_descs.DROP_W, bitmap_descs.DROP_H },
     };
-}
-
-/// Draw a single number with a label, truncated if it doesn't fit the buffer
-///
-fn drawLabel(graphics: pd.playdate_graphics, comptime fmt: []const u8, value: anytype, x: c_int, y: c_int) void {
-    var buffer: [32]u8 = undefined;
-    const text = std.fmt.bufPrint(&buffer, fmt, .{value}) catch buffer[0..];
-    _ = graphics.drawText.?(text.ptr, text.len, pd.kASCIIEncoding, x, y);
 }
 
 /// 8x8 dither patterns for the fading tracer tail: 8 rows of image (1 = white) then 8 rows of mask
