@@ -75,7 +75,10 @@ pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameSt
     //Top left (after the FPS counter): the wave, or the countdown to the next one
     const spawner = &game.spawner;
     const wave_text = switch (spawner.phase) {
-        .wave => format(&buf, "Wave {d}", .{spawner.wave}),
+        .wave => if (spawner.isHolding())
+            format(&buf, "Wave {d}  Hold {d}", .{ spawner.wave, secondsLeft(spawner.hold - spawner.phase_time) })
+        else
+            format(&buf, "Wave {d}  Clear!", .{spawner.wave}),
         .lull => format(&buf, "Wave {d} in {d}", .{ spawner.wave + 1, secondsLeft(spawner.timer) }),
     };
     drawBoxed(graphics, fonts.small, wave_text, WAVE_LABEL_X, BOX_PAD_Y, .left, .normal);
@@ -132,8 +135,9 @@ fn secondsLeft(timer: f32) u32 {
     return @as(u32, @intFromFloat(timer)) + 1;
 }
 
-/// The start and end of a wave: "WAVE N" and where it is coming from as it starts, and "WAVE N SURVIVED" when it
-/// is cleared (not when it ran out of time: then the next wave starts straight away instead)
+/// The beats of a wave: "WAVE N", how long to hold out and where it is coming from as it starts, "CLEAR THE REST"
+/// when the spawning stops, and "WAVE N SURVIVED" when it is cleared (not when it ran out of time: then the next
+/// wave starts straight away instead)
 ///
 fn drawWaveBanner(graphics: pd.playdate_graphics, fonts: Fonts, spawner: *const state.Spawner, width: c_int) void {
     var buf: [48]u8 = undefined;
@@ -142,7 +146,10 @@ fn drawWaveBanner(graphics: pd.playdate_graphics, fonts: Fonts, spawner: *const 
     switch (spawner.phase) {
         .wave => if (spawner.phase_time < consts.WAVE_BANNER_TIME) {
             drawBoxed(graphics, fonts.big, format(&buf, "WAVE {d}", .{spawner.wave}), cx, BANNER_Y, .centre, .loud);
-            drawBoxed(graphics, fonts.small, sidesText(&buf, spawner.sides), cx, BANNER_Y + big_h, .centre, .normal);
+            var sides_buf: [40]u8 = undefined;
+            drawBoxed(graphics, fonts.small, format(&buf, "Hold out {d}s {s}", .{ secondsLeft(spawner.hold) - 1, sidesText(&sides_buf, spawner.sides) }), cx, BANNER_Y + big_h, .centre, .normal);
+        } else if (!spawner.isHolding() and spawner.phase_time < spawner.hold + consts.WAVE_BANNER_TIME) {
+            drawBoxed(graphics, fonts.big, "CLEAR THE REST", cx, BANNER_Y, .centre, .loud);
         },
         .lull => if (spawner.survived and spawner.phase_time < consts.WAVE_SURVIVED_BANNER_TIME) {
             drawBoxed(graphics, fonts.big, format(&buf, "WAVE {d} SURVIVED", .{spawner.wave}), cx, BANNER_Y, .centre, .normal);
@@ -151,16 +158,16 @@ fn drawWaveBanner(graphics: pd.playdate_graphics, fonts: Fonts, spawner: *const 
     }
 }
 
-/// "From the north", "From the north and east", ... "From all sides"
+/// "from the north", "from the north and east", ... "from all sides"
 ///
 fn sidesText(buffer: []u8, sides: u8) []const u8 {
-    if (@popCount(sides) == std.enums.values(MapSide).len) return "From all sides";
+    if (@popCount(sides) == std.enums.values(MapSide).len) return "from all sides";
     var len: usize = 0;
     var written: u8 = 0;
     const total = @popCount(sides);
     for (std.enums.values(MapSide)) |side| {
         if (sides & (@as(u8, 1) << @intCast(@backingInt(side))) == 0) continue;
-        const joiner = if (written == 0) "From the " else if (written + 1 == total) " and " else ", ";
+        const joiner = if (written == 0) "from the " else if (written + 1 == total) " and " else ", ";
         len += (std.fmt.bufPrint(buffer[len..], "{s}{s}", .{ joiner, @tagName(side) }) catch return buffer[0..len]).len;
         written += 1;
     }

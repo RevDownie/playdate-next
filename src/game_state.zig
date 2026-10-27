@@ -225,17 +225,23 @@ pub const Popups = struct {
 pub const WavePhase = enum(u8) { lull, wave };
 
 /// Where the run is in its waves (see the WAVE_* constants and enemy_spawn_system). A lull counts down to the next
-/// wave; a wave spawns its enemies in bursts until it is survived (or runs out of time)
+/// wave; a wave holds out (spawning) for `hold` seconds, then must be cleared to be survived
 ///
 pub const Spawner = struct {
     wave: u16 = 0, //The current wave, or during a lull the one just fought (0 before the first)
     phase: WavePhase = .lull,
-    phase_time: f32 = 0, //Seconds since this lull or wave began (drives the HUD's banners)
-    timer: f32 = consts.FIRST_WAVE_DELAY, //Lull: until the next wave. Wave: until the next burst. Infinite stops spawning
-    to_spawn: u16 = 0, //Enemies of this wave still to come
-    burst_interval: f32 = 0,
+    phase_time: f32 = 0, //Seconds since this lull or wave began (drives the HUD)
+    timer: f32 = consts.FIRST_WAVE_DELAY, //Lull: until the next wave. Wave: until the next pack. Infinite stops spawning
+    hold: f32 = 0, //This wave's tuning (see consts.WaveDef)
+    peak: u8 = 0,
+    pack: u8 = 0,
     sides: u8 = 0, //Bit per level_loader.MapSide the wave comes from
     survived: bool = false, //This lull follows a wave the player survived (rather than one that ran out of time)
+
+    /// Still spawning: the wave is being held out
+    pub fn isHolding(self: *const Spawner) bool {
+        return self.phase == .wave and self.phase_time < self.hold;
+    }
 };
 
 /// What a drop gives, in the order of the drops bitmap table (see drop_sprites.py)

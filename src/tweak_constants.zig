@@ -30,46 +30,55 @@ pub const MAX_POPUPS: u8 = 8; //Messages in the world at once; a new one replace
 pub const POPUP_TIME: f32 = 0.7; //Seconds a combo message shows
 pub const POPUP_BIG_TIME: f32 = 1.4; //...and a milestone or COMBO LOST
 
-/// Waves. The horde comes in waves with a lull between them: a wave spawns its enemies in bursts from one or two
-/// sides of the map, and is survived once it has all spawned and at most WAVE_CLEAR_LEFT enemies are left. The
-/// lull after it is the time to go out for drops (they come faster and bigger then, see DROP_LULL_*).
+/// Waves. The horde comes in waves with a lull between them. A wave is a fight to hold out through: for `hold`
+/// seconds packs keep spawning to keep the number of enemies alive near a target, which climbs from
+/// WAVE_START_FRACTION of the wave's `peak` to all of it, so the pressure is sustained and builds to a climax
+/// (killing faster only brings the next pack sooner). Then the rest must be cleared (down to WAVE_CLEAR_LEFT) to
+/// survive it. The lull after it is the time to go out for drops (they come faster and bigger then, DROP_LULL_*).
 /// Difficulty rises and falls but trends up: the table runs in fours of a build up, a step back, a peak and a
-/// breather, each four bigger and faster than the last
+/// breather, each four bigger and longer than the last
 pub const WaveDef = struct {
-    size: u16, //Enemies in the wave
-    burst_interval: f32, //Seconds between bursts of WAVE_BURST_SIZE
+    hold: f32, //Seconds the wave keeps spawning
+    peak: u8, //Enemies kept alive by the end of the hold
+    pack: u8, //Enemies per pack (they drop in together on one cell, so they arrive as a crowd)
     lull: f32, //Seconds of quiet after it is survived
 };
 pub const WAVES = [_]WaveDef{
-    .{ .size = 10, .burst_interval = 1.2, .lull = 6 }, //1: a gentle start from one side (2.5 enemies a second)
-    .{ .size = 18, .burst_interval = 1.0, .lull = 6 },
-    .{ .size = 14, .burst_interval = 1.0, .lull = 5 }, //Step back
-    .{ .size = 34, .burst_interval = 0.65, .lull = 8 }, //Peak, then a longer lull to recover
-    .{ .size = 26, .burst_interval = 0.7, .lull = 6 },
-    .{ .size = 46, .burst_interval = 0.5, .lull = 6 },
-    .{ .size = 36, .burst_interval = 0.5, .lull = 5 },
-    .{ .size = 64, .burst_interval = 0.38, .lull = 8 }, //8: peak, faster than a steady crank can kill
+    .{ .hold = 20, .peak = 14, .pack = 4, .lull = 7 }, //1: from one side, a taste
+    .{ .hold = 25, .peak = 20, .pack = 4, .lull = 7 },
+    .{ .hold = 20, .peak = 16, .pack = 4, .lull = 6 }, //Step back
+    .{ .hold = 30, .peak = 30, .pack = 5, .lull = 9 }, //Peak, then a longer lull to recover
+    .{ .hold = 25, .peak = 24, .pack = 5, .lull = 7 },
+    .{ .hold = 35, .peak = 38, .pack = 6, .lull = 7 },
+    .{ .hold = 25, .peak = 30, .pack = 5, .lull = 6 },
+    .{ .hold = 40, .peak = 50, .pack = 6, .lull = 9 }, //8: peak
 };
-/// Past the table the last four repeat, each repeat this much bigger, faster and with shorter lulls
-pub const WAVE_REPEAT_EXTRA_SIZE: u16 = 28;
-pub const WAVE_REPEAT_FASTER: f32 = 0.06; //Off the burst interval
+/// Past the table the last four repeat, each repeat with a higher peak, a longer hold, bigger packs and shorter lulls
+pub const WAVE_REPEAT_EXTRA_PEAK: u8 = 10;
+pub const WAVE_REPEAT_LONGER: f32 = 5; //Seconds onto the hold
 pub const WAVE_REPEAT_SHORTER_LULL: f32 = 1.0;
-pub const WAVE_MIN_BURST_INTERVAL: f32 = 0.25;
+pub const WAVE_MAX_HOLD: f32 = 60;
+pub const WAVE_MAX_PACK: u8 = 8;
 pub const WAVE_MIN_LULL: f32 = 4.0;
-pub const WAVE_SIZE_SCALE: f32 = 1.0; //Every wave's size is multiplied by this (raise it for a stress test)
-pub const WAVE_BURST_SIZE: u8 = 3; //Enemies per burst
+pub const WAVE_START_FRACTION: f32 = 0.4; //Of the peak, kept alive as a wave starts
+pub const WAVE_PACK_INTERVAL: f32 = 0.5; //Seconds between packs at most: faster than a steady crank kills, so a crowd builds
+pub const WAVE_PEAK_SCALE: f32 = 1.0; //Every wave's peak is multiplied by this (raise it for a stress test)
 /// Waves come from one side of the map, then from one more side every this many waves until they come from all
 /// four. One side is easy to read and to back away from; a horde on a single front walks into the gun in single
 /// file, so the surround is what eventually overruns the player
 pub const WAVES_PER_EXTRA_SIDE: u16 = 3;
-pub const WAVE_CLEAR_LEFT: u8 = 3; //A wave is survived once it has all spawned and no more than this many enemies are left
-pub const WAVE_MAX_TIME: f32 = 45.0; //A wave not survived by then is followed straight away by the next (no lull)
+pub const WAVE_CLEAR_LEFT: u8 = 3; //After the hold, a wave is survived once no more than this many enemies are left
+pub const WAVE_CLEAR_MAX_TIME: f32 = 20.0; //...or followed straight away by the next wave (no lull) if that takes longer
 pub const FIRST_WAVE_DELAY: f32 = 3.0;
-pub const WAVE_BANNER_TIME: f32 = 2.0; //How long "WAVE N" shows when a wave starts
+pub const WAVE_BANNER_TIME: f32 = 2.0; //How long "WAVE N" shows when a wave starts, and "CLEAR THE REST" after the hold
 pub const WAVE_SURVIVED_BANNER_TIME: f32 = 2.5; //...and "WAVE N SURVIVED" when it is survived
 pub const SPAWN_EDGE_BAND: f32 = 1.0; //Enemies drop in on free cells within this many metres of the map's edge
 pub const SPAWN_MIN_PLAYER_DIST: f32 = 3.0; //...but never closer than this to the player
-pub const SPAWN_ATTEMPTS: u8 = 4; //Random spawn cells tried per enemy before giving up (they must be reachable and far enough away)
+/// Waves drop their packs in a ring just off screen in the wave's direction(s), this far from the player at most,
+/// so they arrive within a few seconds as a crowd the player can see (spawning only at the map's edge, the gun
+/// picked each enemy off as it walked into view and the screen never filled). The map's edge band is the fallback
+pub const SPAWN_RING_MAX_DIST: f32 = 4.5;
+pub const SPAWN_ATTEMPTS: u8 = 6; //Random spawn cells tried per enemy before giving up (they must be reachable and far enough away)
 pub const RNG_SEED: u64 = 42;
 
 /// Auto targetting. The gun only aims at enemies the player can see: inside the camera's view and with a

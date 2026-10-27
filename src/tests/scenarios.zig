@@ -159,8 +159,8 @@ test "[scenario] the player dies if left alone" {
 test "[scenario] balance: a steadily cranked gun holds the horde off for a while, but is overrun in the end" {
     //A player standing still in the open turning the crank once a second, at the device's 50 FPS, with ammo
     //kept topped up (this measures the gun against the waves; ammo comes from drops, see the drop scenarios).
-    //Measured at the time of tuning: untouched until the wave 8 peak, overrun in wave 12 once waves come from
-    //all four sides, after ~240s and ~510 kills
+    //Measured at the time of tuning: the first waves are mown down as they walk on screen, the wave 4 climax
+    //crowds the screen (~12 enemies in view) and hurts, and the player is overrun in wave 6 after ~210s and ~720 kills
     const dt: f32 = 1.0 / 50.0;
     var t: TestLevel = .{};
     t.init(true);
@@ -179,8 +179,8 @@ test "[scenario] balance: a steadily cranked gun holds the horde off for a while
     const secs = @as(f32, @floatFromInt(frames)) * dt;
     try std.testing.expect(result == .player_died);
     try std.testing.expect(secs > 150 and secs < 300);
-    try std.testing.expect(game.spawner.wave >= 8 and game.spawner.wave <= 14);
-    try std.testing.expect(kills > 300);
+    try std.testing.expect(game.spawner.wave >= 5 and game.spawner.wave <= 9);
+    try std.testing.expect(kills > 400);
 }
 
 test "[scenario] an enemy right up against the player can be shot" {
@@ -358,6 +358,7 @@ fn secondsSurvivedWithDrops(walk_to_drops: bool) f32 {
 test "[scenario] under the horde, a player who goes out for drops outlives one who stands still" {
     const standing = secondsSurvivedWithDrops(false);
     const walking = secondsSurvivedWithDrops(true);
-    //Measured at the time of tuning: ~16s standing still, ~590s walking to drops
+    //Measured at the time of tuning: ~14s standing still; walking to drops reaches the 600s cap (the player is
+    //faster than the enemies, so one who keeps moving can always outrun them)
     try std.testing.expect(walking > standing * 1.5);
 }
