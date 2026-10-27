@@ -81,8 +81,8 @@ pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameSt
     drawBoxed(graphics, fonts.small, wave_text, WAVE_LABEL_X, BOX_PAD_Y, .left, .normal);
     drawWaveBanner(graphics, fonts, spawner, width);
 
-    //Top centre: health
-    drawBoxed(graphics, fonts.small, format(&buf, "Health {d}", .{game.player.health}), @divTrunc(width, 2), BOX_PAD_Y, .centre, if (game.player.health <= 25) .loud else .normal);
+    //Bottom left: health, next to the ammo so the two resources read together
+    drawBoxed(graphics, fonts.small, format(&buf, "Health {d}", .{game.player.health}), BOX_PAD_X, height - small_h, .left, if (game.player.health <= 25) .loud else .normal);
 
     //Top right: score, then the best to beat (or that it is being beaten)
     const right = width - BOX_PAD_X;
@@ -108,7 +108,7 @@ pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameSt
         drawBoxed(graphics, fonts.small, format(&buf, "Ammo {d}", .{game.bullets.ammo}), @divTrunc(width, 2), ammo_y, .centre, .normal);
     }
 
-    if (game.invincible) drawBoxed(graphics, fonts.small, "INVINCIBLE", BOX_PAD_X, height - small_h, .left, .loud); //Debug, so screenshots don't mislead
+    if (game.invincible) drawBoxed(graphics, fonts.small, "INVINCIBLE", WAVE_LABEL_X, BOX_PAD_Y + small_h, .left, .loud); //Debug, so screenshots don't mislead
 }
 
 /// A combo message in the world, centred on `x` with its bottom at `y`

@@ -118,6 +118,13 @@ pub const DROP_LULL_LARGE_CHANCE: f32 = 0.6; //...and are more often large
 pub const DROP_MIN_PLAYER_DIST: f32 = 2.0; //Drops never appear this close to the player: they have to go and get them
 pub const DROP_SPAWN_ATTEMPTS: u8 = 4; //Random points tried per drop (must be free and far enough away), then retried next frame
 pub const DROP_PICKUP_RADIUS: f32 = CHAR_WIDTH_M * 0.5;
+pub const DROP_PICKUP_RADIUS_LARGE: f32 = CHAR_WIDTH_M * 0.75; //Large drops are drawn about as wide as the player
+/// Drops bob gently and a glint sweeps across them now and then, so they catch the eye
+pub const DROP_BOUNCE_PX: f32 = 5; //Height of each hop
+pub const DROP_BOUNCE_PERIOD: f32 = 0.8; //Seconds per hop
+pub const DROP_SHEEN_PERIOD_MS: u32 = 1600; //A glint this often...
+pub const DROP_SHEEN_FRAME_MS: u32 = 50; //...stepping through its frames this fast
+pub const DROP_SHEEN_POINT_OFFSET_MS: u32 = 370; //Per drop point, so drops don't all glint at once
 /// The chance a drop is ammo leans towards whichever of ammo and health the player is shorter of, within these
 pub const DROP_AMMO_CHANCE_MIN: f32 = 0.3;
 pub const DROP_AMMO_CHANCE_MAX: f32 = 0.75;

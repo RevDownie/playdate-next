@@ -50,6 +50,18 @@ const POPUP_RISE_PX_PER_SEC: f32 = 30;
 /// Seconds per on/off cycle of a drop that is about to vanish
 const DROP_BLINK_PERIOD: f32 = 0.25;
 
+/// Drop shadow ellipses in pixels, a little narrower than the drawn drop
+const DROP_SHADOW_W = 30;
+const DROP_SHADOW_W_LARGE = 44;
+const DROP_SHADOW_H = 8;
+
+/// A drop about to vanish blinks: hidden every other half period. Integer half periods: a float @mod would
+/// call libc's fmodf, which drags newlib's malloc into the device link
+///
+fn isBlinkedOut(lifetime: f32) bool {
+    return lifetime < consts.DROP_BLINK_TIME and @as(u32, @intFromFloat(@max(lifetime, 0) / (DROP_BLINK_PERIOD / 2))) % 2 == 0;
+}
+
 /// Size in pixels of the ring drawn at the gun's target's feet
 const TARGET_RING_W = 30;
 const TARGET_RING_H = 12;
@@ -103,6 +115,16 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
         graphics.drawEllipse.?(feet[0] - TARGET_RING_W / 2, feet[1] - TARGET_RING_H / 2, TARGET_RING_W, TARGET_RING_H, 2, 0, 360, pd.kColorXOR);
     }
 
+    //---Shadows under the drops, on the ground below their bounce (smaller when higher)
+    const drops = &game.drops;
+    for (drops.pos[0..drops.len], drops.kind[0..drops.len], drops.lifetime[0..drops.len]) |p, k, l| {
+        if (isBlinkedOut(l)) continue;
+        const feet = screen.toScreen(p);
+        const w: i32 = @as(i32, if (k.isLarge()) DROP_SHADOW_W_LARGE else DROP_SHADOW_W) - 2 * anim.dropBounce(consts.DROP_LIFETIME - l);
+        if (feet[0] + w < 0 or feet[0] - w > screen.width or feet[1] < -DROP_SHADOW_H or feet[1] > screen.height + DROP_SHADOW_H) continue;
+        graphics.fillEllipse.?(feet[0] - @divTrunc(w, 2), feet[1] - DROP_SHADOW_H / 2, w, DROP_SHADOW_H, 0, 360, @intFromPtr(&PATTERN_SHADOW));
+    }
+
     //---Build the draw list of visible sprites. Characters face the way they are aiming / moving
     const max_items = 1 + game.enemies.len + game.drops.len + level.obj_world_positions.len;
     var list = DrawList{ .items = frame_arena.alloc(DrawItem, max_items), .keys = frame_arena.alloc(SortKey, max_items) };
@@ -111,12 +133,14 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     for (game.enemies.positions(), game.enemies.velocities()) |p, v| {
         list.addCharacter(screen, .enemy, p, v);
     }
-    //Drops sit on the ground at their point, blinking for their last few seconds before they vanish
-    const drops = &game.drops;
-    for (drops.pos[0..drops.len], drops.kind[0..drops.len], drops.lifetime[0..drops.len]) |p, k, l| {
-        //Integer half periods: a float @mod would call libc's fmodf, which drags newlib's malloc into the device link
-        if (l < consts.DROP_BLINK_TIME and @as(u32, @intFromFloat(@max(l, 0) / (DROP_BLINK_PERIOD / 2))) % 2 == 0) continue;
-        list.add(screen, .drop, p, .{ .index = @backingInt(k), .flipped = false }, .{ bitmap_descs.DROP_W / 2, bitmap_descs.DROP_H - 2 });
+    //Drops bob above their point with a glint now and then, blinking for their last few seconds before they vanish.
+    //The bob goes in the anchor so the depth sort still uses the point on the ground
+    for (drops.pos[0..drops.len], drops.kind[0..drops.len], drops.lifetime[0..drops.len], drops.point[0..drops.len]) |p, k, l, point| {
+        if (isBlinkedOut(l)) continue;
+        const age = consts.DROP_LIFETIME - l;
+        const frame = @as(u32, @backingInt(k)) * bitmap_descs.DROP_FRAMES_PER_KIND + anim.dropSheenFrame(age, point);
+        const anchor = Vec2i{ bitmap_descs.DROP_W / 2, @as(i32, bitmap_descs.DROP_H) - 1 + anim.dropBounce(age) };
+        list.add(screen, .drop, p, .{ .index = @intCast(frame), .flipped = false }, anchor);
     }
     for (level.obj_world_positions, level.obj_bitmap_indices) |p, bi| {
         list.add(screen, .env, p, .{ .index = bi, .flipped = false }, .{ bitmap_descs.ENV_OBJ_W / 2, bitmap_descs.ENV_OBJ_H });
@@ -210,6 +234,8 @@ fn sheetSize(sheet: Sheet) Vec2i {
 
 /// 8x8 dither patterns for the fading tracer tail: 8 rows of image (1 = white) then 8 rows of mask
 const PATTERN_HALF: pd.LCDPattern = .{ 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+/// Ground shadows: black on every other pixel, the ground showing through the rest (the mask rows are the checker)
+const PATTERN_SHADOW: pd.LCDPattern = .{ 0, 0, 0, 0, 0, 0, 0, 0, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55 };
 const PATTERN_QUARTER: pd.LCDPattern = .{ 0xEE, 0xBB, 0xEE, 0xBB, 0xEE, 0xBB, 0xEE, 0xBB, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
 /// Draw a bullet as a comet: a solid head fading through 50% then 25% dither towards the tail, over a white

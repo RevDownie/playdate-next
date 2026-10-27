@@ -11,6 +11,7 @@ const Vec2f = @Vector(2, f32);
 
 const DROP_MIN_PLAYER_DIST_SQRD = consts.DROP_MIN_PLAYER_DIST * consts.DROP_MIN_PLAYER_DIST;
 const DROP_PICKUP_RADIUS_SQRD = consts.DROP_PICKUP_RADIUS * consts.DROP_PICKUP_RADIUS;
+const DROP_PICKUP_RADIUS_LARGE_SQRD = consts.DROP_PICKUP_RADIUS_LARGE * consts.DROP_PICKUP_RADIUS_LARGE;
 
 /// Age the drops lying around (expired ones are flagged for `Drops.removeDead`) and, every `interval` while
 /// there is room, put a new one on a free drop point. `interval` and `large_chance` are shorter and higher between
@@ -79,7 +80,7 @@ fn ammoChance(health: u8, ammo: u8) f32 {
 pub fn collect(drops: *Drops, player: *state.Player, bullets: *state.Bullets) void {
     for (drops.pos[0..drops.len], drops.kind[0..drops.len], drops.lifetime[0..drops.len]) |p, kind, *l| {
         if (l.* <= 0) continue;
-        if (maths.magnitudeSqrd(p - player.pos) > DROP_PICKUP_RADIUS_SQRD) continue;
+        if (maths.magnitudeSqrd(p - player.pos) > (if (kind.isLarge()) DROP_PICKUP_RADIUS_LARGE_SQRD else DROP_PICKUP_RADIUS_SQRD)) continue;
 
         switch (kind) {
             .ammo_small, .ammo_large => {
@@ -186,4 +187,16 @@ test "[drop_system] a shorter interval (a lull) brings the next drop forward" {
     var prng = std.Random.DefaultPrng.init(4);
     update(&drops, prng.random(), @splat(0), 100, 100, &cells, &sizes, &OPEN_GRID, consts.DROP_LULL_INTERVAL, consts.DROP_LULL_LARGE_CHANCE, consts.DROP_LULL_INTERVAL + 0.01);
     try std.testing.expect(drops.len == 1);
+}
+
+test "[drop_system] large drops are picked up from further away, matching their size" {
+    var drops = Drops{};
+    var player = state.Player{};
+    var bullets = state.Bullets{};
+    bullets.ammo = 0;
+    const between = (consts.DROP_PICKUP_RADIUS + consts.DROP_PICKUP_RADIUS_LARGE) / 2;
+    drops.add(Vec2f{ between, 0 }, .ammo_small, 0);
+    drops.add(Vec2f{ 0, between }, .ammo_large, 1);
+    collect(&drops, &player, &bullets);
+    try std.testing.expect(drops.lifetime[0] > 0 and drops.lifetime[1] <= 0);
 }
