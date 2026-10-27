@@ -6,6 +6,7 @@ const bitmap_descs = @import("bitmap_descs.zig");
 const consts = @import("tweak_constants.zig");
 const memory = @import("memory.zig");
 const hud_mod = @import("hud.zig");
+const maths = @import("maths.zig");
 const GameState = @import("game_state.zig").GameState;
 const Level = @import("level_loader.zig").Level;
 const Arena = memory.Arena;
@@ -43,6 +44,9 @@ const DrawItem = extern struct {
 /// Sort key: depth (screen y of the sprite's feet, biased to unsigned) in the high half and the draw item's
 /// index in the low half. Sorting plain u32s needs no indirection, and as keys are unique the order is stable
 const SortKey = u32;
+
+/// Degrees of circle the melee swing sweeps
+const MELEE_ARC_DEGREES: f32 = 140;
 
 /// How fast combo messages float up
 const POPUP_RISE_PX_PER_SEC: f32 = 30;
@@ -166,8 +170,30 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
         drawTracer(graphics, head, tail);
     }
 
+    //---The melee swing: an arc sweeping round the player towards the enemy struck, at chest height
+    const melee = &game.melee;
+    if (melee.swing_timer > 0) {
+        const chest = screen.toScreen(game.player.pos) - Vec2i{ 0, consts.GUN_HEIGHT_PX };
+        const r: i32 = @intFromFloat(consts.MELEE_RANGE * consts.METRES_TO_PIXELS);
+        //Degrees clockwise from screen up (the API's convention); world +y is up
+        const facing = std.math.radiansToDegrees(std.math.atan2(melee.swing_dir[0], melee.swing_dir[1]));
+        const progress = 1 - melee.swing_timer / consts.MELEE_SWING_TIME;
+        //The API wants angles from 0 to 360: a negative start draws (nearly) the whole circle
+        const start = if (facing - MELEE_ARC_DEGREES / 2 < 0) facing - MELEE_ARC_DEGREES / 2 + 360 else facing - MELEE_ARC_DEGREES / 2;
+        graphics.drawEllipse.?(chest[0] - r, chest[1] - r, 2 * r, 2 * r, 3, start, start + MELEE_ARC_DEGREES * progress, pd.kColorXOR);
+    }
+
     //---Text is never inverted by the hit flash, so it stays readable
     _ = graphics.setDrawMode.?(pd.kDrawModeCopy);
+
+    //---Off screen drops are marked at the edge, pointing the way
+    if (hud.game_over == null) {
+        for (drops.pos[0..drops.len], drops.kind[0..drops.len], drops.lifetime[0..drops.len]) |p, k, l| {
+            if (isBlinkedOut(l)) continue;
+            const marker = graphics_coords.offScreenMarker(screen.toScreen(p), screen.width, screen.height, consts.DROP_MARKER_INSET_SIDE, consts.DROP_MARKER_INSET_TOP, consts.DROP_MARKER_INSET_SIDE, consts.DROP_MARKER_INSET_BOTTOM) orelse continue;
+            hud_mod.drawDropMarker(graphics, k, marker.pos[0], marker.pos[1], marker.dir);
+        }
+    }
 
     //---Combo messages float up from above where they happened
     const popups = &game.popups;

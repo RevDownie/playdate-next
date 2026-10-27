@@ -200,3 +200,17 @@ test "[drop_system] large drops are picked up from further away, matching their 
     collect(&drops, &player, &bullets);
     try std.testing.expect(drops.lifetime[0] > 0 and drops.lifetime[1] <= 0);
 }
+
+test "[drop_system] collecting never takes health or ammo past their capacities" {
+    var player = state.Player{};
+    var bullets = state.Bullets{};
+    player.health = consts.PLAYER_MAX_HEALTH - 1;
+    bullets.ammo = consts.MAX_AMMO - 1;
+    for ([_]DropKind{ .health_large, .health_small, .ammo_large, .ammo_small, .ammo_large }) |kind| {
+        var drops = Drops{};
+        drops.add(@splat(0), kind, 0);
+        collect(&drops, &player, &bullets);
+        try std.testing.expect(player.health <= consts.PLAYER_MAX_HEALTH and bullets.ammo <= consts.MAX_AMMO);
+    }
+    try std.testing.expect(player.health == consts.PLAYER_MAX_HEALTH and bullets.ammo == consts.MAX_AMMO);
+}

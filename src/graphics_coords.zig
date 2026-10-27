@@ -40,3 +40,34 @@ test "[graphics_coords] worldSpaceToScreenSpace - metre conversion" {
         try std.testing.expect(screen_pos[i][1] == expected[i][1]);
     }
 }
+
+pub const EdgeMarker = struct {
+    pos: Vec2i, //Where to draw it, on the inset edge of the screen
+    dir: Vec2f, //Unit length, screen space (+y down): the way to the thing it marks
+};
+
+/// Where to mark something off screen at `screen_pos`: on the screen's edge, inset by `left`/`top`/`right`/`bottom`
+/// pixels, along the line from the centre of the screen (the player) towards it. Null if it is on screen
+///
+pub fn offScreenMarker(screen_pos: Vec2i, width: i32, height: i32, left: i32, top: i32, right: i32, bottom: i32) ?EdgeMarker {
+    if (screen_pos[0] >= 0 and screen_pos[1] >= 0 and screen_pos[0] < width and screen_pos[1] < height) return null;
+    const centre = Vec2f{ @floatFromInt(@divTrunc(width, 2)), @floatFromInt(@divTrunc(height, 2)) };
+    const d = @as(Vec2f, @floatFromInt(screen_pos)) - centre;
+    //How far along d each pair of edges is; the nearer one is where the line leaves the inset rectangle
+    const tx = if (d[0] > 0) (@as(f32, @floatFromInt(width - right)) - centre[0]) / d[0] else if (d[0] < 0) (@as(f32, @floatFromInt(left)) - centre[0]) / d[0] else std.math.inf(f32);
+    const ty = if (d[1] > 0) (@as(f32, @floatFromInt(height - bottom)) - centre[1]) / d[1] else if (d[1] < 0) (@as(f32, @floatFromInt(top)) - centre[1]) / d[1] else std.math.inf(f32);
+    const t = @min(tx, ty);
+    const len = @sqrt(d[0] * d[0] + d[1] * d[1]);
+    return .{ .pos = @intFromFloat(@round(centre + d * @as(Vec2f, @splat(t)))), .dir = d / @as(Vec2f, @splat(len)) };
+}
+
+test "[graphics_coords] off screen markers sit on the inset edge, pointing the way" {
+    try std.testing.expect(offScreenMarker(.{ 10, 10 }, 400, 240, 16, 46, 16, 30) == null);
+    const right = offScreenMarker(.{ 900, 120 }, 400, 240, 16, 46, 16, 30).?;
+    try std.testing.expect(right.pos[0] == 384 and right.pos[1] == 120 and right.dir[0] == 1);
+    const up = offScreenMarker(.{ 200, -500 }, 400, 240, 16, 46, 16, 30).?;
+    try std.testing.expect(up.pos[0] == 200 and up.pos[1] == 46 and up.dir[1] == -1);
+    //Diagonal: whichever edge the line meets first
+    const corner = offScreenMarker(.{ -1000, 1000 }, 400, 240, 16, 46, 16, 30).?;
+    try std.testing.expect(corner.pos[1] == 210 and corner.pos[0] > 16 and corner.pos[0] < 200);
+}

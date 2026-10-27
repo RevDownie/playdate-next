@@ -5,7 +5,22 @@ pub const MAX_ENEMIES: u8 = 100;
 
 pub const PLAYER_ACC: f32 = 2.0;
 pub const PLAYER_MAX_SPEED: f32 = 1.5;
-pub const ENEMY_MAX_SPEED: f32 = 1.2;
+/// Enemies don't all move alike. Most walk at about ENEMY_SPEED (a little faster or slower each), some shamble, and
+/// from wave 2 a growing share are runners, faster than the player, so a crowd strings out as it closes in and the
+/// player can't simply outrun every wave. No visual difference yet
+pub const ENEMY_SPEED: f32 = 1.2;
+pub const ENEMY_SPEED_JITTER: f32 = 0.1; //Walkers vary by up to this fraction either way
+pub const ENEMY_SLOW_SPEED: f32 = 0.85;
+pub const ENEMY_SLOW_CHANCE: f32 = 0.25;
+pub const ENEMY_RUNNER_SPEED: f32 = 1.75; //Faster than PLAYER_MAX_SPEED
+pub const ENEMY_RUNNER_CHANCE_PER_WAVE: f32 = 0.04; //From wave 2: 4% of a wave's enemies, then 8%, ...
+pub const ENEMY_RUNNER_CHANCE_MAX: f32 = 0.3;
+pub const ENEMY_MAX_SPEED: f32 = ENEMY_RUNNER_SPEED; //The fastest any enemy moves
+comptime {
+    //Enemy steps are only tested at their destination, so one frame's move must stay under the smallest cell side
+    //(0.21m on lvl1) even on the longest frame
+    if (ENEMY_MAX_SPEED * MAX_FRAME_DT >= 0.2) @compileError("Enemies are fast enough to step over a cell in one frame");
+}
 pub const ENEMY_SEPARATION_DIST: f32 = CHAR_WIDTH_M * 0.75; //Enemies are pushed apart when their centres are closer than this
 pub const ENEMY_SEPARATION_MAX_PUSH: f32 = 0.1; //Most an enemy is moved by separation in one frame (must stay under a cell)
 pub const PLAYER_RING_RADIUS: f32 = CHAR_ENEMY_COLL_RADIUS * 0.8; //Enemies are kept this far from the player (inside contact range)
@@ -111,7 +126,7 @@ comptime {
 /// Ammo. Nothing reloads the gun on its own: it only refills from ammo drops, so the player has to go out and
 /// find them. Picking one up reloads for a while (longer for a large drop) and the gun can't fire meanwhile
 pub const START_AMMO: u8 = 80; //About 7s of a steady crank
-pub const MAX_AMMO: u8 = 250; //Most the player can carry (ammo is a u8). An ammo drop is left lying while full
+pub const MAX_AMMO: u8 = 200; //Most the player can carry: a large drop tops it up rather than doubling it. Drops are left lying while full
 
 /// Drops appear one at a time on the level's drop points (an object layer in the Tiled map). Small points sit in
 /// the middle of the map, outside the enemies' spawn band; large ones in the rooms at the top and bottom, where
@@ -155,6 +170,18 @@ pub const MUZZLE_CONVERGE_DIST: f32 = 1.5; //The drawn muzzle offset fades out o
 pub const TRACER_LENGTH: f32 = 0.3; //Metres of trail drawn behind each bullet (longer than a 50 FPS step so the stream looks unbroken)
 
 pub const FLASH_HIT_EFFECT_DURATION: f32 = 0.3;
+
+/// Melee. Out of ammo, the player strikes the few nearest enemies in reach with the gun's stock (see melee_system)
+pub const MELEE_RANGE: f32 = CHAR_ENEMY_COLL_RADIUS * 1.5; //Reaches the ring enemies crowd the player at, and a bit beyond
+pub const MELEE_INTERVAL: f32 = 0.6; //Seconds between blows
+pub const MELEE_MAX_TARGETS: u8 = 3; //Enemies hit per blow: holds off a few, not a crowd
+pub const MELEE_SWING_TIME: f32 = 0.15; //How long the swing shows
+
+/// Off screen drops are marked at the screen's edge, pointing the way to them
+/// Insets are to the marker's centre: room for its disc and arrow (~22px) clear of the HUD rows
+pub const DROP_MARKER_INSET_TOP: i32 = 50; //Above the player's head, which reaches ~48px above the centre
+pub const DROP_MARKER_INSET_BOTTOM: i32 = 46;
+pub const DROP_MARKER_INSET_SIDE: i32 = 24;
 
 pub const MAX_SCORE: u64 = 9999999999;
 pub const GAME_OVER_INPUT_DELAY: f32 = 1.0; //Seconds the run end screen ignores fire before A/B starts the next run
