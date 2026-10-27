@@ -26,12 +26,16 @@ pub const TickResult = enum { playing, player_died };
 ///
 pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.FlowField, input: state.Input, dt: f32, frame_arena: *Arena) TickResult {
     const grid = &level.collision_grid;
+    game.run_time += dt;
 
-    //1. Spawn new enemies around the player
-    enemy_spawn_sys.update(&game.spawner, &game.enemies, game.rng.random(), game.player.pos, level.spawn_cells, field, grid, dt);
+    //1. Waves of enemies spawn in from the edges of the map
+    enemy_spawn_sys.update(&game.spawner, &game.enemies, game.rng.random(), game.player.pos, &level.spawn_cells, field, grid, dt);
 
-    //Ammo and health drops on the level's drop points
-    drop_sys.update(&game.drops, game.rng.random(), game.player.pos, game.player.health, game.bullets.ammo, level.drop_cells, level.drop_sizes, grid, dt);
+    //Ammo and health drops on the level's drop points, faster and bigger between waves
+    const lull = game.spawner.phase == .lull;
+    const drop_interval = if (lull) consts.DROP_LULL_INTERVAL else consts.DROP_INTERVAL;
+    const drop_large_chance = if (lull) consts.DROP_LULL_LARGE_CHANCE else consts.DROP_LARGE_CHANCE;
+    drop_sys.update(&game.drops, game.rng.random(), game.player.pos, game.player.health, game.bullets.ammo, level.drop_cells, level.drop_sizes, grid, drop_interval, drop_large_chance, dt);
 
     //2. Movement. The flow field follows the player, a bounded slice of a rebuild per frame. The player picks up
     //the drops they walk over
@@ -45,13 +49,16 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     //3. Move projectiles (walls stop them) and resolve bullet -> enemy hits (kills are flagged then compacted out)
     bullet_sys.update(&game.bullets, grid, dt);
     const hits = bullet_sys.collide(&game.bullets, game.enemies.positions(), frame_arena.alloc(state.Hit, game.bullets.len));
-    combat_sys.applyBulletHits(hits, &game.enemies, &game.player);
+    combat_sys.applyBulletHits(hits, &game.enemies, &game.player, &game.popups);
     game.bullets.removeDead();
     game.enemies.removeDead();
 
     //4. Enemies touching the player hurt them
-    combat_sys.applyEnemyContact(&game.enemies, &game.player, if (game.invincible) 0 else consts.CONTACT_DMG);
-    if (game.player.health == 0) return .player_died;
+    combat_sys.applyEnemyContact(&game.enemies, &game.player, if (game.invincible) 0 else consts.CONTACT_DMG, &game.popups);
+    if (game.player.health == 0) {
+        game.player.hit_flash_timer = 0; //The run end screen shows the last frame, so don't leave it inverted
+        return .player_died;
+    }
 
     //5. Camera. Before targeting, as the gun only aims at what is on screen
     game.camera_pos = game.player.pos; //Follow the player directly for now
@@ -69,6 +76,7 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
 
     //7. Effects
     game.player.hit_flash_timer = @max(game.player.hit_flash_timer - dt, 0);
+    game.popups.update(dt);
 
     return .playing;
 }

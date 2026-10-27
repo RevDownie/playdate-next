@@ -5,12 +5,15 @@ const anim = @import("animation.zig");
 const bitmap_descs = @import("bitmap_descs.zig");
 const consts = @import("tweak_constants.zig");
 const memory = @import("memory.zig");
+const hud_mod = @import("hud.zig");
 const GameState = @import("game_state.zig").GameState;
 const Level = @import("level_loader.zig").Level;
 const Arena = memory.Arena;
 
 const Vec2i = @Vector(2, i32);
 const Vec2f = @Vector(2, f32);
+
+pub const Hud = hud_mod.Hud;
 
 /// Which bitmap table a sprite is drawn from
 ///
@@ -21,6 +24,7 @@ const Sheet = enum(u8) { player, enemy, env, drop };
 pub const Assets = struct {
     bg_bitmap: *pd.LCDBitmap,
     tables: [std.enums.values(Sheet).len]*pd.LCDBitmapTable, //Indexed by Sheet
+    fonts: hud_mod.Fonts,
 };
 
 /// One entry in the per frame draw list, already in screen space with the sprite's anchor applied.
@@ -40,8 +44,23 @@ const DrawItem = extern struct {
 /// index in the low half. Sorting plain u32s needs no indirection, and as keys are unique the order is stable
 const SortKey = u32;
 
+/// How fast combo messages float up
+const POPUP_RISE_PX_PER_SEC: f32 = 30;
+
 /// Seconds per on/off cycle of a drop that is about to vanish
 const DROP_BLINK_PERIOD: f32 = 0.25;
+
+/// Drop shadow ellipses in pixels, a little narrower than the drawn drop
+const DROP_SHADOW_W = 30;
+const DROP_SHADOW_W_LARGE = 44;
+const DROP_SHADOW_H = 8;
+
+/// A drop about to vanish blinks: hidden every other half period. Integer half periods: a float @mod would
+/// call libc's fmodf, which drags newlib's malloc into the device link
+///
+fn isBlinkedOut(lifetime: f32) bool {
+    return lifetime < consts.DROP_BLINK_TIME and @as(u32, @intFromFloat(@max(lifetime, 0) / (DROP_BLINK_PERIOD / 2))) % 2 == 0;
+}
 
 /// Size in pixels of the ring drawn at the gun's target's feet
 const TARGET_RING_W = 30;
@@ -68,13 +87,14 @@ pub fn loadAssets(playdate_api: *pd.PlaydateAPI, level_bitmap_name: [*:0]const u
     assets.tables[@backingInt(Sheet.enemy)] = graphics.loadBitmapTable.?("enemy1", null) orelse @panic("loadAssets: Failed to load enemy1");
     assets.tables[@backingInt(Sheet.env)] = graphics.loadBitmapTable.?(level_bitmap_name, null) orelse @panic("loadAssets: Failed to load level bitmaps");
     assets.tables[@backingInt(Sheet.drop)] = graphics.loadBitmapTable.?("drops", null) orelse @panic("loadAssets: Failed to load drops");
+    assets.fonts = hud_mod.loadFonts(playdate_api);
     return assets;
 }
 
-/// Build a draw list of everything on screen, sort it by "depth order" and draw it, then the bullets and HUD.
-/// Per frame buffers come from the frame arena
+/// Build a draw list of everything on screen, sort it by "depth order" and draw it, then the bullets, the HUD
+/// and (when the run is over) the run end screen. Per frame buffers come from the frame arena
 ///
-pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const GameState, level: *const Level, frame_arena: *Arena) RenderStats {
+pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const GameState, level: *const Level, hud: Hud, frame_arena: *Arena) RenderStats {
     const sys = playdate_api.system.*;
     const disp = playdate_api.display.*;
     const graphics = playdate_api.graphics.*;
@@ -95,6 +115,16 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
         graphics.drawEllipse.?(feet[0] - TARGET_RING_W / 2, feet[1] - TARGET_RING_H / 2, TARGET_RING_W, TARGET_RING_H, 2, 0, 360, pd.kColorXOR);
     }
 
+    //---Shadows under the drops, on the ground below their bounce (smaller when higher)
+    const drops = &game.drops;
+    for (drops.pos[0..drops.len], drops.kind[0..drops.len], drops.lifetime[0..drops.len]) |p, k, l| {
+        if (isBlinkedOut(l)) continue;
+        const feet = screen.toScreen(p);
+        const w: i32 = @as(i32, if (k.isLarge()) DROP_SHADOW_W_LARGE else DROP_SHADOW_W) - 2 * anim.dropBounce(consts.DROP_LIFETIME - l);
+        if (feet[0] + w < 0 or feet[0] - w > screen.width or feet[1] < -DROP_SHADOW_H or feet[1] > screen.height + DROP_SHADOW_H) continue;
+        graphics.fillEllipse.?(feet[0] - @divTrunc(w, 2), feet[1] - DROP_SHADOW_H / 2, w, DROP_SHADOW_H, 0, 360, @intFromPtr(&PATTERN_SHADOW));
+    }
+
     //---Build the draw list of visible sprites. Characters face the way they are aiming / moving
     const max_items = 1 + game.enemies.len + game.drops.len + level.obj_world_positions.len;
     var list = DrawList{ .items = frame_arena.alloc(DrawItem, max_items), .keys = frame_arena.alloc(SortKey, max_items) };
@@ -103,12 +133,14 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     for (game.enemies.positions(), game.enemies.velocities()) |p, v| {
         list.addCharacter(screen, .enemy, p, v);
     }
-    //Drops sit on the ground at their point, blinking for their last few seconds before they vanish
-    const drops = &game.drops;
-    for (drops.pos[0..drops.len], drops.kind[0..drops.len], drops.lifetime[0..drops.len]) |p, k, l| {
-        //Integer half periods: a float @mod would call libc's fmodf, which drags newlib's malloc into the device link
-        if (l < consts.DROP_BLINK_TIME and @as(u32, @intFromFloat(@max(l, 0) / (DROP_BLINK_PERIOD / 2))) % 2 == 0) continue;
-        list.add(screen, .drop, p, .{ .index = @backingInt(k), .flipped = false }, .{ bitmap_descs.DROP_W / 2, bitmap_descs.DROP_H - 2 });
+    //Drops bob above their point with a glint now and then, blinking for their last few seconds before they vanish.
+    //The bob goes in the anchor so the depth sort still uses the point on the ground
+    for (drops.pos[0..drops.len], drops.kind[0..drops.len], drops.lifetime[0..drops.len], drops.point[0..drops.len]) |p, k, l, point| {
+        if (isBlinkedOut(l)) continue;
+        const age = consts.DROP_LIFETIME - l;
+        const frame = @as(u32, @backingInt(k)) * bitmap_descs.DROP_FRAMES_PER_KIND + anim.dropSheenFrame(age, point);
+        const anchor = Vec2i{ bitmap_descs.DROP_W / 2, @as(i32, bitmap_descs.DROP_H) - 1 + anim.dropBounce(age) };
+        list.add(screen, .drop, p, .{ .index = @intCast(frame), .flipped = false }, anchor);
     }
     for (level.obj_world_positions, level.obj_bitmap_indices) |p, bi| {
         list.add(screen, .env, p, .{ .index = bi, .flipped = false }, .{ bitmap_descs.ENV_OBJ_W / 2, bitmap_descs.ENV_OBJ_H });
@@ -134,20 +166,23 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
         drawTracer(graphics, head, tail);
     }
 
-    //---HUD. TODO: Replace with bitmap font
-    drawLabel(graphics, "Score: {d}", game.player.score, screen.width - 100, 0);
-    drawLabel(graphics, "Health: {d}", game.player.health, @divTrunc(screen.width, 2), 0);
-    const ammo_x = @divTrunc(screen.width, 2);
-    const ammo_y = screen.height - 30;
-    if (game.bullets.isReloading()) {
-        drawLabel(graphics, "Reloading {d}", game.bullets.ammo, ammo_x, ammo_y);
-    } else if (game.bullets.ammo == 0) {
-        drawLabel(graphics, "{s}", "OUT OF AMMO", ammo_x, ammo_y);
-    } else {
-        drawLabel(graphics, "Ammo: {d}", game.bullets.ammo, ammo_x, ammo_y);
+    //---Text is never inverted by the hit flash, so it stays readable
+    _ = graphics.setDrawMode.?(pd.kDrawModeCopy);
+
+    //---Combo messages float up from above where they happened
+    const popups = &game.popups;
+    for (popups.pos[0..popups.len], popups.life[0..popups.len], popups.value[0..popups.len], popups.kind[0..popups.len]) |p, life, value, kind| {
+        const rise: i32 = @intFromFloat((kind.duration() - life) * POPUP_RISE_PX_PER_SEC);
+        const at = screen.toScreen(p) - Vec2i{ 0, @as(i32, bitmap_descs.CHAR_H) + rise };
+        if (at[0] < -50 or at[0] > screen.width + 50 or at[1] < -30 or at[1] > screen.height) continue;
+        hud_mod.drawPopup(graphics, assets.fonts, kind, value, at[0], at[1]);
     }
 
-    if (game.invincible) _ = graphics.drawText.?("INVINCIBLE", 10, pd.kASCIIEncoding, 0, 20); //Debug, so screenshots don't mislead
+    if (hud.game_over) |over| {
+        hud_mod.drawGameOver(graphics, assets.fonts, game, hud, over, screen.width, screen.height);
+    } else {
+        hud_mod.drawHud(graphics, assets.fonts, game, hud, screen.width, screen.height);
+    }
     sys.drawFPS.?(0, 0);
     return .{ .drawn = @intCast(list.len) };
 }
@@ -197,16 +232,10 @@ fn sheetSize(sheet: Sheet) Vec2i {
     };
 }
 
-/// Draw a single number with a label, truncated if it doesn't fit the buffer
-///
-fn drawLabel(graphics: pd.playdate_graphics, comptime fmt: []const u8, value: anytype, x: c_int, y: c_int) void {
-    var buffer: [32]u8 = undefined;
-    const text = std.fmt.bufPrint(&buffer, fmt, .{value}) catch buffer[0..];
-    _ = graphics.drawText.?(text.ptr, text.len, pd.kASCIIEncoding, x, y);
-}
-
 /// 8x8 dither patterns for the fading tracer tail: 8 rows of image (1 = white) then 8 rows of mask
 const PATTERN_HALF: pd.LCDPattern = .{ 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+/// Ground shadows: black on every other pixel, the ground showing through the rest (the mask rows are the checker)
+const PATTERN_SHADOW: pd.LCDPattern = .{ 0, 0, 0, 0, 0, 0, 0, 0, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55 };
 const PATTERN_QUARTER: pd.LCDPattern = .{ 0xEE, 0xBB, 0xEE, 0xBB, 0xEE, 0xBB, 0xEE, 0xBB, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
 /// Draw a bullet as a comet: a solid head fading through 50% then 25% dither towards the tail, over a white

@@ -18,18 +18,67 @@ pub const FLOW_FIELD_CELLS_PER_FRAME: u32 = 300;
 pub const PLAYER_MAX_HEALTH: u8 = 100;
 pub const ENEMY_MAX_HEALTH: u8 = 100;
 pub const CONTACT_DMG: u8 = 5; //Damage an enemy does to the player when it walks into them
-pub const SCORE_PER_KILL: u64 = 10; //Multiplied by the kill streak
+pub const SCORE_PER_KILL: u64 = 10; //Multiplied by the kill streak (the combo), which resets when the player is hurt
 
-pub const FIRST_SPAWN_TIME: f32 = 0.25;
-/// Spawning speeds up from one wave every INIT_SPAWN_TIME to one every MIN_SPAWN_TIME (7.5 enemies a second) after
-/// about 55s, more than a steady crank of 1-1.5 turns a second can clear, so most runs end in being overrun
-pub const INIT_SPAWN_TIME: f32 = 5.0;
-pub const SPAWN_TIME_REDUCTION: f32 = 0.25; //Taken off the interval after every wave
-pub const MIN_SPAWN_TIME: f32 = 0.4; //Spawn interval never drops below this (it used to reach 0 and spawn every frame)
-pub const ENEMIES_PER_SPAWN: u8 = 3;
+/// Combo messages. Each kill shows the combo where the enemy fell; milestones get a big message, and losing a
+/// good combo says so at the player
+pub const COMBO_SHOW_FROM: u32 = 2; //Combos below this aren't shown
+pub const COMBO_MILESTONE_FIRST: u32 = 5;
+pub const COMBO_MILESTONE_EVERY: u32 = 10; //...then every multiple of this
+pub const COMBO_LOST_MIN: u32 = 5; //Losing a combo at least this long shows "COMBO LOST"
+pub const MAX_POPUPS: u8 = 8; //Messages in the world at once; a new one replaces the oldest
+pub const POPUP_TIME: f32 = 0.7; //Seconds a combo message shows
+pub const POPUP_BIG_TIME: f32 = 1.4; //...and a milestone or COMBO LOST
+
+/// Waves. The horde comes in waves with a lull between them. A wave is a fight to hold out through: for `hold`
+/// seconds packs keep spawning to keep the number of enemies alive near a target, which climbs from
+/// WAVE_START_FRACTION of the wave's `peak` to all of it, so the pressure is sustained and builds to a climax
+/// (killing faster only brings the next pack sooner). Then the rest must be cleared (down to WAVE_CLEAR_LEFT) to
+/// survive it. The lull after it is the time to go out for drops (they come faster and bigger then, DROP_LULL_*).
+/// Difficulty rises and falls but trends up: the table runs in fours of a build up, a step back, a peak and a
+/// breather, each four bigger and longer than the last
+pub const WaveDef = struct {
+    hold: f32, //Seconds the wave keeps spawning
+    peak: u8, //Enemies kept alive by the end of the hold
+    pack: u8, //Enemies per pack (they drop in together on one cell, so they arrive as a crowd)
+    lull: f32, //Seconds of quiet after it is survived
+};
+pub const WAVES = [_]WaveDef{
+    .{ .hold = 20, .peak = 14, .pack = 4, .lull = 7 }, //1: from one side, a taste
+    .{ .hold = 25, .peak = 20, .pack = 4, .lull = 7 },
+    .{ .hold = 20, .peak = 16, .pack = 4, .lull = 6 }, //Step back
+    .{ .hold = 30, .peak = 30, .pack = 5, .lull = 9 }, //Peak, then a longer lull to recover
+    .{ .hold = 25, .peak = 24, .pack = 5, .lull = 7 },
+    .{ .hold = 35, .peak = 38, .pack = 6, .lull = 7 },
+    .{ .hold = 25, .peak = 30, .pack = 5, .lull = 6 },
+    .{ .hold = 40, .peak = 50, .pack = 6, .lull = 9 }, //8: peak
+};
+/// Past the table the last four repeat, each repeat with a higher peak, a longer hold, bigger packs and shorter lulls
+pub const WAVE_REPEAT_EXTRA_PEAK: u8 = 10;
+pub const WAVE_REPEAT_LONGER: f32 = 5; //Seconds onto the hold
+pub const WAVE_REPEAT_SHORTER_LULL: f32 = 1.0;
+pub const WAVE_MAX_HOLD: f32 = 60;
+pub const WAVE_MAX_PACK: u8 = 8;
+pub const WAVE_MIN_LULL: f32 = 4.0;
+pub const WAVE_START_FRACTION: f32 = 0.4; //Of the peak, kept alive as a wave starts
+pub const WAVE_PACK_INTERVAL: f32 = 0.5; //Seconds between packs at most: faster than a steady crank kills, so a crowd builds
+pub const WAVE_PEAK_SCALE: f32 = 1.0; //Every wave's peak is multiplied by this (raise it for a stress test)
+/// Waves come from one side of the map, then from one more side every this many waves until they come from all
+/// four. One side is easy to read and to back away from; a horde on a single front walks into the gun in single
+/// file, so the surround is what eventually overruns the player
+pub const WAVES_PER_EXTRA_SIDE: u16 = 3;
+pub const WAVE_CLEAR_LEFT: u8 = 3; //After the hold, a wave is survived once no more than this many enemies are left
+pub const WAVE_CLEAR_MAX_TIME: f32 = 20.0; //...or followed straight away by the next wave (no lull) if that takes longer
+pub const FIRST_WAVE_DELAY: f32 = 3.0;
+pub const WAVE_BANNER_TIME: f32 = 2.0; //How long "WAVE N" shows when a wave starts, and "CLEAR THE REST" after the hold
+pub const WAVE_SURVIVED_BANNER_TIME: f32 = 2.5; //...and "WAVE N SURVIVED" when it is survived
 pub const SPAWN_EDGE_BAND: f32 = 1.0; //Enemies drop in on free cells within this many metres of the map's edge
 pub const SPAWN_MIN_PLAYER_DIST: f32 = 3.0; //...but never closer than this to the player
-pub const SPAWN_ATTEMPTS: u8 = 4; //Random spawn cells tried per enemy before giving up (they must be reachable and far enough away)
+/// Waves drop their packs in a ring just off screen in the wave's direction(s), this far from the player at most,
+/// so they arrive within a few seconds as a crowd the player can see (spawning only at the map's edge, the gun
+/// picked each enemy off as it walked into view and the screen never filled). The map's edge band is the fallback
+pub const SPAWN_RING_MAX_DIST: f32 = 4.5;
+pub const SPAWN_ATTEMPTS: u8 = 6; //Random spawn cells tried per enemy before giving up (they must be reachable and far enough away)
 pub const RNG_SEED: u64 = 42;
 
 /// Auto targetting. The gun only aims at enemies the player can see: inside the camera's view and with a
@@ -73,9 +122,18 @@ pub const DROP_INTERVAL: f32 = 3.0; //Seconds between drops while there is room 
 pub const DROP_LIFETIME: f32 = 20.0; //Uncollected drops vanish, so the map keeps changing and hoarding a spot doesn't pay
 pub const DROP_BLINK_TIME: f32 = 4.0; //A drop blinks for its last few seconds
 pub const DROP_LARGE_CHANCE: f32 = 0.35; //Chance a new drop goes on a large point rather than a small one
+pub const DROP_LULL_INTERVAL: f32 = 1.5; //Between waves drops come faster...
+pub const DROP_LULL_LARGE_CHANCE: f32 = 0.6; //...and are more often large
 pub const DROP_MIN_PLAYER_DIST: f32 = 2.0; //Drops never appear this close to the player: they have to go and get them
 pub const DROP_SPAWN_ATTEMPTS: u8 = 4; //Random points tried per drop (must be free and far enough away), then retried next frame
 pub const DROP_PICKUP_RADIUS: f32 = CHAR_WIDTH_M * 0.5;
+pub const DROP_PICKUP_RADIUS_LARGE: f32 = CHAR_WIDTH_M * 0.75; //Large drops are drawn about as wide as the player
+/// Drops bob gently and a glint sweeps across them now and then, so they catch the eye
+pub const DROP_BOUNCE_PX: f32 = 5; //Height of each hop
+pub const DROP_BOUNCE_PERIOD: f32 = 0.8; //Seconds per hop
+pub const DROP_SHEEN_PERIOD_MS: u32 = 1600; //A glint this often...
+pub const DROP_SHEEN_FRAME_MS: u32 = 50; //...stepping through its frames this fast
+pub const DROP_SHEEN_POINT_OFFSET_MS: u32 = 370; //Per drop point, so drops don't all glint at once
 /// The chance a drop is ammo leans towards whichever of ammo and health the player is shorter of, within these
 pub const DROP_AMMO_CHANCE_MIN: f32 = 0.3;
 pub const DROP_AMMO_CHANCE_MAX: f32 = 0.75;
@@ -99,6 +157,7 @@ pub const TRACER_LENGTH: f32 = 0.3; //Metres of trail drawn behind each bullet (
 pub const FLASH_HIT_EFFECT_DURATION: f32 = 0.3;
 
 pub const MAX_SCORE: u64 = 9999999999;
+pub const GAME_OVER_INPUT_DELAY: f32 = 1.0; //Seconds the run end screen ignores fire before A/B starts the next run
 
 /// Longest step the simulation takes in one frame. Larger gaps (e.g. returning from the system menu) are clamped
 /// so enemies and bullets don't teleport

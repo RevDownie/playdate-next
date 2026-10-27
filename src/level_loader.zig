@@ -11,13 +11,25 @@ const Vec2i = @Vector(2, i32);
 ///
 pub const DropSize = enum(u8) { small, large };
 
+/// Which edge of the map a spawn cell is on (north is the top row). Waves come in from one or two of these
+///
+pub const MapSide = enum(u8) { north, east, south, west };
+pub const NUM_SIDES = std.enums.values(MapSide).len;
+
+/// The spawn cells, grouped by side: `sides[s]` are slices of `all`
+///
+pub const SpawnCells = struct {
+    all: []const u16,
+    sides: [NUM_SIDES][]const u16,
+};
+
 /// Everything loaded for a level. All slices live in the level arena
 ///
 pub const Level = struct {
     obj_world_positions: []const Vec2f,
     obj_bitmap_indices: []const u8,
     collision_grid: CollisionGrid,
-    spawn_cells: []const u16, //Free cells around the edge of the map that enemies drop in on
+    spawn_cells: SpawnCells, //Free cells around the edge of the map that enemies drop in on
     drop_cells: []const u16, //Free cells ammo and health drops appear on, placed by the level designer
     drop_sizes: []const DropSize, //Size of drop each of `drop_cells` gives
     bg_size_pixels: Vec2i,
@@ -136,33 +148,54 @@ pub fn parse(bytes: []const u8, arena: *Arena) Error!Level {
     };
 }
 
-/// The free cells within SPAWN_EDGE_BAND metres of the edge of the map, so the horde arrives from every
-/// side rather than out of thin air next to the player. Built once at load (two passes: count, then fill)
+/// The free cells within SPAWN_EDGE_BAND metres of the edge of the map, so the horde arrives from the
+/// sides rather than out of thin air next to the player, grouped by the side they are on so a wave can
+/// come from one direction. Built once at load (two passes: count per side, then fill)
 ///
-pub fn findSpawnCells(grid: *const CollisionGrid, arena: *Arena) []u16 {
+pub fn findSpawnCells(grid: *const CollisionGrid, arena: *Arena) SpawnCells {
     const band_px = consts.SPAWN_EDGE_BAND * consts.METRES_TO_PIXELS;
     const band_x: u32 = @max(1, @as(u32, @intFromFloat(@ceil(band_px / @as(f32, @floatFromInt(grid.cell_width))))));
     const band_y: u32 = @max(1, @as(u32, @intFromFloat(@ceil(band_px / @as(f32, @floatFromInt(grid.cell_height))))));
 
-    var count: usize = 0;
+    var counts: [NUM_SIDES]usize = @splat(0);
     for (0..grid.cells.len) |i| {
-        if (isSpawnCell(grid, i, band_x, band_y)) count += 1;
+        if (spawnSide(grid, i, band_x, band_y)) |side| counts[@backingInt(side)] += 1;
     }
-    const spawn_cells = arena.alloc(u16, count);
-    var n: usize = 0;
+    var total: usize = 0;
+    for (counts) |c| total += c;
+    const all = arena.alloc(u16, total);
+
+    var result = SpawnCells{ .all = all, .sides = undefined };
+    var next: [NUM_SIDES]usize = undefined;
+    var start: usize = 0;
+    for (counts, 0..) |c, s| {
+        result.sides[s] = all[start .. start + c];
+        next[s] = start;
+        start += c;
+    }
     for (0..grid.cells.len) |i| {
-        if (!isSpawnCell(grid, i, band_x, band_y)) continue;
-        spawn_cells[n] = @intCast(i);
-        n += 1;
+        const side = spawnSide(grid, i, band_x, band_y) orelse continue;
+        all[next[@backingInt(side)]] = @intCast(i);
+        next[@backingInt(side)] += 1;
     }
-    return spawn_cells;
+    return result;
 }
 
-fn isSpawnCell(grid: *const CollisionGrid, i: usize, band_x: u32, band_y: u32) bool {
-    if (grid.cells[i]) return false;
-    const x = i % grid.width;
-    const y = i / grid.width;
-    return x < band_x or y < band_y or x + band_x >= grid.width or y + band_y >= grid.height;
+/// The side of the map a free cell in the edge band is on, or null if it isn't a spawn cell. In the corners,
+/// whichever edge is nearer (measured in bands, as cells needn't be square)
+///
+fn spawnSide(grid: *const CollisionGrid, i: usize, band_x: u32, band_y: u32) ?MapSide {
+    if (grid.cells[i]) return null;
+    const x: u32 = @intCast(i % grid.width);
+    const y: u32 = @intCast(i / grid.width);
+    const from_x_edge = @min(x, grid.width - 1 - x);
+    const from_y_edge = @min(y, grid.height - 1 - y);
+    if (from_x_edge >= band_x and from_y_edge >= band_y) return null;
+    //Compare from_y_edge / band_y with from_x_edge / band_x without dividing
+    if (from_y_edge * band_x <= from_x_edge * band_y) {
+        return if (y < grid.height / 2) .north else .south;
+    }
+    return if (x < grid.width / 2) .west else .east;
 }
 
 test "[level_loader] spawn cells are the free cells around the edge" {
@@ -172,10 +205,25 @@ test "[level_loader] spawn cells are the free cells around the edge" {
     var cells: [36]bool = @splat(false);
     cells[1] = true;
     const grid = CollisionGrid{ .cells = &cells, .width = 6, .height = 6, .cell_width = 128, .cell_height = 128 };
-    const spawn_cells = findSpawnCells(&grid, &arena);
+    const spawn = findSpawnCells(&grid, &arena);
 
-    try std.testing.expect(spawn_cells.len == 20 - 1);
-    for (spawn_cells) |c| {
+    try std.testing.expect(spawn.all.len == 20 - 1);
+    var grouped: usize = 0;
+    for (spawn.sides, 0..) |side_cells, s| {
+        grouped += side_cells.len;
+        for (side_cells) |c| {
+            const x = c % 6;
+            const y = c / 6;
+            switch (@as(MapSide, @fromBackingInt(@intCast(s)))) {
+                .north => try std.testing.expect(y == 0),
+                .south => try std.testing.expect(y == 5),
+                .west => try std.testing.expect(x == 0 and y > 0 and y < 5),
+                .east => try std.testing.expect(x == 5 and y > 0 and y < 5),
+            }
+        }
+    }
+    try std.testing.expect(grouped == spawn.all.len);
+    for (spawn.all) |c| {
         try std.testing.expect(!cells[c]);
         const x = c % 6;
         const y = c / 6;
@@ -195,7 +243,7 @@ test "[level_loader] parse objects and collision" {
     try std.testing.expect(level.obj_world_positions[0][0] == -2 and level.obj_world_positions[0][1] == 2);
     try std.testing.expect(level.collision_grid.isOccupied(level.obj_world_positions[0]));
     try std.testing.expect(!level.collision_grid.isOccupied(Vec2f{ 0, 0 }));
-    try std.testing.expect(level.spawn_cells.len == 12 - 1); //The edge of a 4x4 grid, minus the object
+    try std.testing.expect(level.spawn_cells.all.len == 12 - 1); //The edge of a 4x4 grid, minus the object
     try std.testing.expect(level.drop_cells.len == 1 and level.drop_cells[0] == 5 and level.drop_sizes[0] == .large);
 }
 

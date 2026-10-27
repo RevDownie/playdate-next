@@ -47,6 +47,7 @@ def createDescFile():
         f.write(f"pub const ENV_OBJ_H: u32 = {ENV_H};\n")
         f.write(f"pub const DROP_W: u32 = {drop_sprites.DROP_W};\n")
         f.write(f"pub const DROP_H: u32 = {drop_sprites.DROP_H};\n")
+        f.write(f"pub const DROP_FRAMES_PER_KIND: u32 = {drop_sprites.FRAMES_PER_KIND};\n")
         f.close();
 
 

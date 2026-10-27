@@ -11,21 +11,23 @@ const Vec2f = @Vector(2, f32);
 
 const DROP_MIN_PLAYER_DIST_SQRD = consts.DROP_MIN_PLAYER_DIST * consts.DROP_MIN_PLAYER_DIST;
 const DROP_PICKUP_RADIUS_SQRD = consts.DROP_PICKUP_RADIUS * consts.DROP_PICKUP_RADIUS;
+const DROP_PICKUP_RADIUS_LARGE_SQRD = consts.DROP_PICKUP_RADIUS_LARGE * consts.DROP_PICKUP_RADIUS_LARGE;
 
-/// Age the drops lying around (expired ones are flagged for `Drops.removeDead`) and, every DROP_INTERVAL while
-/// there is room, put a new one on a free drop point. The size comes from the point (large ones are placed where
-/// it is risky to go); whether it is ammo or health leans towards what the player is short of.
+/// Age the drops lying around (expired ones are flagged for `Drops.removeDead`) and, every `interval` while
+/// there is room, put a new one on a free drop point. `interval` and `large_chance` are shorter and higher between
+/// waves (DROP_LULL_*). The size comes from the point (large ones are placed where it is risky to go), chosen
+/// with `large_chance`; whether it is ammo or health leans towards what the player is short of.
 /// `drop_cells` / `drop_sizes` are the level's drop points. A point is tried DROP_SPAWN_ATTEMPTS times; if
 /// none is free and far enough from the player the timer stays expired and it tries again next frame
 ///
-pub fn update(drops: *Drops, rand: std.Random, player_pos: Vec2f, health: u8, ammo: u8, drop_cells: []const u16, drop_sizes: []const DropSize, grid: *const CollisionGrid, dt: f32) void {
+pub fn update(drops: *Drops, rand: std.Random, player_pos: Vec2f, health: u8, ammo: u8, drop_cells: []const u16, drop_sizes: []const DropSize, grid: *const CollisionGrid, interval: f32, large_chance: f32, dt: f32) void {
     for (drops.lifetime[0..drops.len]) |*l| l.* -= dt;
 
     if (drops.isFull() or drop_cells.len == 0) return; //The timer waits until there is room
-    drops.spawn_timer -= dt;
+    drops.spawn_timer = @min(drops.spawn_timer, interval) - dt; //A lull starting brings the next drop forward
     if (drops.spawn_timer > 0) return;
 
-    const size: DropSize = if (rand.float(f32) < consts.DROP_LARGE_CHANCE) .large else .small;
+    const size: DropSize = if (rand.float(f32) < large_chance) .large else .small;
     const point = pickPoint(drops, rand, player_pos, drop_cells, drop_sizes, size, grid) orelse return;
 
     const ammo_chance = ammoChance(health, ammo);
@@ -35,7 +37,7 @@ pub fn update(drops: *Drops, rand: std.Random, player_pos: Vec2f, health: u8, am
         .large => if (is_ammo) .ammo_large else .health_large,
     };
     drops.add(grid.cellCentre(drop_cells[point]), kind, point);
-    drops.spawn_timer = consts.DROP_INTERVAL;
+    drops.spawn_timer = interval;
 }
 
 /// A random drop point of the wanted size (or any size, if the level has none of that size) with no drop on it
@@ -78,7 +80,7 @@ fn ammoChance(health: u8, ammo: u8) f32 {
 pub fn collect(drops: *Drops, player: *state.Player, bullets: *state.Bullets) void {
     for (drops.pos[0..drops.len], drops.kind[0..drops.len], drops.lifetime[0..drops.len]) |p, kind, *l| {
         if (l.* <= 0) continue;
-        if (maths.magnitudeSqrd(p - player.pos) > DROP_PICKUP_RADIUS_SQRD) continue;
+        if (maths.magnitudeSqrd(p - player.pos) > (if (kind.isLarge()) DROP_PICKUP_RADIUS_LARGE_SQRD else DROP_PICKUP_RADIUS_SQRD)) continue;
 
         switch (kind) {
             .ammo_small, .ammo_large => {
@@ -109,12 +111,12 @@ test "[drop_system] drops arrive on the interval, on free points, until full, th
     var drops = Drops{};
     var prng = std.Random.DefaultPrng.init(1);
 
-    update(&drops, prng.random(), @splat(0), 100, 100, &cells, &sizes, &OPEN_GRID, consts.FIRST_DROP_TIME - 0.01);
+    update(&drops, prng.random(), @splat(0), 100, 100, &cells, &sizes, &OPEN_GRID, consts.DROP_INTERVAL, consts.DROP_LARGE_CHANCE, consts.FIRST_DROP_TIME - 0.01);
     try std.testing.expect(drops.len == 0);
-    update(&drops, prng.random(), @splat(0), 100, 100, &cells, &sizes, &OPEN_GRID, 0.02);
+    update(&drops, prng.random(), @splat(0), 100, 100, &cells, &sizes, &OPEN_GRID, consts.DROP_INTERVAL, consts.DROP_LARGE_CHANCE, 0.02);
     try std.testing.expect(drops.len == 1);
 
-    for (0..100) |_| update(&drops, prng.random(), @splat(0), 100, 100, &cells, &sizes, &OPEN_GRID, consts.DROP_INTERVAL / 4);
+    for (0..100) |_| update(&drops, prng.random(), @splat(0), 100, 100, &cells, &sizes, &OPEN_GRID, consts.DROP_INTERVAL, consts.DROP_LARGE_CHANCE, consts.DROP_INTERVAL / 4);
     try std.testing.expect(drops.len == Drops.capacity);
     //No two on the same point, and each kind matches its point's size
     for (drops.point[0..drops.len], drops.kind[0..drops.len], 0..) |p, k, i| {
@@ -122,7 +124,7 @@ test "[drop_system] drops arrive on the interval, on free points, until full, th
         try std.testing.expect(k.isLarge() == (sizes[p] == .large));
     }
 
-    update(&drops, prng.random(), @splat(0), 100, 100, &cells, &sizes, &OPEN_GRID, consts.DROP_LIFETIME);
+    update(&drops, prng.random(), @splat(0), 100, 100, &cells, &sizes, &OPEN_GRID, consts.DROP_INTERVAL, consts.DROP_LARGE_CHANCE, consts.DROP_LIFETIME);
     drops.removeDead();
     try std.testing.expect(drops.len == 0);
 }
@@ -132,7 +134,7 @@ test "[drop_system] drops never appear next to the player" {
     const sizes = [_]DropSize{ .small, .small };
     var drops = Drops{};
     var prng = std.Random.DefaultPrng.init(2);
-    for (0..20) |_| update(&drops, prng.random(), @splat(0), 100, 100, &cells, &sizes, &OPEN_GRID, consts.DROP_INTERVAL);
+    for (0..20) |_| update(&drops, prng.random(), @splat(0), 100, 100, &cells, &sizes, &OPEN_GRID, consts.DROP_INTERVAL, consts.DROP_LARGE_CHANCE, consts.DROP_INTERVAL);
     try std.testing.expect(drops.len == 1 and drops.point[0] == 1);
 }
 
@@ -175,4 +177,26 @@ test "[drop_system] ammo is capped and a full gun leaves ammo lying" {
     collect(&drops, &player, &bullets);
     try std.testing.expect(bullets.ammo == consts.MAX_AMMO);
     try std.testing.expect(drops.lifetime[0] <= 0 and drops.lifetime[1] > 0);
+}
+
+test "[drop_system] a shorter interval (a lull) brings the next drop forward" {
+    const cells = [_]u16{0};
+    const sizes = [_]DropSize{.small};
+    var drops = Drops{};
+    drops.spawn_timer = consts.DROP_INTERVAL;
+    var prng = std.Random.DefaultPrng.init(4);
+    update(&drops, prng.random(), @splat(0), 100, 100, &cells, &sizes, &OPEN_GRID, consts.DROP_LULL_INTERVAL, consts.DROP_LULL_LARGE_CHANCE, consts.DROP_LULL_INTERVAL + 0.01);
+    try std.testing.expect(drops.len == 1);
+}
+
+test "[drop_system] large drops are picked up from further away, matching their size" {
+    var drops = Drops{};
+    var player = state.Player{};
+    var bullets = state.Bullets{};
+    bullets.ammo = 0;
+    const between = (consts.DROP_PICKUP_RADIUS + consts.DROP_PICKUP_RADIUS_LARGE) / 2;
+    drops.add(Vec2f{ between, 0 }, .ammo_small, 0);
+    drops.add(Vec2f{ 0, between }, .ammo_large, 1);
+    collect(&drops, &player, &bullets);
+    try std.testing.expect(drops.lifetime[0] > 0 and drops.lifetime[1] <= 0);
 }

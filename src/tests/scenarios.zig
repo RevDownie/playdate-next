@@ -37,7 +37,7 @@ const TestLevel = struct {
             .obj_world_positions = &.{},
             .obj_bitmap_indices = &.{},
             .collision_grid = .{ .cells = &self.cells, .width = 30, .height = 30, .cell_width = 64, .cell_height = 64 },
-            .spawn_cells = &.{},
+            .spawn_cells = .{ .all = &.{}, .sides = @splat(&.{}) },
             .drop_cells = &.{},
             .drop_sizes = &.{},
             .bg_size_pixels = .{ 0, 0 },
@@ -46,6 +46,18 @@ const TestLevel = struct {
         self.level.spawn_cells = level_loader.findSpawnCells(&self.level.collision_grid, &self.level_arena);
         self.frame_arena = Arena.init("frame", &self.frame_buffer);
         self.field = FlowField.init(&self.level_arena, &self.level.collision_grid, self.level.collision_grid.cellIndex(@splat(0)));
+    }
+
+    /// Stop the waves and drop enemies on random reachable spawn cells until the pool is full. The waves only
+    /// reach a full horde late in a run, which is too slow (and too random) for a test that needs one now
+    fn fillHorde(self: *TestLevel, game: *state.GameState, rand: std.Random) void {
+        game.spawner.timer = std.math.inf(f32);
+        const cells = self.level.spawn_cells.all;
+        while (!game.enemies.isFull()) {
+            const cell = cells[rand.uintLessThan(usize, cells.len)];
+            if (!self.field.isReachable(cell)) continue;
+            game.enemies.add(self.level.collision_grid.cellCentre(cell));
+        }
     }
 
     fn tick(self: *TestLevel, game: *state.GameState, input: state.Input) game_mod.TickResult {
@@ -60,16 +72,17 @@ test "[scenario] worst case: max enemies and bullets fit the frame arena and poo
     const grid = &t.level.collision_grid;
     var game = state.GameState{};
 
-    //Hold fire until the horde is full (the gun otherwise keeps the count low), then spin the crank flat out
-    //with endless ammo. The player walks a loop the whole time so the flow field keeps rebuilding
+    //Keep the horde topped up to the max and spin the crank flat out with endless ammo. The player walks a
+    //loop the whole time so the flow field keeps rebuilding
+    var prng = std.Random.DefaultPrng.init(7);
     var frames: usize = 0;
     var max_enemies: usize = 0;
     while (frames < 60 * 120) : (frames += 1) {
+        t.fillHorde(&game, prng.random());
         game.bullets.ammo = consts.MAX_AMMO;
         game.player.health = consts.PLAYER_MAX_HEALTH;
         const phase = (frames / 120) % 4;
-        const firing = max_enemies == state.Enemies.capacity;
-        _ = t.tick(&game, .{ .crank_delta = if (firing) consts.FIRE_ANGLE_DELTA else 0, .left = phase == 0, .up = phase == 1, .right = phase == 2, .down = phase == 3 });
+        _ = t.tick(&game, .{ .crank_delta = consts.FIRE_ANGLE_DELTA, .left = phase == 0, .up = phase == 1, .right = phase == 2, .down = phase == 3 });
         try std.testing.expect(game.enemies.len <= state.Enemies.capacity);
         try std.testing.expect(game.bullets.len <= state.Bullets.capacity);
         for (game.enemies.positions()) |p| try std.testing.expect(!grid.isOccupied(p));
@@ -84,7 +97,9 @@ test "[scenario] a full horde surrounds the player without stacking" {
     t.init(true);
     var game = state.GameState{};
 
-    //No firing and no dying: let the pool fill and pile in on the player for a while
+    //No firing and no dying: a full horde piles in on the player for a while
+    var prng = std.Random.DefaultPrng.init(7);
+    t.fillHorde(&game, prng.random());
     var frames: usize = 0;
     while (frames < 60 * 90) : (frames += 1) {
         game.player.health = consts.PLAYER_MAX_HEALTH;
@@ -115,7 +130,7 @@ test "[scenario] an enemy behind a wall paths around it and reaches the player" 
     var t: TestLevel = .{};
     t.init(true);
     var game = state.GameState{};
-    game.spawner.next_spawn_timer = std.math.inf(f32); //Just the one enemy
+    game.spawner.timer = std.math.inf(f32); //Just the one enemy
     game.enemies.add(.{ 4, 0 }); //Behind the vertical wall at x = 2m
 
     var frames: usize = 0;
@@ -143,8 +158,9 @@ test "[scenario] the player dies if left alone" {
 
 test "[scenario] balance: a steadily cranked gun holds the horde off for a while, but is overrun in the end" {
     //A player standing still in the open turning the crank once a second, at the device's 50 FPS, with ammo
-    //kept topped up (this measures the gun against the horde; ammo comes from drops, see the drop scenarios).
-    //Measured at the time of tuning: ~68s survived and ~95 kills, against ~13s and none without firing
+    //kept topped up (this measures the gun against the waves; ammo comes from drops, see the drop scenarios).
+    //Measured at the time of tuning: the first waves are mown down as they walk on screen, the wave 4 climax
+    //crowds the screen (~12 enemies in view) and hurts, and the player is overrun in wave 6 after ~210s and ~720 kills
     const dt: f32 = 1.0 / 50.0;
     var t: TestLevel = .{};
     t.init(true);
@@ -162,15 +178,16 @@ test "[scenario] balance: a steadily cranked gun holds the horde off for a while
     }
     const secs = @as(f32, @floatFromInt(frames)) * dt;
     try std.testing.expect(result == .player_died);
-    try std.testing.expect(secs > 50 and secs < 150);
-    try std.testing.expect(kills > 60);
+    try std.testing.expect(secs > 150 and secs < 300);
+    try std.testing.expect(game.spawner.wave >= 5 and game.spawner.wave <= 9);
+    try std.testing.expect(kills > 400);
 }
 
 test "[scenario] an enemy right up against the player can be shot" {
     var t: TestLevel = .{};
     t.init(false);
     var game = state.GameState{};
-    game.spawner.next_spawn_timer = std.math.inf(f32);
+    game.spawner.timer = std.math.inf(f32);
     game.enemies.add(.{ consts.PLAYER_RING_RADIUS, 0 });
 
     //Fires at the end of the first frame, hits on the next
@@ -184,7 +201,7 @@ test "[scenario] bullets can't go through walls" {
     var t: TestLevel = .{};
     t.init(true);
     var game = state.GameState{};
-    game.spawner.next_spawn_timer = std.math.inf(f32);
+    game.spawner.timer = std.math.inf(f32);
     game.enemies.add(.{ 4, 0 }); //Behind the vertical wall at x = 2m
     //It is off screen and behind the wall so the gun keeps its aim: point that at the wall
     game.player.facing_dir = .{ 1, 0 };
@@ -209,7 +226,7 @@ test "[scenario] the gun shoots the enemy it can see, not a closer one behind a 
     var t: TestLevel = .{};
     t.init(true);
     var game = state.GameState{};
-    game.spawner.next_spawn_timer = std.math.inf(f32);
+    game.spawner.timer = std.math.inf(f32);
     game.player.pos = .{ 1, 0 };
     game.enemies.add(.{ 2.5, 0 }); //1.5m away, on screen but behind the vertical wall at x = 2m
     game.enemies.add(.{ -0.6, 0 }); //1.6m away in the open
@@ -232,7 +249,7 @@ test "[scenario] with nothing in sight the gun aims the way the player moves, or
     var t: TestLevel = .{};
     t.init(false);
     var game = state.GameState{};
-    game.spawner.next_spawn_timer = std.math.inf(f32);
+    game.spawner.timer = std.math.inf(f32);
     game.player.facing_dir = .{ 0, 1 };
 
     _ = t.tick(&game, .{});
@@ -260,7 +277,7 @@ fn shotsFiredWithDrops(walk_to_drops: bool, secs: f32) !u32 {
     t.level.drop_cells = &drop_cells;
     t.level.drop_sizes = &TEST_DROP_SIZES;
     var game = state.GameState{};
-    game.spawner.next_spawn_timer = std.math.inf(f32);
+    game.spawner.timer = std.math.inf(f32);
 
     var shots: u32 = 0;
     var frames: usize = 0;
@@ -341,6 +358,7 @@ fn secondsSurvivedWithDrops(walk_to_drops: bool) f32 {
 test "[scenario] under the horde, a player who goes out for drops outlives one who stands still" {
     const standing = secondsSurvivedWithDrops(false);
     const walking = secondsSurvivedWithDrops(true);
-    //Measured at the time of tuning: ~16s standing still, ~88s walking to drops
+    //Measured at the time of tuning: ~14s standing still; walking to drops reaches the 600s cap (the player is
+    //faster than the enemies, so one who keeps moving can always outrun them)
     try std.testing.expect(walking > standing * 1.5);
 }

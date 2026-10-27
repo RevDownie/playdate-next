@@ -1,6 +1,7 @@
 const std = @import("std");
 const maths = @import("maths.zig");
 const consts = @import("tweak_constants.zig");
+const bitmap_descs = @import("bitmap_descs.zig");
 
 const Vec2f = @Vector(2, f32);
 
@@ -57,6 +58,25 @@ const BARREL_SIDE_OFFSETS = blk: {
     break :blk offsets;
 };
 
+/// Pixels a drop is lifted off the ground `age` seconds after it appeared: a gentle repeating hop
+///
+pub fn dropBounce(age: f32) i32 {
+    const phase = age * (std.math.pi / consts.DROP_BOUNCE_PERIOD);
+    return @intFromFloat(@round(@abs(std.math.sin(phase)) * consts.DROP_BOUNCE_PX));
+}
+
+/// Which frame of its glint a drop shows `age` seconds after it appeared: 0 (no glint) most of the time, then
+/// 1..DROP_FRAMES_PER_KIND-1 as the light sweeps across. `point` staggers drops on different points. Integer
+/// maths: a float @mod would call libc's fmodf, which drags newlib's malloc into the device link
+///
+pub fn dropSheenFrame(age: f32, point: u8) u8 {
+    const sheen_frames = bitmap_descs.DROP_FRAMES_PER_KIND - 1;
+    const ms: u32 = @intFromFloat(@max(age, 0) * 1000);
+    const t = (ms + @as(u32, point) * consts.DROP_SHEEN_POINT_OFFSET_MS) % consts.DROP_SHEEN_PERIOD_MS;
+    const frame = t / consts.DROP_SHEEN_FRAME_MS;
+    return if (frame < sheen_frames) @intCast(frame + 1) else 0;
+}
+
 pub const Tracer = struct { head: Vec2f, tail: Vec2f };
 
 /// Where to draw a bullet's tracer streak (world metres, on the ground; the renderer lifts it to gun height).
@@ -92,4 +112,24 @@ test "[animation] bullet tracers start at the muzzle and converge on the bullet"
     const far = bulletTracer(Vec2f{ 3, 0 }, Vec2f{ 1, 0 }, consts.MUZZLE_CONVERGE_DIST, 3);
     try std.testing.expect(far.head[0] == 3 and far.head[1] == 0);
     try std.testing.expectApproxEqAbs(far.head[0] - far.tail[0], consts.TRACER_LENGTH, 0.0001);
+}
+
+test "[animation] drops hop off the ground and back" {
+    const top: i32 = @intFromFloat(consts.DROP_BOUNCE_PX);
+    try std.testing.expect(dropBounce(0) == 0);
+    try std.testing.expect(dropBounce(consts.DROP_BOUNCE_PERIOD / 2) == top);
+    try std.testing.expect(dropBounce(consts.DROP_BOUNCE_PERIOD) == 0);
+    for (0..100) |i| {
+        const b = dropBounce(@as(f32, @floatFromInt(i)) * 0.037);
+        try std.testing.expect(b >= 0 and b <= top);
+    }
+}
+
+test "[animation] a drop's glint sweeps through every frame once a period, staggered by point" {
+    var seen: [bitmap_descs.DROP_FRAMES_PER_KIND]u32 = @splat(0);
+    var ms: u32 = 0;
+    while (ms < consts.DROP_SHEEN_PERIOD_MS) : (ms += 1) seen[dropSheenFrame(@as(f32, @floatFromInt(ms)) / 1000, 0)] += 1;
+    for (seen[1..]) |n| try std.testing.expect(n > 0 and n <= consts.DROP_SHEEN_FRAME_MS + 1);
+    try std.testing.expect(seen[0] > consts.DROP_SHEEN_PERIOD_MS / 2); //Mostly still
+    try std.testing.expect(dropSheenFrame(0, 0) == 1 and dropSheenFrame(0, 1) == 0);
 }

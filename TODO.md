@@ -21,11 +21,17 @@
 
 ## Combine enemy_separation_system into enemy_movement_system
 - Feels like these should be in the same file as they relate to enemy positioning
-- Enemies should spawn in waves so players get a peak and trough experience where they feel they can gear up for the next battle
 
 ## Improve enemy spawning
 - Feels like there is too much chance of enemies failing to spawn
 - Perhaps spawn locations should be specified on the map - like player spawn is
+
+## Run loop follow-up (waves, run end, combo)
+- Playtest the wave curve on device: `WAVES` table (hold, peak, pack, lull), `WAVES_PER_EXTRA_SIDE`, `WAVE_PACK_INTERVAL`
+- The player (1.5 m/s) outruns the enemies (1.2 m/s), so a player who keeps moving can kite forever (the drop-seeking
+  scenario bot survives its whole 600s). Needs faster enemy types or a reason to stand and fight
+- Whether a timed-out wave should give any signal (today the next wave just starts)
+- Combo popups and HUD text: draw cost on device with a full horde and 8 popups
 
 ## Drops follow-up
 - Playtest the tuning on device (`DROP_*`, `AMMO_DROP_*`, `HEALTH_DROP_*`, `RELOAD_TIME_*` in tweak_constants.zig)
