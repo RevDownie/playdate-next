@@ -45,14 +45,22 @@ pub const Enemies = struct {
     pos: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined,
     vel: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined,
     health: [capacity]u8 align(memory.CACHE_LINE_SIZE) = undefined,
+    speed: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined, //Metres a second it seeks the player at
     bump_timer: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined, //Seeking resumes when this reaches BUMP_TIME
     //Cold: only read while an enemy is bumping back
     bump_offset: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined, //Direction * distance of the full bump
 
+    /// Add one moving at ENEMY_SPEED
     pub fn add(self: *Enemies, world_pos: Vec2f) void {
+        self.addWithSpeed(world_pos, consts.ENEMY_SPEED);
+    }
+
+    pub fn addWithSpeed(self: *Enemies, world_pos: Vec2f, speed: f32) void {
         std.debug.assert(self.len < capacity);
+        std.debug.assert(speed <= consts.ENEMY_MAX_SPEED);
         const i = self.len;
         self.pos[i] = world_pos;
+        self.speed[i] = speed;
         self.vel[i] = @splat(0);
         self.health[i] = consts.ENEMY_MAX_HEALTH;
         self.bump_timer[i] = consts.BUMP_TIME;
@@ -89,6 +97,7 @@ pub const Enemies = struct {
             self.pos[i] = self.pos[last];
             self.vel[i] = self.vel[last];
             self.health[i] = self.health[last];
+            self.speed[i] = self.speed[last];
             self.bump_timer[i] = self.bump_timer[last];
             self.bump_offset[i] = self.bump_offset[last];
             self.len = last;
@@ -158,6 +167,14 @@ comptime {
 pub const Hit = struct {
     enemy_idx: u8,
     impact_dir: Vec2f,
+};
+
+/// The player's melee blow, used when out of ammo (see melee_system)
+///
+pub const Melee = struct {
+    cooldown: f32 = 0, //Seconds until the next blow can land
+    swing_timer: f32 = 0, //Counts down while the swing shows
+    swing_dir: Vec2f = .{ 1, 0 }, //Towards the nearest enemy struck
 };
 
 /// Crank / button state that decides when the gun fires
@@ -319,6 +336,7 @@ pub const GameState = struct {
     drops: Drops = .{},
     popups: Popups = .{},
     trigger: Trigger = .{},
+    melee: Melee = .{},
     spawner: Spawner = .{},
     camera_pos: Vec2f = @splat(0),
     run_time: f32 = 0, //Seconds survived this run

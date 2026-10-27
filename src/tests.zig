@@ -19,6 +19,7 @@ test {
     _ = @import("combat_system.zig");
     _ = @import("firing_system.zig");
     _ = @import("drop_system.zig");
+    _ = @import("melee_system.zig");
     _ = @import("auto_targetting_system.zig");
     _ = @import("player_movement_system.zig");
     _ = @import("game.zig");

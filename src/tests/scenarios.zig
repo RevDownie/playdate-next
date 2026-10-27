@@ -140,7 +140,7 @@ test "[scenario] an enemy behind a wall paths around it and reaches the player" 
     }
     try std.testing.expect(game.player.health < consts.PLAYER_MAX_HEALTH);
     //Going round the wall's end (y = -2.5m) is about 9m, not the 4m straight line
-    try std.testing.expect(@as(f32, @floatFromInt(frames)) / 60.0 * consts.ENEMY_MAX_SPEED > 6);
+    try std.testing.expect(@as(f32, @floatFromInt(frames)) / 60.0 * consts.ENEMY_SPEED > 6);
 }
 
 test "[scenario] the player dies if left alone" {
@@ -358,7 +358,30 @@ fn secondsSurvivedWithDrops(walk_to_drops: bool) f32 {
 test "[scenario] under the horde, a player who goes out for drops outlives one who stands still" {
     const standing = secondsSurvivedWithDrops(false);
     const walking = secondsSurvivedWithDrops(true);
-    //Measured at the time of tuning: ~14s standing still; walking to drops reaches the 600s cap (the player is
-    //faster than the enemies, so one who keeps moving can always outrun them)
+    //Measured at the time of tuning: ~21s standing still (the melee holds a few off once the ammo is gone); walking
+    //to drops reaches the 600s cap even with runners in the waves (the player is faster than most enemies, so one
+    //who keeps moving can outrun most of a wave)
     try std.testing.expect(walking > standing * 1.5);
+}
+
+test "[scenario] out of ammo, the player's melee fights off a few enemies" {
+    var t: TestLevel = .{};
+    t.init(false);
+    var game = state.GameState{};
+    game.spawner.timer = std.math.inf(f32);
+    game.bullets.ammo = 0;
+    game.enemies.add(.{ 0.6, 0 });
+    game.enemies.add(.{ -0.6, 0.1 });
+    game.enemies.add(.{ 0, -0.5 });
+
+    var frames: usize = 0;
+    var swings: u32 = 0;
+    while (game.enemies.len > 0 and frames < 60 * 10) : (frames += 1) {
+        const before = game.melee.swing_timer;
+        _ = t.tick(&game, .{});
+        if (game.melee.swing_timer > before) swings += 1;
+    }
+    try std.testing.expect(game.enemies.len == 0);
+    try std.testing.expect(game.player.kills == 3 and swings >= 2);
+    try std.testing.expect(game.player.health > consts.PLAYER_MAX_HEALTH - 4 * consts.CONTACT_DMG); //Mostly held off
 }

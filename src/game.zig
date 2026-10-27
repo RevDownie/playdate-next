@@ -14,6 +14,7 @@ const combat_sys = @import("combat_system.zig");
 const auto_target_sys = @import("auto_targetting_system.zig");
 const firing_sys = @import("firing_system.zig");
 const drop_sys = @import("drop_system.zig");
+const melee_sys = @import("melee_system.zig");
 
 const Vec2f = @Vector(2, f32);
 
@@ -46,10 +47,13 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     enemy_move_sys.update(&game.enemies, field, grid, game.player.pos, dt);
     enemy_separation_sys.update(&game.enemies, game.player.pos, field, grid, frame_arena.alloc(Vec2f, game.enemies.len));
 
-    //3. Move projectiles (walls stop them) and resolve bullet -> enemy hits (kills are flagged then compacted out)
+    //3. Move projectiles (walls stop them) and resolve bullet and melee hits on enemies (kills are flagged then compacted out)
     bullet_sys.update(&game.bullets, grid, dt);
     const hits = bullet_sys.collide(&game.bullets, game.enemies.positions(), frame_arena.alloc(state.Hit, game.bullets.len));
-    combat_sys.applyBulletHits(hits, &game.enemies, &game.player, &game.popups);
+    combat_sys.applyHits(hits, &game.enemies, &game.player, &game.popups);
+    //Out of ammo, the player strikes the nearest enemies in reach instead
+    const melee_hits = melee_sys.update(&game.melee, game.enemies.positions(), game.player.pos, game.bullets.ammo, dt, frame_arena.alloc(state.Hit, consts.MELEE_MAX_TARGETS));
+    combat_sys.applyHits(melee_hits, &game.enemies, &game.player, &game.popups);
     game.bullets.removeDead();
     game.enemies.removeDead();
 

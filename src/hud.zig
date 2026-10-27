@@ -85,7 +85,7 @@ pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameSt
     drawWaveBanner(graphics, fonts, spawner, width);
 
     //Bottom left: health, next to the ammo so the two resources read together
-    drawBoxed(graphics, fonts.small, format(&buf, "Health {d}", .{game.player.health}), BOX_PAD_X, height - small_h, .left, if (game.player.health <= 25) .loud else .normal);
+    drawBoxed(graphics, fonts.small, format(&buf, "Health {d}/{d}", .{ game.player.health, consts.PLAYER_MAX_HEALTH }), BOX_PAD_X, height - small_h, .left, if (game.player.health <= 25) .loud else .normal);
 
     //Top right: score, then the best to beat (or that it is being beaten)
     const right = width - BOX_PAD_X;
@@ -101,14 +101,14 @@ pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameSt
         drawBoxed(graphics, fonts.small, format(&buf, "Combo x{d}", .{combo}), right, BOX_PAD_Y + small_h * 2, .right, if (combo >= consts.COMBO_LOST_MIN) .loud else .normal);
     }
 
-    //Bottom centre: ammo
+    //Bottom right: ammo (health is bottom left)
     const ammo_y = height - small_h;
     if (game.bullets.isReloading()) {
-        drawBoxed(graphics, fonts.small, format(&buf, "Reloading {d}", .{game.bullets.ammo}), @divTrunc(width, 2), ammo_y, .centre, .normal);
+        drawBoxed(graphics, fonts.small, format(&buf, "Reloading {d}/{d}", .{ game.bullets.ammo, consts.MAX_AMMO }), right, ammo_y, .right, .normal);
     } else if (game.bullets.ammo == 0) {
-        drawBoxed(graphics, fonts.small, "OUT OF AMMO", @divTrunc(width, 2), ammo_y, .centre, .loud);
+        drawBoxed(graphics, fonts.small, "OUT OF AMMO", right, ammo_y, .right, .loud);
     } else {
-        drawBoxed(graphics, fonts.small, format(&buf, "Ammo {d}", .{game.bullets.ammo}), @divTrunc(width, 2), ammo_y, .centre, .normal);
+        drawBoxed(graphics, fonts.small, format(&buf, "Ammo {d}/{d}", .{ game.bullets.ammo, consts.MAX_AMMO }), right, ammo_y, .right, .normal);
     }
 
     if (game.invincible) drawBoxed(graphics, fonts.small, "INVINCIBLE", WAVE_LABEL_X, BOX_PAD_Y + small_h, .left, .loud); //Debug, so screenshots don't mislead
@@ -123,6 +123,37 @@ pub fn drawPopup(graphics: pd.playdate_graphics, fonts: Fonts, kind: state.Popup
         .milestone => drawBoxed(graphics, fonts.big, format(&buf, "COMBO x{d}!", .{value}), x, y - graphics.getFontHeight.?(fonts.big), .centre, .loud),
         .lost => drawBoxed(graphics, fonts.small, "COMBO LOST", x, y - graphics.getFontHeight.?(fonts.small), .centre, .loud),
     }
+}
+
+const MARKER_RADIUS = 9;
+const MARKER_RADIUS_LARGE = 12;
+
+/// An off screen drop: a black disc with a white icon of what it is (a cross for health, a bullet for ammo; a
+/// bigger disc for a large one) and an arrow pointing the way to it. `dir` is unit length, screen space
+///
+pub fn drawDropMarker(graphics: pd.playdate_graphics, kind: state.DropKind, x: c_int, y: c_int, dir: @Vector(2, f32)) void {
+    const r: c_int = if (kind.isLarge()) MARKER_RADIUS_LARGE else MARKER_RADIUS;
+    graphics.fillEllipse.?(x - r - 1, y - r - 1, 2 * r + 2, 2 * r + 2, 0, 360, pd.kColorWhite);
+    graphics.fillEllipse.?(x - r, y - r, 2 * r, 2 * r, 0, 360, pd.kColorBlack);
+    const s: c_int = if (kind.isLarge()) 2 else 1; //Icon scale
+    if (kind.isAmmo()) {
+        //A bullet standing up: a pointed tip on a casing
+        graphics.fillRect.?(x - 2 * s, y - 2 * s, 4 * s, 6 * s, pd.kColorWhite);
+        graphics.fillTriangle.?(x - 2 * s, y - 2 * s, x + 2 * s, y - 2 * s, x, y - 5 * s, pd.kColorWhite);
+    } else {
+        graphics.fillRect.?(x - s, y - 4 * s, 2 * s + 1, 8 * s + 1, pd.kColorWhite);
+        graphics.fillRect.?(x - 4 * s, y - s, 8 * s + 1, 2 * s + 1, pd.kColorWhite);
+    }
+    //Arrow just outside the disc
+    const f: c_int = r + 2;
+    const b: c_int = r + 8;
+    const tip = @Vector(2, f32){ @floatFromInt(x), @floatFromInt(y) } + dir * @as(@Vector(2, f32), @splat(@floatFromInt(b)));
+    const base = @Vector(2, f32){ @floatFromInt(x), @floatFromInt(y) } + dir * @as(@Vector(2, f32), @splat(@floatFromInt(f)));
+    const side = @Vector(2, f32){ -dir[1], dir[0] } * @as(@Vector(2, f32), @splat(4));
+    const p1: @Vector(2, c_int) = @intFromFloat(@round(base + side));
+    const p2: @Vector(2, c_int) = @intFromFloat(@round(base - side));
+    const p3: @Vector(2, c_int) = @intFromFloat(@round(tip));
+    graphics.fillTriangle.?(p1[0], p1[1], p2[0], p2[1], p3[0], p3[1], pd.kColorBlack);
 }
 
 const WAVE_LABEL_X = 34; //Clear of the FPS counter

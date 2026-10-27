@@ -95,7 +95,7 @@ pub const FlowField = struct {
     /// Move an enemy from `pos` to `new_pos`, dropping whichever axis would enter a blocked cell (X then Y,
     /// like the player) so it slides along walls. One already inside a blocked cell moves freely to get out.
     /// Only the destination is tested, so a step must stay shorter than a cell (seeking moves at most
-    /// ENEMY_MAX_SPEED * MAX_FRAME_DT = 0.12m, a bump's biggest frame about half of BUMP_DISTANCE, and a
+    /// ENEMY_MAX_SPEED * MAX_FRAME_DT = 0.175m, a bump's biggest frame about half of BUMP_DISTANCE, and a
     /// separation push at most ENEMY_SEPARATION_MAX_PUSH)
     ///
     pub fn slide(self: *const FlowField, grid: *const CollisionGrid, pos: Vec2f, new_pos: Vec2f, start_blocked: bool) Vec2f {

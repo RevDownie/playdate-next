@@ -39,7 +39,7 @@ pub fn update(spawner: *state.Spawner, enemies: *state.Enemies, rand: std.Random
             const target = targetAlive(spawner.peak, spawner.phase_time / spawner.hold);
             if (spawner.timer > 0 or enemies.len >= target) return;
             spawner.timer = consts.WAVE_PACK_INTERVAL;
-            spawnPack(@min(spawner.pack, target - enemies.len), spawner.sides, enemies, rand, player_world_pos, spawn, field, grid);
+            spawnPack(@min(spawner.pack, target - enemies.len), spawner.sides, spawner.wave, enemies, rand, player_world_pos, spawn, field, grid);
         },
     }
 }
@@ -69,6 +69,17 @@ pub fn waveDef(n: u16) consts.WaveDef {
     };
     const scaled = @round(@as(f32, @floatFromInt(def.peak)) * consts.WAVE_PEAK_SCALE);
     return .{ .hold = def.hold, .peak = @intFromFloat(std.math.clamp(scaled, 1, state.Enemies.capacity)), .pack = def.pack, .lull = def.lull };
+}
+
+/// A new enemy's speed in wave `wave`: a runner (more of them each wave from wave 2), a shambler, or a walker
+/// a little faster or slower than ENEMY_SPEED
+///
+pub fn enemySpeed(rand: std.Random, wave: u16) f32 {
+    const runner_chance = @min(consts.ENEMY_RUNNER_CHANCE_MAX, consts.ENEMY_RUNNER_CHANCE_PER_WAVE * @as(f32, @floatFromInt(wave -| 1)));
+    const roll = rand.float(f32);
+    if (roll < runner_chance) return consts.ENEMY_RUNNER_SPEED;
+    if (roll < runner_chance + consts.ENEMY_SLOW_CHANCE) return consts.ENEMY_SLOW_SPEED;
+    return consts.ENEMY_SPEED * (1 + consts.ENEMY_SPEED_JITTER * (rand.float(f32) * 2 - 1));
 }
 
 /// How many sides of the map wave `n` comes from
@@ -105,7 +116,7 @@ fn startLull(spawner: *state.Spawner) void {
 /// the map's edge band on those sides, then anywhere on it. The cell must be free and able to reach the player;
 /// if every pick misses the pack waits for the next interval, so the cost is bounded
 ///
-fn spawnPack(count: u8, sides: u8, enemies: *state.Enemies, rand: std.Random, player_world_pos: Vec2f, spawn: *const SpawnCells, field: *const FlowField, grid: *const CollisionGrid) void {
+fn spawnPack(count: u8, sides: u8, wave: u16, enemies: *state.Enemies, rand: std.Random, player_world_pos: Vec2f, spawn: *const SpawnCells, field: *const FlowField, grid: *const CollisionGrid) void {
     if (count == 0) return;
     const cell = ringCell(rand, sides, player_world_pos, field, grid) orelse edgeCell(rand, sides, player_world_pos, spawn, field, grid) orelse return;
 
@@ -114,7 +125,7 @@ fn spawnPack(count: u8, sides: u8, enemies: *state.Enemies, rand: std.Random, pl
     const n = @min(count, state.Enemies.capacity - enemies.len);
     for (0..n) |_| {
         const offset = (Vec2f{ rand.float(f32), rand.float(f32) } - @as(Vec2f, @splat(0.5))) * jitter;
-        enemies.add(grid.cellCentre(cell) + offset);
+        enemies.addWithSpeed(grid.cellCentre(cell) + offset, enemySpeed(rand, wave));
     }
 }
 
@@ -295,4 +306,20 @@ test "[enemy_spawn_system] packs arrive together, spawning never overfills, and 
     }
     try std.testing.expect(checked_pack and max_sides >= 3);
     try std.testing.expect(numSides(1) == 1 and numSides(100) == level_loader.NUM_SIDES);
+}
+
+test "[enemy_spawn_system] enemy speeds vary, with runners from wave 2 and more of them later" {
+    var prng = std.Random.DefaultPrng.init(4);
+    var runners: [3]u32 = @splat(0);
+    var slow: u32 = 0;
+    for ([_]u16{ 1, 3, 20 }, 0..) |wave, w| {
+        for (0..2000) |_| {
+            const s = enemySpeed(prng.random(), wave);
+            try std.testing.expect(s >= consts.ENEMY_SLOW_SPEED and s <= consts.ENEMY_MAX_SPEED);
+            if (s == consts.ENEMY_RUNNER_SPEED) runners[w] += 1;
+            if (s == consts.ENEMY_SLOW_SPEED) slow += 1;
+        }
+    }
+    try std.testing.expect(runners[0] == 0 and runners[1] > 0 and runners[2] > runners[1]);
+    try std.testing.expect(runners[2] < 2000 * 0.35 and slow > 6000 / 5);
 }

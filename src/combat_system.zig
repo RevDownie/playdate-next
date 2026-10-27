@@ -8,11 +8,11 @@ const Vec2f = @Vector(2, f32);
 
 const CHAR_ENEMY_COLL_RADIUS_SQRD = consts.CHAR_ENEMY_COLL_RADIUS * consts.CHAR_ENEMY_COLL_RADIUS;
 
-/// Apply bullet -> enemy hits: push the enemy back and deduct health. Enemies that run out of health are
+/// Apply hits on enemies (from bullets or the melee): push the enemy back and deduct health. Enemies that run out of health are
 /// left flagged dead (health 0) for `Enemies.removeDead`; later hits on them in the same frame are ignored.
 /// Each kill grows the combo and shows it where the enemy fell (big at a milestone)
 ///
-pub fn applyBulletHits(hits: []const Hit, enemies: *state.Enemies, player: *state.Player, popups: *state.Popups) void {
+pub fn applyHits(hits: []const Hit, enemies: *state.Enemies, player: *state.Player, popups: *state.Popups) void {
     for (hits) |hit| {
         const i = hit.enemy_idx;
         const health = enemies.health[i];
@@ -72,7 +72,7 @@ test "[combat_system] a second hit on a killed enemy is ignored" {
     enemies.health[0] = consts.DMG_PER_HIT;
 
     const hits = [_]Hit{ .{ .enemy_idx = 0, .impact_dir = Vec2f{ 1, 0 } }, .{ .enemy_idx = 0, .impact_dir = Vec2f{ 1, 0 } } };
-    applyBulletHits(&hits, &enemies, &player, &popups);
+    applyHits(&hits, &enemies, &player, &popups);
 
     try std.testing.expect(enemies.health[0] == 0);
     try std.testing.expect(player.kill_streak == 1);
@@ -87,9 +87,9 @@ test "[combat_system] a fresh enemy is knocked back by the first hit and killed 
     enemies.add(Vec2f{ 0, 0 });
 
     const hit = [_]Hit{.{ .enemy_idx = 0, .impact_dir = Vec2f{ 1, 0 } }};
-    applyBulletHits(&hit, &enemies, &player, &popups);
+    applyHits(&hit, &enemies, &player, &popups);
     try std.testing.expect(enemies.health[0] > 0 and enemies.isBumping(0));
-    applyBulletHits(&hit, &enemies, &player, &popups);
+    applyHits(&hit, &enemies, &player, &popups);
     try std.testing.expect(enemies.health[0] == 0);
 }
 
@@ -136,7 +136,7 @@ test "[combat_system] kills show the growing combo where they fell, big at miles
     enemies.health[0] = consts.DMG_PER_HIT;
     enemies.health[1] = consts.DMG_PER_HIT;
     const hits = [_]Hit{ .{ .enemy_idx = 0, .impact_dir = Vec2f{ 1, 0 } }, .{ .enemy_idx = 1, .impact_dir = Vec2f{ 1, 0 } } };
-    applyBulletHits(&hits, &enemies, &player, &popups);
+    applyHits(&hits, &enemies, &player, &popups);
 
     try std.testing.expect(popups.len == 2);
     try std.testing.expect(popups.kind[0] == .combo and popups.value[0] == consts.COMBO_MILESTONE_FIRST - 1);
@@ -151,7 +151,7 @@ test "[combat_system] a first kill shows nothing, and only a good combo says it 
     var popups = state.Popups{};
     enemies.add(Vec2f{ 0, 0 });
     enemies.health[0] = consts.DMG_PER_HIT;
-    applyBulletHits(&[_]Hit{.{ .enemy_idx = 0, .impact_dir = Vec2f{ 1, 0 } }}, &enemies, &player, &popups);
+    applyHits(&[_]Hit{.{ .enemy_idx = 0, .impact_dir = Vec2f{ 1, 0 } }}, &enemies, &player, &popups);
     try std.testing.expect(popups.len == 0);
 
     var toucher = state.Enemies{};

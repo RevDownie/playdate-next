@@ -28,8 +28,9 @@
 
 ## Run loop follow-up (waves, run end, combo)
 - Playtest the wave curve on device: `WAVES` table (hold, peak, pack, lull), `WAVES_PER_EXTRA_SIDE`, `WAVE_PACK_INTERVAL`
-- The player (1.5 m/s) outruns the enemies (1.2 m/s), so a player who keeps moving can kite forever (the drop-seeking
-  scenario bot survives its whole 600s). Needs faster enemy types or a reason to stand and fight
+- A player who keeps moving can still kite most of a wave: runners (faster than the player, from wave 2) help, but the
+  drop-seeking scenario bot still survives its whole 600s. Playtest whether runners need to come sooner or in packs
+- Give the enemy speed types their own look (runner / shambler)
 - Whether a timed-out wave should give any signal (today the next wave just starts)
 - Combo popups and HUD text: draw cost on device with a full horde and 8 popups
 

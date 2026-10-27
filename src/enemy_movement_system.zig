@@ -38,9 +38,9 @@ fn updateSeeking(enemies: *Enemies, i: usize, field: *const FlowField, grid: *co
 
     const follow_field = dir < flow.DIR_GOAL and field.dir[field.nextCell(cell.?, dir)] != flow.DIR_GOAL;
     const desired = if (follow_field)
-        field.dir_vecs[dir] * @as(Vec2f, @splat(consts.ENEMY_MAX_SPEED))
+        field.dir_vecs[dir] * @as(Vec2f, @splat(enemies.speed[i]))
     else
-        maths.normaliseSafeMag(to_target, mag, enemies.vel[i]) * @as(Vec2f, @splat(@min(consts.ENEMY_MAX_SPEED, mag)));
+        maths.normaliseSafeMag(to_target, mag, enemies.vel[i]) * @as(Vec2f, @splat(@min(enemies.speed[i], mag)));
 
     const vel = enemies.vel[i] + (desired - enemies.vel[i]) * @as(Vec2f, @splat(@min(consts.ENEMY_TURN_RATE * dt, 1.0)));
     enemies.vel[i] = vel;
@@ -155,4 +155,19 @@ test "[enemy_movement_system] a bump into a wall stops at the wall" {
         try std.testing.expect(!lvl.grid.isOccupied(e.pos[0]));
     }
     try std.testing.expect(e.pos[0][0] < 0.75);
+}
+
+test "[enemy_movement_system] each enemy seeks at its own speed" {
+    var cells: [9 * 9]bool = @splat(false);
+    const grid = CollisionGrid{ .cells = &cells, .width = 9, .height = 9, .cell_width = 64, .cell_height = 64 };
+    var buffer: [8 * 1024]u8 = undefined;
+    var arena = @import("memory.zig").Arena.init("level", &buffer);
+    const field = FlowField.init(&arena, &grid, grid.cellIndex(@splat(0)));
+    var e = Enemies{};
+    e.addWithSpeed(Vec2f{ -1.5, 0 }, consts.ENEMY_SLOW_SPEED);
+    e.addWithSpeed(Vec2f{ 1.5, 0 }, consts.ENEMY_RUNNER_SPEED);
+    for (0..30) |_| update(&e, &field, &grid, @splat(0), 1.0 / 50.0);
+    //Up to speed after easing in: the runner has covered more ground
+    try std.testing.expect(1.5 - @abs(e.pos[1][0]) > 1.5 - @abs(e.pos[0][0]) + 0.1);
+    try std.testing.expect(maths.magnitude(e.vel[1]) > consts.PLAYER_MAX_SPEED);
 }
