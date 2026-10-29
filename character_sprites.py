@@ -21,7 +21,8 @@ Sheets (bitmap tables, index = facing * frames per facing + frame; facing = degr
   HERO_DEATH_FRAMES falling down. Body only: the arms belong to the weapon layer
 - hero_gun / hero_melee: the arms and weapon, drawn over the hero in the same cell with the same anchor. The body's
   occlusion is baked in (pixels the body hides are left out). Gun: idle, hurt. Melee: ready, strike, follow through
-- zombie_<kind>: 11 facings (18 degrees) x ENEMY_FRAMES (4 walk, hit, 3 death)
+- zombie_<kind>: 11 facings (18 degrees) x ENEMY_FRAMES (4 walk, hit). They have no death: killed zombies burst
+  into gibs (gore_sprites.py)
 """
 
 # ---------------------------------------------------------------- layout (written into src/bitmap_descs.zig)
@@ -38,9 +39,8 @@ MELEE_FRAMES = 3  # ready, strike, follow through
 
 ENEMY_FACING_STEP = 18  # Steps that land on 90: side on is the facing seen most
 ENEMY_FACINGS = 180 // ENEMY_FACING_STEP + 1
-ENEMY_FRAMES = 8  # walk 0..3, hit, death 0..2
+ENEMY_FRAMES = 5  # walk 0..3, hit
 ENEMY_WALK_FRAMES = 4
-ENEMY_DEATH_FRAMES = 3
 # Per kind (src/game_state.zig EnemyKind order): cell w, h and the feet's pixel in it
 ENEMY_CELLS = {"runner": (32, 32, 16, 29), "walker": (48, 48, 24, 43), "shambler": (48, 48, 24, 43), "brute": (64, 64, 32, 58)}
 
@@ -226,11 +226,11 @@ def zombie_brute(feet=STAND, sway=0.0):
 
 
 ZOMBIES = {
-    # model, stride, foot lift, arm sway, how far the back sits off the ground when lying down
-    "runner": (zombie_runner, 4.5, 2.5, 1.5, 3.0),
-    "walker": (zombie_walker, 3.0, 1.5, 1.0, 4.0),
-    "shambler": (zombie_shambler, 2.0, 0.8, 1.5, 5.0),
-    "brute": (zombie_brute, 3.0, 1.5, 2.0, 9.0),
+    # model, stride, foot lift, arm sway
+    "runner": (zombie_runner, 4.5, 2.5, 1.5),
+    "walker": (zombie_walker, 3.0, 1.5, 1.0),
+    "shambler": (zombie_shambler, 2.0, 0.8, 1.5),
+    "brute": (zombie_brute, 3.0, 1.5, 2.0),
 }
 
 # ---------------------------------------------------------------- frames
@@ -262,14 +262,12 @@ def hero_frame(spec):
 
 def enemy_frame(spec):
     kind, facing, frame = spec
-    model, stride, lift, sway, lie = ZOMBIES[kind]
+    model, stride, lift, sway = ZOMBIES[kind]
     w, h, ax, ay = ENEMY_CELLS[kind]
     if frame < ENEMY_WALK_FRAMES:
         prims = model(cycle(stride, lift)[frame], sway * (1 if frame < 2 else -1))
-    elif frame == ENEMY_WALK_FRAMES:
-        prims = pose(model(), (0, 0, 10), pitch=18, offset=(0, 1.5, -1))  # hit: rocked back
     else:
-        prims = fall(model(), (35, 65, 88)[frame - ENEMY_WALK_FRAMES - 1], lie, facing)
+        prims = pose(model(), (0, 0, 10), pitch=18, offset=(0, 1.5, -1))  # hit: rocked back
     return spec, outline(clean(render(prims, w, h, ax, ay, facing)))
 
 
@@ -349,7 +347,7 @@ def desc_lines():
         f"pub const HERO_DEATH_FACING_STEP: u32 = {HERO_DEATH_FACING_STEP};", f"pub const HERO_DEATH_FRAMES: u32 = {HERO_DEATH_FRAMES};",
         f"pub const GUN_FRAMES: u32 = {GUN_FRAMES};", f"pub const MELEE_FRAMES: u32 = {MELEE_FRAMES};",
         f"pub const ENEMY_FACING_STEP: u32 = {ENEMY_FACING_STEP};", f"pub const ENEMY_FRAMES: u32 = {ENEMY_FRAMES};",
-        f"pub const ENEMY_WALK_FRAMES: u32 = {ENEMY_WALK_FRAMES};", f"pub const ENEMY_DEATH_FRAMES: u32 = {ENEMY_DEATH_FRAMES};",
+        f"pub const ENEMY_WALK_FRAMES: u32 = {ENEMY_WALK_FRAMES};",
         "/// Per EnemyKind: cell width, height and the feet's pixel in it",
         "pub const ENEMY_CELLS = [_][4]u32{ " + ", ".join(".{ %d, %d, %d, %d }" % c for c in ENEMY_CELLS.values()) + " };",
     ]

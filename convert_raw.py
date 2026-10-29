@@ -4,6 +4,7 @@ import os
 import shutil
 import drop_sprites
 import character_sprites
+import gore_sprites
 
 """
 Simple script for running Imagemagick on source images to convert them to 1 bit images for Playdate
@@ -38,7 +39,7 @@ def createDescFile():
         f.write(f"pub const DROP_W: u32 = {drop_sprites.DROP_W};\n")
         f.write(f"pub const DROP_H: u32 = {drop_sprites.DROP_H};\n")
         f.write(f"pub const DROP_FRAMES_PER_KIND: u32 = {drop_sprites.FRAMES_PER_KIND};\n")
-        for line in character_sprites.desc_lines():
+        for line in character_sprites.desc_lines() + gore_sprites.desc_lines():
             f.write(line + "\n")
         f.close();
 
@@ -55,6 +56,7 @@ if __name__ == "__main__":
 
     # Characters (modelled and rendered to 1-bit, written directly)
     character_sprites.save(character_sprites.build(), 'images')
+    gore_sprites.save(gore_sprites.build(), 'images')
 
     # Environment
     convertEnvironmentSprites(args.imagemagick, "raw-levels")

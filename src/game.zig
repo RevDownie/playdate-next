@@ -15,6 +15,7 @@ const auto_target_sys = @import("auto_targetting_system.zig");
 const firing_sys = @import("firing_system.zig");
 const drop_sys = @import("drop_system.zig");
 const melee_sys = @import("melee_system.zig");
+const gore_sys = @import("gore_system.zig");
 
 const Vec2f = @Vector(2, f32);
 
@@ -47,15 +48,17 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     enemy_move_sys.update(&game.enemies, field, grid, game.player.pos, dt);
     enemy_separation_sys.update(&game.enemies, game.player.pos, field, grid, frame_arena.alloc(Vec2f, game.enemies.len));
 
-    //3. Move projectiles (walls stop them) and resolve bullet and melee hits on enemies (kills are flagged then compacted out)
+    //3. Move projectiles (walls stop them) and resolve bullet and melee hits on enemies (kills are flagged then compacted
+    //out). Wounds spray blood and kills burst into gore
     bullet_sys.update(&game.bullets, grid, dt);
     const hits = bullet_sys.collide(&game.bullets, game.enemies.positions(), game.enemies.kind[0..game.enemies.len], frame_arena.alloc(state.Hit, game.bullets.len));
-    combat_sys.applyHits(hits, &game.enemies, &game.player, &game.popups);
+    const impacts = combat_sys.applyHits(hits, &game.enemies, &game.player, &game.popups, frame_arena.alloc(state.Impact, hits.len));
+    gore_sys.spawn(&game.gore, impacts, game.gore_rng.random());
     //Out of ammo, the player strikes the nearest enemies in reach instead
     const melee_hits = melee_sys.update(&game.melee, game.enemies.positions(), game.player.pos, game.bullets.ammo, dt, frame_arena.alloc(state.Hit, consts.MELEE_MAX_TARGETS));
-    combat_sys.applyHits(melee_hits, &game.enemies, &game.player, &game.popups);
+    const melee_impacts = combat_sys.applyHits(melee_hits, &game.enemies, &game.player, &game.popups, frame_arena.alloc(state.Impact, melee_hits.len));
+    gore_sys.spawn(&game.gore, melee_impacts, game.gore_rng.random());
     game.bullets.removeDead();
-    game.corpses.addDead(&game.enemies);
     game.enemies.removeDead();
 
     //4. Enemies touching the player hurt them
@@ -82,7 +85,7 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     //7. Effects
     game.player.hit_flash_timer = @max(game.player.hit_flash_timer - dt, 0);
     game.popups.update(dt);
-    game.corpses.update(dt);
+    gore_sys.update(&game.gore, grid, dt);
 
     return .playing;
 }
