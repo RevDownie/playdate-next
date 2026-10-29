@@ -19,7 +19,7 @@ pub fn applyHits(hits: []const Hit, enemies: *state.Enemies, player: *state.Play
         if (health == 0) continue; //Already killed by an earlier bullet this frame
 
         if (health <= consts.DMG_PER_HIT) {
-            //Enemy is dead - TODO: Graceful death and not just dissappear
+            //Dead: it falls as a corpse (see Corpses.addDead) when compacted out
             enemies.health[i] = 0;
             player.kill_streak += 1;
             player.kills += 1;
@@ -32,7 +32,9 @@ pub fn applyHits(hits: []const Hit, enemies: *state.Enemies, player: *state.Play
             }
         } else {
             enemies.health[i] = health - consts.DMG_PER_HIT;
-            enemies.startBumpBack(i, hit.impact_dir, consts.BUMP_DISTANCE);
+            //Brutes don't flinch, so fire alone can't hold them off
+            const bump = enemies.kind[i].def().bump;
+            if (bump > 0) enemies.startBumpBack(i, hit.impact_dir, bump);
         }
     }
 }

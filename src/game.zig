@@ -49,12 +49,13 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
 
     //3. Move projectiles (walls stop them) and resolve bullet and melee hits on enemies (kills are flagged then compacted out)
     bullet_sys.update(&game.bullets, grid, dt);
-    const hits = bullet_sys.collide(&game.bullets, game.enemies.positions(), frame_arena.alloc(state.Hit, game.bullets.len));
+    const hits = bullet_sys.collide(&game.bullets, game.enemies.positions(), game.enemies.kind[0..game.enemies.len], frame_arena.alloc(state.Hit, game.bullets.len));
     combat_sys.applyHits(hits, &game.enemies, &game.player, &game.popups);
     //Out of ammo, the player strikes the nearest enemies in reach instead
     const melee_hits = melee_sys.update(&game.melee, game.enemies.positions(), game.player.pos, game.bullets.ammo, dt, frame_arena.alloc(state.Hit, consts.MELEE_MAX_TARGETS));
     combat_sys.applyHits(melee_hits, &game.enemies, &game.player, &game.popups);
     game.bullets.removeDead();
+    game.corpses.addDead(&game.enemies);
     game.enemies.removeDead();
 
     //4. Enemies touching the player hurt them
@@ -70,7 +71,7 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     //6. Now that the enemy positions are final, aim at the best target the player can see and fire.
     //With nothing in sight aim the way the player is moving, or keep the last aim while standing still
     const move_dir = maths.normaliseSafe(game.player.vel, @splat(0));
-    const target = auto_target_sys.findTarget(game.player.pos, move_dir, game.player.facing_dir, game.camera_pos, game.enemies.positions(), game.enemies.health[0..game.enemies.len], grid, frame_arena.alloc(f32, game.enemies.len));
+    const target = auto_target_sys.findTarget(game.player.pos, move_dir, game.player.facing_dir, game.camera_pos, game.enemies.positions(), game.enemies.health[0..game.enemies.len], game.enemies.kind[0..game.enemies.len], grid, frame_arena.alloc(f32, game.enemies.len));
     const aim_dir = if (target) |t| t.dir else maths.normaliseSafe(move_dir, game.player.facing_dir);
     if (firing_sys.update(&game.trigger, input, dt)) {
         bullet_sys.fire(&game.bullets, game.player.pos, aim_dir, game.rng.random().float(f32) * 2 - 1);
@@ -81,6 +82,7 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     //7. Effects
     game.player.hit_flash_timer = @max(game.player.hit_flash_timer - dt, 0);
     game.popups.update(dt);
+    game.corpses.update(dt);
 
     return .playing;
 }

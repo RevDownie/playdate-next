@@ -17,6 +17,7 @@ pub const Hud = struct {
     pub const GameOver = struct {
         new_best: bool, //The run that ended beat the saved best
         can_restart: bool, //Past GAME_OVER_INPUT_DELAY, so A/B starts the next run
+        time: f32 = 0, //Seconds since the run ended (the player falls down)
     };
 };
 

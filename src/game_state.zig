@@ -33,7 +33,25 @@ pub const Player = struct {
     kills: u32 = 0, //This run
     best_streak: u32 = 0, //This run
     hit_flash_timer: f32 = 0, //Counts down while the hit flash effect is showing
+    run_dist: f32 = 0, //Metres walked, drives the run cycle (wraps round, only its fraction matters)
 };
+
+/// What an enemy is, which sets its look, health, size and how it moves (consts.ENEMY_KINDS is in this order, and
+/// the zombie_<kind> sprite sheets are loaded in it)
+///
+pub const EnemyKind = enum(u8) {
+    runner,
+    walker,
+    shambler,
+    brute,
+
+    pub fn def(self: EnemyKind) consts.EnemyKindDef {
+        return consts.ENEMY_KINDS[@backingInt(self)];
+    }
+};
+comptime {
+    if (consts.ENEMY_KINDS.len != std.enums.values(EnemyKind).len) @compileError("ENEMY_KINDS needs an entry per EnemyKind");
+}
 
 /// Enemies are dead once their health reaches zero; `removeDead` then compacts them out
 ///
@@ -46,23 +64,30 @@ pub const Enemies = struct {
     vel: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined,
     health: [capacity]u8 align(memory.CACHE_LINE_SIZE) = undefined,
     speed: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined, //Metres a second it seeks the player at
+    kind: [capacity]EnemyKind align(memory.CACHE_LINE_SIZE) = undefined,
     bump_timer: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined, //Seeking resumes when this reaches BUMP_TIME
     //Cold: only read while an enemy is bumping back
     bump_offset: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined, //Direction * distance of the full bump
 
-    /// Add one moving at ENEMY_SPEED
+    /// Add a walker moving at ENEMY_SPEED
     pub fn add(self: *Enemies, world_pos: Vec2f) void {
-        self.addWithSpeed(world_pos, consts.ENEMY_SPEED);
+        self.addKind(world_pos, .walker, consts.ENEMY_SPEED);
     }
 
+    /// Add a walker moving at `speed`
     pub fn addWithSpeed(self: *Enemies, world_pos: Vec2f, speed: f32) void {
+        self.addKind(world_pos, .walker, speed);
+    }
+
+    pub fn addKind(self: *Enemies, world_pos: Vec2f, kind: EnemyKind, speed: f32) void {
         std.debug.assert(self.len < capacity);
         std.debug.assert(speed <= consts.ENEMY_MAX_SPEED);
         const i = self.len;
         self.pos[i] = world_pos;
         self.speed[i] = speed;
+        self.kind[i] = kind;
         self.vel[i] = @splat(0);
-        self.health[i] = consts.ENEMY_MAX_HEALTH;
+        self.health[i] = kind.def().health;
         self.bump_timer[i] = consts.BUMP_TIME;
         self.bump_offset[i] = @splat(0);
         self.len += 1;
@@ -98,6 +123,7 @@ pub const Enemies = struct {
             self.vel[i] = self.vel[last];
             self.health[i] = self.health[last];
             self.speed[i] = self.speed[last];
+            self.kind[i] = self.kind[last];
             self.bump_timer[i] = self.bump_timer[last];
             self.bump_offset[i] = self.bump_offset[last];
             self.len = last;
@@ -157,7 +183,7 @@ pub const Bullets = struct {
 
 /// The bullet x enemy collision test re-reads every enemy position for each live bullet, so all of
 /// those arrays need to stay resident in the cache together
-pub const COLLISION_HOT_SET_BYTES = @sizeOf(@FieldType(Enemies, "pos")) + @sizeOf(@FieldType(Bullets, "pos")) + @sizeOf(@FieldType(Bullets, "lifetime"));
+pub const COLLISION_HOT_SET_BYTES = @sizeOf(@FieldType(Enemies, "pos")) + @sizeOf(@FieldType(Enemies, "kind")) + @sizeOf(@FieldType(Bullets, "pos")) + @sizeOf(@FieldType(Bullets, "lifetime"));
 comptime {
     if (COLLISION_HOT_SET_BYTES > memory.HOT_SET_BUDGET) @compileError("Bullet/enemy collision data no longer fits the L1 hot set budget");
 }
@@ -233,6 +259,54 @@ pub const Popups = struct {
             self.pos[i] = self.pos[last];
             self.life[i] = self.life[last];
             self.value[i] = self.value[last];
+            self.kind[i] = self.kind[last];
+            self.len = last;
+        }
+    }
+};
+
+/// Killed enemies falling down and lying there for a moment (drawn only, nothing collides with them). Fixed
+/// capacity: when full the newest replace the oldest
+///
+pub const Corpses = struct {
+    pub const capacity = consts.MAX_CORPSES;
+
+    len: u8 = 0,
+    pos: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined,
+    dir: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined, //The way it was facing when it fell
+    age: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined, //Seconds since it died
+    kind: [capacity]EnemyKind align(memory.CACHE_LINE_SIZE) = undefined,
+
+    /// Add a corpse for every enemy flagged dead (health 0). Call before `Enemies.removeDead`
+    pub fn addDead(self: *Corpses, enemies: *const Enemies) void {
+        for (0..enemies.len) |e| {
+            if (enemies.health[e] > 0) continue;
+            var i = self.len;
+            if (i < capacity) {
+                self.len += 1;
+            } else {
+                i = @intCast(std.mem.indexOfMax(f32, &self.age));
+            }
+            self.pos[i] = enemies.pos[e];
+            self.dir[i] = enemies.vel[e];
+            self.age[i] = 0;
+            self.kind[i] = enemies.kind[e];
+        }
+    }
+
+    /// Age them, then swap-remove the ones that have lain there long enough
+    pub fn update(self: *Corpses, dt: f32) void {
+        for (self.age[0..self.len]) |*a| a.* += dt;
+        var i: u8 = 0;
+        while (i < self.len) {
+            if (self.age[i] < consts.CORPSE_TIME) {
+                i += 1;
+                continue;
+            }
+            const last = self.len - 1;
+            self.pos[i] = self.pos[last];
+            self.dir[i] = self.dir[last];
+            self.age[i] = self.age[last];
             self.kind[i] = self.kind[last];
             self.len = last;
         }
@@ -335,6 +409,7 @@ pub const GameState = struct {
     bullets: Bullets = .{},
     drops: Drops = .{},
     popups: Popups = .{},
+    corpses: Corpses = .{},
     trigger: Trigger = .{},
     melee: Melee = .{},
     spawner: Spawner = .{},
@@ -422,6 +497,38 @@ test "[game_state] popups replace the oldest when full and go once shown" {
     try std.testing.expect(p.len == 1 and p.kind[0] == .milestone); //Milestones show for longer
     p.update(consts.POPUP_BIG_TIME);
     try std.testing.expect(p.len == 0);
+}
+
+test "[game_state] enemies keep their kind through removeDead, and start with its health" {
+    var e = Enemies{};
+    e.addKind(Vec2f{ 0, 0 }, .runner, consts.ENEMY_RUNNER_SPEED);
+    e.addKind(Vec2f{ 1, 0 }, .brute, consts.ENEMY_BRUTE_SPEED);
+    try std.testing.expect(e.health[0] == EnemyKind.runner.def().health and e.health[1] == EnemyKind.brute.def().health);
+    e.health[0] = 0;
+    e.removeDead();
+    try std.testing.expect(e.len == 1 and e.kind[0] == .brute and e.pos[0][0] == 1);
+}
+
+test "[game_state] corpses are added for the dead, replace the oldest when full and go once lain long enough" {
+    var e = Enemies{};
+    var c = Corpses{};
+    e.addKind(Vec2f{ 0, 0 }, .shambler, consts.ENEMY_SLOW_SPEED);
+    e.add(Vec2f{ 1, 0 });
+    e.health[0] = 0;
+    c.addDead(&e);
+    try std.testing.expect(c.len == 1 and c.kind[0] == .shambler and c.pos[0][0] == 0);
+
+    e.removeDead();
+    e.health[0] = 0; //The walker, dying over and over
+    for (0..Corpses.capacity) |_| {
+        c.update(0.01);
+        c.addDead(&e);
+    }
+    try std.testing.expect(c.len == Corpses.capacity);
+    try std.testing.expect(std.mem.indexOfScalar(EnemyKind, c.kind[0..c.len], .shambler) == null); //The oldest went
+
+    c.update(consts.CORPSE_TIME);
+    try std.testing.expect(c.len == 0);
 }
 
 test "[game_state] reset keeps rng sequence" {

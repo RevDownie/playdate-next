@@ -7,7 +7,8 @@ const consts = @import("tweak_constants.zig");
 const memory = @import("memory.zig");
 const hud_mod = @import("hud.zig");
 const maths = @import("maths.zig");
-const GameState = @import("game_state.zig").GameState;
+const state = @import("game_state.zig");
+const GameState = state.GameState;
 const Level = @import("level_loader.zig").Level;
 const Arena = memory.Arena;
 
@@ -16,9 +17,15 @@ const Vec2f = @Vector(2, f32);
 
 pub const Hud = hud_mod.Hud;
 
-/// Which bitmap table a sprite is drawn from
+/// Which bitmap table a sprite is drawn from. The zombie sheets are in EnemyKind order
 ///
-const Sheet = enum(u8) { player, enemy, env, drop };
+const Sheet = enum(u8) { player, gun, melee, runner, walker, shambler, brute, env, drop };
+
+const SHEET_FILES = [_][*:0]const u8{ "hero", "hero_gun", "hero_melee", "zombie_runner", "zombie_walker", "zombie_shambler", "zombie_brute" };
+
+fn enemySheet(kind: state.EnemyKind) Sheet {
+    return @fromBackingInt(@intCast(@backingInt(Sheet.runner) + @backingInt(kind)));
+}
 
 /// Bitmaps owned by the Playdate runtime, loaded once up front
 ///
@@ -74,7 +81,9 @@ pub const BYTES_PER_DRAW_ITEM = @sizeOf(DrawItem) + @sizeOf(SortKey);
 comptime {
     std.debug.assert(@sizeOf(DrawItem) == 8);
     //Every character and drop on screen at once must fit, leaving room for the environment objects in view
-    if ((1 + @as(usize, consts.MAX_ENEMIES) + consts.MAX_DROPS) * BYTES_PER_DRAW_ITEM > memory.HOT_SET_BUDGET * 3 / 4) @compileError("Character draw list no longer fits the L1 hot set budget");
+    //(The player is two sprites: the body and the arms holding the weapon. Corpses are drawn flat on the ground first)
+    if ((2 + @as(usize, consts.MAX_ENEMIES) + consts.MAX_DROPS) * BYTES_PER_DRAW_ITEM > memory.HOT_SET_BUDGET * 3 / 4) @compileError("Character draw list no longer fits the L1 hot set budget");
+    for (std.enums.values(state.EnemyKind)) |k| std.debug.assert(std.mem.eql(u8, @tagName(enemySheet(k)), @tagName(k)));
 }
 
 pub const RenderStats = struct {
@@ -87,8 +96,9 @@ pub fn loadAssets(playdate_api: *pd.PlaydateAPI, level_bitmap_name: [*:0]const u
     const graphics = playdate_api.graphics.*;
     var assets: Assets = undefined;
     assets.bg_bitmap = graphics.loadBitmap.?("bg", null) orelse @panic("loadAssets: Failed to load bg");
-    assets.tables[@backingInt(Sheet.player)] = graphics.loadBitmapTable.?("hero1", null) orelse @panic("loadAssets: Failed to load hero1");
-    assets.tables[@backingInt(Sheet.enemy)] = graphics.loadBitmapTable.?("enemy1", null) orelse @panic("loadAssets: Failed to load enemy1");
+    for (SHEET_FILES, 0..) |name, i| {
+        assets.tables[i] = graphics.loadBitmapTable.?(name, null) orelse @panic("loadAssets: Failed to load a character sheet");
+    }
     assets.tables[@backingInt(Sheet.env)] = graphics.loadBitmapTable.?(level_bitmap_name, null) orelse @panic("loadAssets: Failed to load level bitmaps");
     assets.tables[@backingInt(Sheet.drop)] = graphics.loadBitmapTable.?("drops", null) orelse @panic("loadAssets: Failed to load drops");
     assets.fonts = hud_mod.loadFonts(playdate_api);
@@ -113,6 +123,18 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     const bg_size = level.bg_size_pixels;
     graphics.tileBitmap.?(assets.bg_bitmap, bg_screen_pos[0] - @divTrunc(bg_size[0], 2), bg_screen_pos[1] - @divTrunc(bg_size[1], 2), bg_size[0], bg_size[1], pd.kBitmapUnflipped);
 
+    //---Fallen enemies lie flat on the ground under everything standing, so they need no depth sort
+    const corpses = &game.corpses;
+    for (corpses.pos[0..corpses.len], corpses.dir[0..corpses.len], corpses.age[0..corpses.len], corpses.kind[0..corpses.len]) |p, d, age, kind| {
+        const sheet = enemySheet(kind);
+        const frame = anim.corpseFrame(d, age);
+        const top_left = screen.toScreen(p) - sheetAnchor(sheet);
+        const size = sheetSize(sheet);
+        if (top_left[0] >= screen.width or top_left[1] >= screen.height or top_left[0] + size[0] <= 0 or top_left[1] + size[1] <= 0) continue;
+        const bitmap = graphics.getTableBitmap.?(assets.tables[@backingInt(sheet)], frame.index) orelse @panic("render: Bitmap index out of range for its table");
+        graphics.drawBitmap.?(bitmap, top_left[0], top_left[1], if (frame.flipped) pd.kBitmapFlippedX else pd.kBitmapUnflipped);
+    }
+
     //---Ring on the ground under the gun's target, below the sprites. XOR so it reads on light and dark ground
     if (game.player.target_pos) |t| {
         const feet = screen.toScreen(t);
@@ -129,13 +151,27 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
         graphics.fillEllipse.?(feet[0] - @divTrunc(w, 2), feet[1] - DROP_SHADOW_H / 2, w, DROP_SHADOW_H, 0, 360, @intFromPtr(&PATTERN_SHADOW));
     }
 
-    //---Build the draw list of visible sprites. Characters face the way they are aiming / moving
-    const max_items = 1 + game.enemies.len + game.drops.len + level.obj_world_positions.len;
+    //---Build the draw list of visible sprites. The player faces the way they aim, enemies the way they move
+    const max_items = 2 + game.enemies.len + game.drops.len + level.obj_world_positions.len;
     var list = DrawList{ .items = frame_arena.alloc(DrawItem, max_items), .keys = frame_arena.alloc(SortKey, max_items) };
 
-    list.addCharacter(screen, .player, game.player.pos, game.player.facing_dir);
-    for (game.enemies.positions(), game.enemies.velocities()) |p, v| {
-        list.addCharacter(screen, .enemy, p, v);
+    const player = &game.player;
+    if (hud.game_over) |over| {
+        list.add(screen, .player, player.pos, anim.heroDeathFrame(player.facing_dir, over.time), sheetAnchor(.player));
+    } else {
+        //The body, then the arms and weapon over it: same depth, and added straight after so it draws just after
+        const moving = player.vel[0] != 0 or player.vel[1] != 0;
+        const hurt = player.hit_flash_timer > 0;
+        list.add(screen, .player, player.pos, anim.heroFrame(player.facing_dir, moving, player.run_dist, hurt), sheetAnchor(.player));
+        const melee = game.bullets.ammo == 0;
+        const swing_progress = 1 - game.melee.swing_timer / consts.MELEE_SWING_TIME;
+        const weapon = anim.heroWeaponFrame(player.facing_dir, melee, game.melee.swing_timer > 0, swing_progress, hurt);
+        list.add(screen, if (melee) .melee else .gun, player.pos, weapon, sheetAnchor(.player));
+    }
+    const enemies = &game.enemies;
+    for (enemies.positions(), enemies.velocities(), enemies.kind[0..enemies.len], 0..) |p, v, kind, i| {
+        const sheet = enemySheet(kind);
+        list.add(screen, sheet, p, anim.enemyFrame(p, v, enemies.isBumping(i)), sheetAnchor(sheet));
     }
     //Drops bob above their point with a glint now and then, blinking for their last few seconds before they vanish.
     //The bob goes in the anchor so the depth sort still uses the point on the ground
@@ -228,11 +264,6 @@ const DrawList = struct {
     keys: []SortKey,
     len: usize = 0,
 
-    fn addCharacter(self: *DrawList, screen: Screen, sheet: Sheet, world_pos: Vec2f, facing_dir: Vec2f) void {
-        const anchor = Vec2i{ bitmap_descs.CHAR_W / 2, @as(i32, bitmap_descs.CHAR_H) - anim.walkBobAnim(world_pos) };
-        self.add(screen, sheet, world_pos, anim.bitmapFrameForDir(facing_dir), anchor);
-    }
-
     /// Add a sprite whose `anchor` (pixels from its top left) sits at `world_pos`, unless it is off screen
     ///
     fn add(self: *DrawList, screen: Screen, sheet: Sheet, world_pos: Vec2f, frame: anim.BitmapFrame, anchor: Vec2i) void {
@@ -252,10 +283,24 @@ const DrawList = struct {
 
 fn sheetSize(sheet: Sheet) Vec2i {
     return switch (sheet) {
-        .player, .enemy => .{ bitmap_descs.CHAR_W, bitmap_descs.CHAR_H },
+        .player, .gun, .melee => .{ bitmap_descs.HERO_W, bitmap_descs.HERO_H },
+        .runner, .walker, .shambler, .brute => .{ enemyCell(sheet)[0], enemyCell(sheet)[1] },
         .env => .{ bitmap_descs.ENV_OBJ_W, bitmap_descs.ENV_OBJ_H },
         .drop => .{ bitmap_descs.DROP_W, bitmap_descs.DROP_H },
     };
+}
+
+/// Pixel in a character's cell that sits on its feet
+fn sheetAnchor(sheet: Sheet) Vec2i {
+    return switch (sheet) {
+        .runner, .walker, .shambler, .brute => .{ enemyCell(sheet)[2], enemyCell(sheet)[3] },
+        else => .{ bitmap_descs.HERO_ANCHOR_X, bitmap_descs.HERO_ANCHOR_Y },
+    };
+}
+
+fn enemyCell(sheet: Sheet) [4]i32 {
+    const cell = bitmap_descs.ENEMY_CELLS[@backingInt(sheet) - @backingInt(Sheet.runner)];
+    return .{ @intCast(cell[0]), @intCast(cell[1]), @intCast(cell[2]), @intCast(cell[3]) };
 }
 
 /// 8x8 dither patterns for the fading tracer tail: 8 rows of image (1 = white) then 8 rows of mask

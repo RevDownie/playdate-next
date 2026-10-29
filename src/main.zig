@@ -204,7 +204,7 @@ fn gameUpdateWrapper(_: ?*anyopaque) callconv(.c) c_int {
     }
     const hud = renderer.Hud{
         .best_score = save.best_score,
-        .game_over = if (phase == .game_over) .{ .new_best = new_best, .can_restart = game_over_time >= consts.GAME_OVER_INPUT_DELAY } else null,
+        .game_over = if (phase == .game_over) .{ .new_best = new_best, .can_restart = game_over_time >= consts.GAME_OVER_INPUT_DELAY, .time = game_over_time } else null,
     };
     last_render_stats = renderer.render(playdate_api, &assets, &game_state, &level, hud, &frame_arena);
 

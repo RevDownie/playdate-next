@@ -2,6 +2,7 @@ const std = @import("std");
 const maths = @import("maths.zig");
 const consts = @import("tweak_constants.zig");
 const memory = @import("memory.zig");
+const state = @import("game_state.zig");
 const CollisionGrid = @import("collision_grid.zig").CollisionGrid;
 
 const Vec2f = @Vector(2, f32);
@@ -26,14 +27,14 @@ pub const Target = struct {
 /// aim, so the gun doesn't flick between two similar targets). Line of sight is only tested on the best TARGET_MAX_LOS_TESTS candidates,
 /// best first. `scores` is per frame scratch with an entry per enemy. Returns null if nothing can be seen
 ///
-pub fn findTarget(player_pos: Vec2f, move_dir: Vec2f, aim_dir: Vec2f, view_centre: Vec2f, enemy_positions: []const Vec2f, enemy_health: []const u8, grid: *const CollisionGrid, scores: []f32) ?Target {
+pub fn findTarget(player_pos: Vec2f, move_dir: Vec2f, aim_dir: Vec2f, view_centre: Vec2f, enemy_positions: []const Vec2f, enemy_health: []const u8, enemy_kinds: []const state.EnemyKind, grid: *const CollisionGrid, scores: []f32) ?Target {
     std.debug.assert(scores.len >= enemy_positions.len and enemy_health.len >= enemy_positions.len);
     const view_half = Vec2f{ consts.VIEW_HALF_WIDTH + consts.TARGET_VIEW_MARGIN, consts.VIEW_HALF_HEIGHT + consts.TARGET_VIEW_MARGIN };
     const unseen = std.math.inf(f32);
     const enemy_scores = scores[0..enemy_positions.len];
 
     //Score every enemy in view in one streamed pass
-    for (enemy_positions, enemy_health[0..enemy_positions.len], enemy_scores) |p, health, *score| {
+    for (enemy_positions, enemy_health[0..enemy_positions.len], enemy_kinds[0..enemy_positions.len], enemy_scores) |p, health, kind, *score| {
         if (@reduce(.Or, maths.abs(p - view_centre) > view_half)) {
             score.* = unseen;
             continue;
@@ -43,8 +44,9 @@ pub fn findTarget(player_pos: Vec2f, move_dir: Vec2f, aim_dir: Vec2f, view_centr
         const dir = maths.normaliseSafeMag(offset, dist, aim_dir);
         const ahead = 1 - consts.TARGET_AHEAD_WEIGHT * @max(maths.dot(dir, move_dir), 0);
         const sticky = 1 - consts.TARGET_STICKY_WEIGHT * @max(maths.dot(dir, aim_dir), 0);
-        const damage: f32 = @floatFromInt(consts.ENEMY_MAX_HEALTH - health);
-        const finish = 1 - consts.TARGET_FINISH_WEIGHT * damage / @as(f32, @floatFromInt(consts.ENEMY_MAX_HEALTH));
+        const max_health = kind.def().health;
+        const damage: f32 = @floatFromInt(max_health -| health);
+        const finish = 1 - consts.TARGET_FINISH_WEIGHT * damage / @as(f32, @floatFromInt(max_health));
         score.* = dist * ahead * finish * sticky;
     }
 
@@ -84,7 +86,8 @@ fn testFind(player_pos: Vec2f, move_dir: Vec2f, aim_dir: Vec2f, enemies: []const
 
 fn testFindHurt(player_pos: Vec2f, move_dir: Vec2f, aim_dir: Vec2f, enemies: []const Vec2f, health: []const u8, grid: *const CollisionGrid) ?Target {
     var scores: [consts.MAX_ENEMIES]f32 = undefined;
-    return findTarget(player_pos, move_dir, aim_dir, player_pos, enemies, health, grid, &scores);
+    const kinds: [consts.MAX_ENEMIES]state.EnemyKind = @splat(.walker);
+    return findTarget(player_pos, move_dir, aim_dir, player_pos, enemies, health, kinds[0..enemies.len], grid, &scores);
 }
 
 test "[auto_targetting] nearest visible enemy, or nothing" {

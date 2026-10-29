@@ -3,25 +3,15 @@ import argparse
 import os
 import shutil
 import drop_sprites
+import character_sprites
 
 """
 Simple script for running Imagemagick on source images to convert them to 1 bit images for Playdate
 """
-CHAR_W = 48
-CHAR_H = 48
+CHAR_W = character_sprites.HERO_W  # The player's cell: gameplay sizes (collision radii, melee range) derive from it
+CHAR_H = character_sprites.HERO_H
 ENV_W = 64
 ENV_H = 88
-
-"""
-Run imagemagick on all the files in the given folder
-"""
-def convertCharacterSprites(imagemagick, dir_name):
-    for f in os.listdir(dir_name):
-        input_path = os.path.join(dir_name, f)
-        output_path = os.path.join('images', f)
-        cmds = [imagemagick, input_path, "-transparent", "red", "-background", "none", "-colorspace", "gray", "-ordered-dither", "h6x6a", "-gravity", "center", "-extent", "648x648", "-resize", f"{CHAR_W}x{CHAR_H}", output_path]
-        p = subprocess.Popen(cmds, stdout=subprocess.PIPE, shell=True)
-        p.communicate()
 
 """
 Run imagemagick on all the files in the given folder
@@ -48,6 +38,8 @@ def createDescFile():
         f.write(f"pub const DROP_W: u32 = {drop_sprites.DROP_W};\n")
         f.write(f"pub const DROP_H: u32 = {drop_sprites.DROP_H};\n")
         f.write(f"pub const DROP_FRAMES_PER_KIND: u32 = {drop_sprites.FRAMES_PER_KIND};\n")
+        for line in character_sprites.desc_lines():
+            f.write(line + "\n")
         f.close();
 
 
@@ -61,9 +53,8 @@ if __name__ == "__main__":
         shutil.rmtree('images')
     os.mkdir('images')
 
-    # Characters
-    convertCharacterSprites(args.imagemagick, "raw-images\\Hero1")
-    convertCharacterSprites(args.imagemagick, "raw-images\\Enemy1")
+    # Characters (modelled and rendered to 1-bit, written directly)
+    character_sprites.save(character_sprites.build(), 'images')
 
     # Environment
     convertEnvironmentSprites(args.imagemagick, "raw-levels")
