@@ -59,11 +59,14 @@ pub fn enemyFrame(pos: Vec2f, vel: Vec2f, bumping: bool) BitmapFrame {
     return .{ .index = @intCast(f.index * bitmap_descs.ENEMY_FRAMES + frame), .flipped = f.flipped };
 }
 
-/// A gib's frame in its kind's gib sheet: its part, turned to spin frame `rot` (0..GIB_SPIN_FRAMES)
+/// A gib's frame in its kind's gib sheet: its part, turned to spin frame `rot` (0..GIB_SPIN_FRAMES), `age` seconds
+/// old: solid, then thinning through the fade frames over the last GIB_FADE_TIME
 ///
-pub fn gibFrame(part: u8, rot: f32) u8 {
+pub fn gibFrame(part: u8, rot: f32, age: f32) u8 {
     const spin: u32 = @min(@as(u32, @intFromFloat(@max(rot, 0))), bitmap_descs.GIB_SPIN_FRAMES - 1);
-    return @intCast(part * bitmap_descs.GIB_SPIN_FRAMES + spin);
+    const fade_start = consts.GIB_TIME - consts.GIB_FADE_TIME;
+    const fade: u32 = if (age < fade_start) 0 else 1 + stepFrame(age - fade_start, consts.GIB_FADE_TIME / (bitmap_descs.GIB_FADES - 1), bitmap_descs.GIB_FADES - 1);
+    return @intCast((fade * bitmap_descs.GIB_PARTS + part) * bitmap_descs.GIB_SPIN_FRAMES + spin);
 }
 
 /// A pool or spatter `age` seconds old: solid, then thinning through the fade frames over the last SPLAT_FADE_TIME.
@@ -189,13 +192,19 @@ test "[animation] walk and run cycles step with distance and wrap, death holds i
     try std.testing.expect(heroDeathFrame(down, 10).index == bitmap_descs.HERO_DEATH_START + bitmap_descs.HERO_DEATH_FRAMES - 1);
 }
 
-test "[animation] gib frames stay in their part's spin frames, splats fade through every fade frame" {
+test "[animation] gib frames stay in their part's spin frames, gibs and splats fade through every fade frame" {
+    const per_fade = bitmap_descs.GIB_PARTS * bitmap_descs.GIB_SPIN_FRAMES;
     for (0..bitmap_descs.GIB_PARTS) |part| {
         for ([_]f32{ -0.1, 0, 3.5, 7.99, 8 }) |rot| {
-            const f = gibFrame(@intCast(part), rot);
+            const f = gibFrame(@intCast(part), rot, 0);
             try std.testing.expect(f >= part * bitmap_descs.GIB_SPIN_FRAMES and f < (part + 1) * bitmap_descs.GIB_SPIN_FRAMES);
+            const last = gibFrame(@intCast(part), rot, consts.GIB_TIME - 0.01);
+            try std.testing.expect(last - f == (bitmap_descs.GIB_FADES - 1) * per_fade);
         }
     }
+    try std.testing.expect(gibFrame(0, 0, consts.GIB_TIME - consts.GIB_FADE_TIME - 0.01) == 0);
+    try std.testing.expect(gibFrame(0, 0, consts.GIB_TIME - consts.GIB_FADE_TIME + 0.01) == per_fade);
+    try std.testing.expect(gibFrame(0, 0, 99) < bitmap_descs.GIB_FADES * per_fade);
     try std.testing.expect(splatFade(0) == 0);
     try std.testing.expect(splatFade(consts.SPLAT_TIME - consts.SPLAT_FADE_TIME + 0.01) == 1);
     try std.testing.expect(splatFade(consts.SPLAT_TIME - 0.01) == bitmap_descs.SPLAT_FADES - 1);

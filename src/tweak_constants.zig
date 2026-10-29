@@ -35,7 +35,7 @@ pub const ENEMY_KINDS = [_]EnemyKindDef{
 pub const ENEMY_MIN_HIT_RADIUS: f32 = CHAR_BULLET_COLL_RADIUS * 0.8;
 
 /// Gore. A killed enemy bursts: its gibs (body parts) are thrown along the killing blow, spinning, bounce and skid, then
-/// lie on the ground for GIB_TIME (blinking out over the last GIB_BLINK_TIME). Blood droplets spray out with them and
+/// lie on the ground for GIB_TIME (fading out through the dither over the last GIB_FADE_TIME). Blood droplets spray out with them and
 /// leave a spatter where they land; the body leaves a pool where it burst, and heavy parts (head, torso) a smaller
 /// one where they first land. Non-lethal hits spray WOUND_DROPLETS out of the far side. Pools and spatters stay for
 /// SPLAT_TIME, fading out over the last SPLAT_FADE_TIME. Every store is fixed size: the newest replace the oldest
@@ -44,7 +44,7 @@ pub const MAX_DROPLETS: u8 = 128;
 pub const MAX_POOLS: u8 = 40;
 pub const MAX_SPATTERS: u8 = 160;
 pub const GIB_TIME: f32 = 3.0;
-pub const GIB_BLINK_TIME: f32 = 0.6;
+pub const GIB_FADE_TIME: f32 = 0.8;
 pub const SPLAT_TIME: f32 = 6.0;
 pub const SPLAT_FADE_TIME: f32 = 2.0;
 pub const GORE_GRAVITY: f32 = 10; //Metres per second squared (screen metres: 128px)

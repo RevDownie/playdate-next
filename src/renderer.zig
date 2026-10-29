@@ -63,7 +63,7 @@ const MELEE_ARC_DEGREES: f32 = 140;
 /// How fast combo messages float up
 const POPUP_RISE_PX_PER_SEC: f32 = 30;
 
-/// Seconds per on/off cycle of a drop or gib that is about to vanish
+/// Seconds per on/off cycle of a drop that is about to vanish
 const BLINK_PERIOD: f32 = 0.25;
 
 /// Drop shadow ellipses in pixels, a little narrower than the drawn drop
@@ -146,8 +146,8 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     drawSplats(graphics, assets, screen, .spatter, gore.spatters.pos[0..gore.spatters.len], gore.spatters.age[0..gore.spatters.len], gore.spatters.variant[0..gore.spatters.len]);
     const gibs = &gore.gibs;
     for (0..gibs.len) |i| {
-        if (gibs.height[i] > 0 or isBlinkedOut(consts.GIB_TIME - gibs.age[i], consts.GIB_BLINK_TIME)) continue;
-        drawGib(graphics, assets, screen, gibs.kind[i], gibs.part[i], gibs.rot[i], gibs.pos[i], GIB_REST_LIFT_PX);
+        if (gibs.height[i] > 0 or gibs.age[i] >= consts.GIB_TIME) continue;
+        drawGib(graphics, assets, screen, gibs, i, GIB_REST_LIFT_PX);
     }
 
     //---Ring on the ground under the gun's target, below the sprites. XOR so it reads on light and dark ground
@@ -218,7 +218,7 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
         const ground = screen.toScreen(gibs.pos[i]);
         const shadow_w: i32 = @divTrunc(@as(i32, @intCast(bitmap_descs.GIB_CELLS[@backingInt(gibs.kind[i])])), 2);
         graphics.fillEllipse.?(ground[0] - @divTrunc(shadow_w, 2), ground[1] - 2, shadow_w, 4, 0, 360, @intFromPtr(&PATTERN_SHADOW));
-        drawGib(graphics, assets, screen, gibs.kind[i], gibs.part[i], gibs.rot[i], gibs.pos[i], @intFromFloat(height * consts.METRES_TO_PIXELS));
+        drawGib(graphics, assets, screen, gibs, i, @intFromFloat(height * consts.METRES_TO_PIXELS));
     }
     const droplets = &gore.droplets;
     for (droplets.pos[0..droplets.len], droplets.height[0..droplets.len], droplets.live[0..droplets.len], 0..) |p, h, live, i| {
@@ -338,9 +338,10 @@ fn drawCentred(graphics: pd.playdate_graphics, assets: *const Assets, screen: Sc
     graphics.drawBitmap.?(bitmap, top_left[0], top_left[1], pd.kBitmapUnflipped);
 }
 
-/// A gib `lift_px` above the point on the ground under it
-fn drawGib(graphics: pd.playdate_graphics, assets: *const Assets, screen: Screen, kind: state.EnemyKind, part: state.GibPart, rot: f32, pos: Vec2f, lift_px: i32) void {
-    drawCentred(graphics, assets, screen, gibSheet(kind), anim.gibFrame(@backingInt(part), rot), screen.toScreen(pos) - Vec2i{ 0, lift_px });
+/// Gib `i`, `lift_px` above the point on the ground under it
+fn drawGib(graphics: pd.playdate_graphics, assets: *const Assets, screen: Screen, gibs: *const state.Gibs, i: usize, lift_px: i32) void {
+    const frame = anim.gibFrame(@backingInt(gibs.part[i]), gibs.rot[i], gibs.age[i]);
+    drawCentred(graphics, assets, screen, gibSheet(gibs.kind[i]), frame, screen.toScreen(gibs.pos[i]) - Vec2i{ 0, lift_px });
 }
 
 /// Pools or spatters that haven't dried up yet, fading out at the end

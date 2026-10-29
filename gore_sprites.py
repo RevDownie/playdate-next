@@ -15,8 +15,9 @@ outline) so the pieces match the zombie that burst, each with a black wet end wh
 seeded 1-bit blobs, flattened for the camera's angle, black like all the blood.
 
 Sheets (bitmap tables):
-- gibs_<kind>: GIB_PARTS (head, arm, leg, torso, chunk) x GIB_SPIN_FRAMES tumbling round, so
-  index = part * GIB_SPIN_FRAMES + frame. Cell GIB_CELLS[kind] square, the piece's centre in the middle
+- gibs_<kind>: GIB_FADES (solid, then thinning with the dither) x GIB_PARTS (head, arm, leg, torso, chunk) x
+  GIB_SPIN_FRAMES tumbling round, so index = (fade * GIB_PARTS + part) * GIB_SPIN_FRAMES + frame. Cell
+  GIB_CELLS[kind] square, the piece's centre in the middle
 - splats: pools (SPLAT_VARIANTS large then SPLAT_VARIANTS medium) x SPLAT_FADES (solid, half, quarter), so
   index = (size * SPLAT_VARIANTS + variant) * SPLAT_FADES + fade. Cell SPLAT_W x SPLAT_H, centred
 - spatters: SPLAT_VARIANTS small drops x SPLAT_FADES, cell SPATTER_W x SPATTER_H, centred
@@ -24,6 +25,7 @@ Sheets (bitmap tables):
 
 GIB_PARTS = ("head", "arm", "leg", "torso", "chunk")
 GIB_SPIN_FRAMES = 8
+GIB_FADES = 4
 GIB_CELLS = {"runner": 20, "walker": 28, "shambler": 28, "brute": 48}
 GIB_SCALE = 1.35  # Pieces are drawn bigger than they were on the body, so they read flying about
 
@@ -150,11 +152,19 @@ def splat_mask(w, h, r, seed, satellites, streaks):
     return m
 
 
+def bayer(h, w):
+    return np.tile(np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]), (h // 4 + 1, w // 4 + 1))[:h, :w]
+
+
+def gib_faded(img, fade):
+    """A gib frame thinned by the Bayer dither (3/4, 1/2, 1/4 of its pixels left), the ground showing through"""
+    return np.where(bayer(*img.shape) >= (0, 4, 8, 12)[fade], img, -1)
+
+
 def faded(mask, fade, gloss=False):
     """-1 transparent, 0 black. Fading thins the black with the Bayer dither, leaving the ground showing through"""
     h, w = mask.shape
-    thr = np.tile(np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]), (h // 4 + 1, w // 4 + 1))[:h, :w]
-    keep = mask & (thr >= (0, 8, 12)[fade])
+    keep = mask & (bayer(h, w) >= (0, 8, 12)[fade])
     img = np.where(keep, 0, -1)
     if gloss and fade == 0:
         # A wet highlight on the pool, up and left towards the light
@@ -186,7 +196,7 @@ def build(processes=None):
     specs = [(k, p, f) for k in GIB_CELLS for p in GIB_PARTS for f in range(GIB_SPIN_FRAMES)]
     with Pool(processes) as pool:
         frames = dict(pool.map(gib_frame, specs, chunksize=4))
-    sheets = {"gibs_" + k: [frames[s] for s in specs if s[0] == k] for k in GIB_CELLS}
+    sheets = {"gibs_" + k: [gib_faded(frames[s], f) for f in range(GIB_FADES) for s in specs if s[0] == k] for k in GIB_CELLS}
     sheets["splats"], sheets["spatters"] = splats()
     return sheets
 
@@ -201,6 +211,7 @@ def preview(sheets, path, scale=3):
     """Every gib frame per kind, then the splats, on light grey ground"""
     from PIL import Image
     rows = [sheets["gibs_" + k][p * GIB_SPIN_FRAMES:(p + 1) * GIB_SPIN_FRAMES] for k in GIB_CELLS for p in range(len(GIB_PARTS))]
+    rows.append([sheets["gibs_walker"][f * len(GIB_PARTS) * GIB_SPIN_FRAMES] for f in range(GIB_FADES)])  # A head fading
     rows += [sheets["splats"][i:i + 6] for i in range(0, len(sheets["splats"]), 6)]
     rows.append(sheets["spatters"])
     cw, ch = 60, 36
@@ -219,6 +230,7 @@ def desc_lines():
     """Zig constants for src/bitmap_descs.zig"""
     return [
         f"pub const GIB_PARTS: u32 = {len(GIB_PARTS)};", f"pub const GIB_SPIN_FRAMES: u32 = {GIB_SPIN_FRAMES};",
+        f"pub const GIB_FADES: u32 = {GIB_FADES};",
         "/// Per EnemyKind: the square gib cell's size (the piece's centre is in the middle)",
         "pub const GIB_CELLS = [_]u32{ " + ", ".join(str(c) for c in GIB_CELLS.values()) + " };",
         f"pub const SPLAT_W: u32 = {SPLAT_W};", f"pub const SPLAT_H: u32 = {SPLAT_H};",
