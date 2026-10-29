@@ -240,8 +240,9 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
         hud_mod.drawPopup(graphics, assets.fonts, kind, value, at[0], at[1]);
     }
 
-    if (hud.game_over) |over| {
-        hud_mod.drawGameOver(graphics, assets.fonts, game, hud, over, screen.width, screen.height);
+    //The run end screen covers the middle, so it waits for the player to finish falling down
+    if (hud.game_over != null and hud.game_over.?.time >= consts.GAME_OVER_PANEL_DELAY) {
+        hud_mod.drawGameOver(graphics, assets.fonts, game, hud, hud.game_over.?, screen.width, screen.height);
     } else {
         hud_mod.drawHud(graphics, assets.fonts, game, hud, screen.width, screen.height);
     }

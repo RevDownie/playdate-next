@@ -211,6 +211,10 @@ pub const DROP_MARKER_INSET_SIDE: i32 = 24;
 
 pub const MAX_SCORE: u64 = 9999999999;
 pub const GAME_OVER_INPUT_DELAY: f32 = 1.0; //Seconds the run end screen ignores fire before A/B starts the next run
+pub const GAME_OVER_PANEL_DELAY: f32 = 0.8; //Seconds the player is seen falling down before the run end panel covers them
+comptime {
+    if (GAME_OVER_PANEL_DELAY > GAME_OVER_INPUT_DELAY) @compileError("The run end panel must show before A/B can restart");
+}
 
 /// Longest step the simulation takes in one frame. Larger gaps (e.g. returning from the system menu) are clamped
 /// so enemies and bullets don't teleport
