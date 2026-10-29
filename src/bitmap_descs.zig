@@ -19,8 +19,17 @@ pub const HERO_DEATH_FRAMES: u32 = 4;
 pub const GUN_FRAMES: u32 = 2;
 pub const MELEE_FRAMES: u32 = 3;
 pub const ENEMY_FACING_STEP: u32 = 18;
-pub const ENEMY_FRAMES: u32 = 8;
+pub const ENEMY_FRAMES: u32 = 5;
 pub const ENEMY_WALK_FRAMES: u32 = 4;
-pub const ENEMY_DEATH_FRAMES: u32 = 3;
 /// Per EnemyKind: cell width, height and the feet's pixel in it
 pub const ENEMY_CELLS = [_][4]u32{ .{ 32, 32, 16, 29 }, .{ 48, 48, 24, 43 }, .{ 48, 48, 24, 43 }, .{ 64, 64, 32, 58 } };
+pub const GIB_PARTS: u32 = 5;
+pub const GIB_SPIN_FRAMES: u32 = 8;
+/// Per EnemyKind: the square gib cell's size (the piece's centre is in the middle)
+pub const GIB_CELLS = [_]u32{ 20, 28, 28, 48 };
+pub const SPLAT_W: u32 = 56;
+pub const SPLAT_H: u32 = 32;
+pub const SPATTER_W: u32 = 12;
+pub const SPATTER_H: u32 = 8;
+pub const SPLAT_VARIANTS: u32 = 4;
+pub const SPLAT_FADES: u32 = 3;

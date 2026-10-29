@@ -17,14 +17,19 @@ const Vec2f = @Vector(2, f32);
 
 pub const Hud = hud_mod.Hud;
 
-/// Which bitmap table a sprite is drawn from. The zombie sheets are in EnemyKind order
+/// Which bitmap table a sprite is drawn from. The zombie and gib sheets are in EnemyKind order
 ///
-const Sheet = enum(u8) { player, gun, melee, runner, walker, shambler, brute, env, drop };
+const Sheet = enum(u8) { player, gun, melee, runner, walker, shambler, brute, env, drop, gibs_runner, gibs_walker, gibs_shambler, gibs_brute, pool, spatter };
 
 const SHEET_FILES = [_][*:0]const u8{ "hero", "hero_gun", "hero_melee", "zombie_runner", "zombie_walker", "zombie_shambler", "zombie_brute" };
+const GORE_SHEET_FILES = [_][*:0]const u8{ "gibs_runner", "gibs_walker", "gibs_shambler", "gibs_brute", "splats", "spatters" }; //From Sheet.gibs_runner on
 
 fn enemySheet(kind: state.EnemyKind) Sheet {
     return @fromBackingInt(@intCast(@backingInt(Sheet.runner) + @backingInt(kind)));
+}
+
+fn gibSheet(kind: state.EnemyKind) Sheet {
+    return @fromBackingInt(@intCast(@backingInt(Sheet.gibs_runner) + @backingInt(kind)));
 }
 
 /// Bitmaps owned by the Playdate runtime, loaded once up front
@@ -58,20 +63,23 @@ const MELEE_ARC_DEGREES: f32 = 140;
 /// How fast combo messages float up
 const POPUP_RISE_PX_PER_SEC: f32 = 30;
 
-/// Seconds per on/off cycle of a drop that is about to vanish
-const DROP_BLINK_PERIOD: f32 = 0.25;
+/// Seconds per on/off cycle of a drop or gib that is about to vanish
+const BLINK_PERIOD: f32 = 0.25;
 
 /// Drop shadow ellipses in pixels, a little narrower than the drawn drop
 const DROP_SHADOW_W = 30;
 const DROP_SHADOW_W_LARGE = 44;
 const DROP_SHADOW_H = 8;
 
-/// A drop about to vanish blinks: hidden every other half period. Integer half periods: a float @mod would
-/// call libc's fmodf, which drags newlib's malloc into the device link
+/// Something about to vanish (`lifetime` seconds left) blinks for its last `blink_time`: hidden every other half
+/// period. Integer half periods: a float @mod would call libc's fmodf, which drags newlib's malloc into the device link
 ///
-fn isBlinkedOut(lifetime: f32) bool {
-    return lifetime < consts.DROP_BLINK_TIME and @as(u32, @intFromFloat(@max(lifetime, 0) / (DROP_BLINK_PERIOD / 2))) % 2 == 0;
+fn isBlinkedOut(lifetime: f32, blink_time: f32) bool {
+    return lifetime < blink_time and @as(u32, @intFromFloat(@max(lifetime, 0) / (BLINK_PERIOD / 2))) % 2 == 0;
 }
+
+/// Pixels above its centre a gib lying on the ground is drawn, so it rests on the ground rather than in it
+const GIB_REST_LIFT_PX = 2;
 
 /// Size in pixels of the ring drawn at the gun's target's feet
 const TARGET_RING_W = 30;
@@ -81,9 +89,14 @@ pub const BYTES_PER_DRAW_ITEM = @sizeOf(DrawItem) + @sizeOf(SortKey);
 comptime {
     std.debug.assert(@sizeOf(DrawItem) == 8);
     //Every character and drop on screen at once must fit, leaving room for the environment objects in view
-    //(The player is two sprites: the body and the arms holding the weapon. Corpses are drawn flat on the ground first)
+    //(The player is two sprites: the body and the arms holding the weapon. Gore is drawn outside the list: on the
+    //ground first, and anything in the air over the sprites)
     if ((2 + @as(usize, consts.MAX_ENEMIES) + consts.MAX_DROPS) * BYTES_PER_DRAW_ITEM > memory.HOT_SET_BUDGET * 3 / 4) @compileError("Character draw list no longer fits the L1 hot set budget");
-    for (std.enums.values(state.EnemyKind)) |k| std.debug.assert(std.mem.eql(u8, @tagName(enemySheet(k)), @tagName(k)));
+    for (std.enums.values(state.EnemyKind)) |k| {
+        std.debug.assert(std.mem.eql(u8, @tagName(enemySheet(k)), @tagName(k)));
+        std.debug.assert(std.mem.eql(u8, @tagName(gibSheet(k)), "gibs_" ++ @tagName(k)));
+    }
+    std.debug.assert(@backingInt(Sheet.gibs_runner) + GORE_SHEET_FILES.len == std.enums.values(Sheet).len);
 }
 
 pub const RenderStats = struct {
@@ -101,6 +114,9 @@ pub fn loadAssets(playdate_api: *pd.PlaydateAPI, level_bitmap_name: [*:0]const u
     }
     assets.tables[@backingInt(Sheet.env)] = graphics.loadBitmapTable.?(level_bitmap_name, null) orelse @panic("loadAssets: Failed to load level bitmaps");
     assets.tables[@backingInt(Sheet.drop)] = graphics.loadBitmapTable.?("drops", null) orelse @panic("loadAssets: Failed to load drops");
+    for (GORE_SHEET_FILES, @backingInt(Sheet.gibs_runner)..) |name, i| {
+        assets.tables[i] = graphics.loadBitmapTable.?(name, null) orelse @panic("loadAssets: Failed to load a gore sheet");
+    }
     assets.fonts = hud_mod.loadFonts(playdate_api);
     return assets;
 }
@@ -123,16 +139,15 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     const bg_size = level.bg_size_pixels;
     graphics.tileBitmap.?(assets.bg_bitmap, bg_screen_pos[0] - @divTrunc(bg_size[0], 2), bg_screen_pos[1] - @divTrunc(bg_size[1], 2), bg_size[0], bg_size[1], pd.kBitmapUnflipped);
 
-    //---Fallen enemies lie flat on the ground under everything standing, so they need no depth sort
-    const corpses = &game.corpses;
-    for (corpses.pos[0..corpses.len], corpses.dir[0..corpses.len], corpses.age[0..corpses.len], corpses.kind[0..corpses.len]) |p, d, age, kind| {
-        const sheet = enemySheet(kind);
-        const frame = anim.corpseFrame(d, age);
-        const top_left = screen.toScreen(p) - sheetAnchor(sheet);
-        const size = sheetSize(sheet);
-        if (top_left[0] >= screen.width or top_left[1] >= screen.height or top_left[0] + size[0] <= 0 or top_left[1] + size[1] <= 0) continue;
-        const bitmap = graphics.getTableBitmap.?(assets.tables[@backingInt(sheet)], frame.index) orelse @panic("render: Bitmap index out of range for its table");
-        graphics.drawBitmap.?(bitmap, top_left[0], top_left[1], if (frame.flipped) pd.kBitmapFlippedX else pd.kBitmapUnflipped);
+    //---Gore on the ground under everything standing, so it needs no depth sort: blood pools, spatters, then the
+    //body parts lying in them
+    const gore = &game.gore;
+    drawSplats(graphics, assets, screen, .pool, gore.pools.pos[0..gore.pools.len], gore.pools.age[0..gore.pools.len], gore.pools.variant[0..gore.pools.len]);
+    drawSplats(graphics, assets, screen, .spatter, gore.spatters.pos[0..gore.spatters.len], gore.spatters.age[0..gore.spatters.len], gore.spatters.variant[0..gore.spatters.len]);
+    const gibs = &gore.gibs;
+    for (0..gibs.len) |i| {
+        if (gibs.height[i] > 0 or isBlinkedOut(consts.GIB_TIME - gibs.age[i], consts.GIB_BLINK_TIME)) continue;
+        drawGib(graphics, assets, screen, gibs.kind[i], gibs.part[i], gibs.rot[i], gibs.pos[i], GIB_REST_LIFT_PX);
     }
 
     //---Ring on the ground under the gun's target, below the sprites. XOR so it reads on light and dark ground
@@ -144,7 +159,7 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     //---Shadows under the drops, on the ground below their bounce (smaller when higher)
     const drops = &game.drops;
     for (drops.pos[0..drops.len], drops.kind[0..drops.len], drops.lifetime[0..drops.len]) |p, k, l| {
-        if (isBlinkedOut(l)) continue;
+        if (isBlinkedOut(l, consts.DROP_BLINK_TIME)) continue;
         const feet = screen.toScreen(p);
         const w: i32 = @as(i32, if (k.isLarge()) DROP_SHADOW_W_LARGE else DROP_SHADOW_W) - 2 * anim.dropBounce(consts.DROP_LIFETIME - l);
         if (feet[0] + w < 0 or feet[0] - w > screen.width or feet[1] < -DROP_SHADOW_H or feet[1] > screen.height + DROP_SHADOW_H) continue;
@@ -176,7 +191,7 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     //Drops bob above their point with a glint now and then, blinking for their last few seconds before they vanish.
     //The bob goes in the anchor so the depth sort still uses the point on the ground
     for (drops.pos[0..drops.len], drops.kind[0..drops.len], drops.lifetime[0..drops.len], drops.point[0..drops.len]) |p, k, l, point| {
-        if (isBlinkedOut(l)) continue;
+        if (isBlinkedOut(l, consts.DROP_BLINK_TIME)) continue;
         const age = consts.DROP_LIFETIME - l;
         const frame = @as(u32, @backingInt(k)) * bitmap_descs.DROP_FRAMES_PER_KIND + anim.dropSheenFrame(age, point);
         const anchor = Vec2i{ bitmap_descs.DROP_W / 2, @as(i32, bitmap_descs.DROP_H) - 1 + anim.dropBounce(age) };
@@ -193,6 +208,26 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
         const item = list.items[@as(u16, @truncate(key))];
         const bitmap = graphics.getTableBitmap.?(assets.tables[@backingInt(item.sheet)], item.frame) orelse @panic("render: Bitmap index out of range for its table");
         graphics.drawBitmap.?(bitmap, item.x, item.y, if (item.flipped) pd.kBitmapFlippedX else pd.kBitmapUnflipped);
+    }
+
+    //---Gore in the air flies over everything, over a small shadow on the ground: gibs, then droplets of blood (black
+    //with a white edge so they show over the zombies too)
+    for (0..gibs.len) |i| {
+        const height = gibs.height[i];
+        if (height <= 0) continue;
+        const ground = screen.toScreen(gibs.pos[i]);
+        const shadow_w: i32 = @divTrunc(@as(i32, @intCast(bitmap_descs.GIB_CELLS[@backingInt(gibs.kind[i])])), 2);
+        graphics.fillEllipse.?(ground[0] - @divTrunc(shadow_w, 2), ground[1] - 2, shadow_w, 4, 0, 360, @intFromPtr(&PATTERN_SHADOW));
+        drawGib(graphics, assets, screen, gibs.kind[i], gibs.part[i], gibs.rot[i], gibs.pos[i], @intFromFloat(height * consts.METRES_TO_PIXELS));
+    }
+    const droplets = &gore.droplets;
+    for (droplets.pos[0..droplets.len], droplets.height[0..droplets.len], droplets.live[0..droplets.len], 0..) |p, h, live, i| {
+        if (!live) continue;
+        const at = screen.toScreen(p) - Vec2i{ 0, @intFromFloat(h * consts.METRES_TO_PIXELS) };
+        if (at[0] < -4 or at[0] > screen.width + 4 or at[1] < -4 or at[1] > screen.height + 4) continue;
+        const size: i32 = if (i % 3 == 0) 3 else 2; //A few bigger gobs
+        graphics.fillRect.?(at[0] - 1, at[1] - 1, size + 2, size + 2, pd.kColorWhite);
+        graphics.fillRect.?(at[0], at[1], size, size, pd.kColorBlack);
     }
 
     //---Bullets are comet tracers on top, at gun height. TODO: Interleave bullets
@@ -225,7 +260,7 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     //---Off screen drops are marked at the edge, pointing the way
     if (hud.game_over == null) {
         for (drops.pos[0..drops.len], drops.kind[0..drops.len], drops.lifetime[0..drops.len]) |p, k, l| {
-            if (isBlinkedOut(l)) continue;
+            if (isBlinkedOut(l, consts.DROP_BLINK_TIME)) continue;
             const marker = graphics_coords.offScreenMarker(screen.toScreen(p), screen.width, screen.height, consts.DROP_MARKER_INSET_SIDE, consts.DROP_MARKER_INSET_TOP, consts.DROP_MARKER_INSET_SIDE, consts.DROP_MARKER_INSET_BOTTOM) orelse continue;
             hud_mod.drawDropMarker(graphics, k, marker.pos[0], marker.pos[1], marker.dir);
         }
@@ -288,7 +323,32 @@ fn sheetSize(sheet: Sheet) Vec2i {
         .runner, .walker, .shambler, .brute => .{ enemyCell(sheet)[0], enemyCell(sheet)[1] },
         .env => .{ bitmap_descs.ENV_OBJ_W, bitmap_descs.ENV_OBJ_H },
         .drop => .{ bitmap_descs.DROP_W, bitmap_descs.DROP_H },
+        .gibs_runner, .gibs_walker, .gibs_shambler, .gibs_brute => @splat(@intCast(bitmap_descs.GIB_CELLS[@backingInt(sheet) - @backingInt(Sheet.gibs_runner)])),
+        .pool => .{ bitmap_descs.SPLAT_W, bitmap_descs.SPLAT_H },
+        .spatter => .{ bitmap_descs.SPATTER_W, bitmap_descs.SPATTER_H },
     };
+}
+
+/// Draw a sheet's frame with its `centre` pixel at `at`, unless it is off screen
+fn drawCentred(graphics: pd.playdate_graphics, assets: *const Assets, screen: Screen, sheet: Sheet, frame: u8, at: Vec2i) void {
+    const size = sheetSize(sheet);
+    const top_left = at - @divTrunc(size, Vec2i{ 2, 2 });
+    if (top_left[0] >= screen.width or top_left[1] >= screen.height or top_left[0] + size[0] <= 0 or top_left[1] + size[1] <= 0) return;
+    const bitmap = graphics.getTableBitmap.?(assets.tables[@backingInt(sheet)], frame) orelse @panic("render: Bitmap index out of range for its table");
+    graphics.drawBitmap.?(bitmap, top_left[0], top_left[1], pd.kBitmapUnflipped);
+}
+
+/// A gib `lift_px` above the point on the ground under it
+fn drawGib(graphics: pd.playdate_graphics, assets: *const Assets, screen: Screen, kind: state.EnemyKind, part: state.GibPart, rot: f32, pos: Vec2f, lift_px: i32) void {
+    drawCentred(graphics, assets, screen, gibSheet(kind), anim.gibFrame(@backingInt(part), rot), screen.toScreen(pos) - Vec2i{ 0, lift_px });
+}
+
+/// Pools or spatters that haven't dried up yet, fading out at the end
+fn drawSplats(graphics: pd.playdate_graphics, assets: *const Assets, screen: Screen, sheet: Sheet, pos: []const Vec2f, age: []const f32, variant: []const u8) void {
+    for (pos, age, variant) |p, a, v| {
+        if (a >= consts.SPLAT_TIME) continue;
+        drawCentred(graphics, assets, screen, sheet, @intCast(v * bitmap_descs.SPLAT_FADES + anim.splatFade(a)), screen.toScreen(p));
+    }
 }
 
 /// Pixel in a character's cell that sits on its feet

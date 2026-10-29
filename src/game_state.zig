@@ -265,52 +265,132 @@ pub const Popups = struct {
     }
 };
 
-/// Killed enemies falling down and lying there for a moment (drawn only, nothing collides with them). Fixed
-/// capacity: when full the newest replace the oldest
+/// A hit that landed on an enemy (see combat_system.applyHits), for the gore: where, which way the blow went, and
+/// whether it killed
 ///
-pub const Corpses = struct {
-    pub const capacity = consts.MAX_CORPSES;
+pub const Impact = struct {
+    pos: Vec2f,
+    dir: Vec2f,
+    kind: EnemyKind,
+    killed: bool,
+};
+
+// Gore (see gore_system and the GIB_*/SPLAT_* constants). Purely visual: nothing collides with it. Each store is a
+// ring: `next` is the slot the next one is written to, overwriting the oldest when full, and `len` how many slots
+// have been used. Entries are never removed, they just expire, so drawing and updating skip the expired ones
+
+/// Advance a ring store's write slot, returning the slot to write
+fn ringSlot(len: *u8, next: *u8, capacity: u8) u8 {
+    const i = next.*;
+    next.* = if (i + 1 == capacity) 0 else i + 1;
+    len.* = @max(len.*, i + 1);
+    return i;
+}
+
+pub const GibPart = enum(u8) { head, arm, leg, torso, chunk }; //In the gib sheets' order
+
+/// Body parts flying about, then lying on the ground until `age` reaches GIB_TIME
+///
+pub const Gibs = struct {
+    pub const capacity = consts.MAX_GIBS;
 
     len: u8 = 0,
+    next: u8 = 0,
+    pos: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined, //On the ground under it
+    vel: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined, //Along the ground
+    height: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined, //Metres above the ground
+    lift: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined, //Upward speed
+    spin: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined, //Spin frames per second
+    rot: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined, //Spin frame, 0..GIB_SPIN_FRAMES
+    age: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined,
+    kind: [capacity]EnemyKind align(memory.CACHE_LINE_SIZE) = undefined, //Whose part it was: which gib sheet
+    part: [capacity]GibPart align(memory.CACHE_LINE_SIZE) = undefined,
+    resting: [capacity]bool align(memory.CACHE_LINE_SIZE) = undefined, //Stopped on the ground
+    landed: [capacity]bool align(memory.CACHE_LINE_SIZE) = undefined, //Has hit the ground (heavy parts splash once)
+
+    pub fn add(self: *Gibs, pos: Vec2f, height: f32, vel: Vec2f, lift: f32, spin: f32, kind: EnemyKind, part: GibPart) void {
+        const i = ringSlot(&self.len, &self.next, capacity);
+        self.pos[i] = pos;
+        self.vel[i] = vel;
+        self.height[i] = height;
+        self.lift[i] = lift;
+        self.spin[i] = spin;
+        self.rot[i] = 0;
+        self.age[i] = 0;
+        self.kind[i] = kind;
+        self.part[i] = part;
+        self.resting[i] = false;
+        self.landed[i] = false;
+    }
+
+    pub fn liveCount(self: *const Gibs) u32 {
+        var n: u32 = 0;
+        for (self.age[0..self.len]) |a| n += @intFromBool(a < consts.GIB_TIME);
+        return n;
+    }
+};
+
+/// Drops of blood in flight; each leaves a spatter where it lands
+///
+pub const Droplets = struct {
+    pub const capacity = consts.MAX_DROPLETS;
+
+    len: u8 = 0,
+    next: u8 = 0,
     pos: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined,
-    dir: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined, //The way it was facing when it fell
-    age: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined, //Seconds since it died
-    kind: [capacity]EnemyKind align(memory.CACHE_LINE_SIZE) = undefined,
+    vel: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined,
+    height: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined,
+    lift: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined,
+    live: [capacity]bool align(memory.CACHE_LINE_SIZE) = undefined, //Still in the air
 
-    /// Add a corpse for every enemy flagged dead (health 0). Call before `Enemies.removeDead`
-    pub fn addDead(self: *Corpses, enemies: *const Enemies) void {
-        for (0..enemies.len) |e| {
-            if (enemies.health[e] > 0) continue;
-            var i = self.len;
-            if (i < capacity) {
-                self.len += 1;
-            } else {
-                i = @intCast(std.mem.indexOfMax(f32, &self.age));
-            }
-            self.pos[i] = enemies.pos[e];
-            self.dir[i] = enemies.vel[e];
+    pub fn add(self: *Droplets, pos: Vec2f, height: f32, vel: Vec2f, lift: f32) void {
+        const i = ringSlot(&self.len, &self.next, capacity);
+        self.pos[i] = pos;
+        self.vel[i] = vel;
+        self.height[i] = height;
+        self.lift[i] = lift;
+        self.live[i] = true;
+    }
+
+    pub fn liveCount(self: *const Droplets) u32 {
+        var n: u32 = 0;
+        for (self.live[0..self.len]) |l| n += @intFromBool(l);
+        return n;
+    }
+};
+
+/// Blood on the ground until `age` reaches SPLAT_TIME. `variant` picks the sprite (for pools: large ones, then medium)
+///
+pub fn Splats(comptime cap: u8) type {
+    return struct {
+        pub const capacity = cap;
+
+        len: u8 = 0,
+        next: u8 = 0,
+        pos: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined,
+        age: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined,
+        variant: [capacity]u8 align(memory.CACHE_LINE_SIZE) = undefined,
+
+        pub fn add(self: *@This(), pos: Vec2f, variant: u8) void {
+            const i = ringSlot(&self.len, &self.next, capacity);
+            self.pos[i] = pos;
             self.age[i] = 0;
-            self.kind[i] = enemies.kind[e];
+            self.variant[i] = variant;
         }
-    }
 
-    /// Age them, then swap-remove the ones that have lain there long enough
-    pub fn update(self: *Corpses, dt: f32) void {
-        for (self.age[0..self.len]) |*a| a.* += dt;
-        var i: u8 = 0;
-        while (i < self.len) {
-            if (self.age[i] < consts.CORPSE_TIME) {
-                i += 1;
-                continue;
-            }
-            const last = self.len - 1;
-            self.pos[i] = self.pos[last];
-            self.dir[i] = self.dir[last];
-            self.age[i] = self.age[last];
-            self.kind[i] = self.kind[last];
-            self.len = last;
+        pub fn liveCount(self: *const @This()) u32 {
+            var n: u32 = 0;
+            for (self.age[0..self.len]) |a| n += @intFromBool(a < consts.SPLAT_TIME);
+            return n;
         }
-    }
+    };
+}
+
+pub const Gore = struct {
+    gibs: Gibs = .{},
+    droplets: Droplets = .{},
+    pools: Splats(consts.MAX_POOLS) = .{}, //Where bodies burst and heavy parts landed
+    spatters: Splats(consts.MAX_SPATTERS) = .{}, //Where droplets landed
 };
 
 pub const WavePhase = enum(u8) { lull, wave };
@@ -409,21 +489,23 @@ pub const GameState = struct {
     bullets: Bullets = .{},
     drops: Drops = .{},
     popups: Popups = .{},
-    corpses: Corpses = .{},
+    gore: Gore = .{},
     trigger: Trigger = .{},
     melee: Melee = .{},
     spawner: Spawner = .{},
     camera_pos: Vec2f = @splat(0),
     run_time: f32 = 0, //Seconds survived this run
     rng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(consts.RNG_SEED), //Not reset between runs
+    gore_rng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(consts.RNG_SEED + 1), //Gore only, so it never changes the gameplay rolls
     invincible: bool = false, //Debug: enemies can't hurt the player (set from the debug menu). Not reset between runs
 
     /// Back to the start of a run, keeping the random sequence going and the debug settings
     ///
     pub fn reset(self: *GameState) void {
         const rng = self.rng;
+        const gore_rng = self.gore_rng;
         const invincible = self.invincible;
-        self.* = .{ .rng = rng, .invincible = invincible };
+        self.* = .{ .rng = rng, .gore_rng = gore_rng, .invincible = invincible };
     }
 };
 
@@ -509,26 +591,16 @@ test "[game_state] enemies keep their kind through removeDead, and start with it
     try std.testing.expect(e.len == 1 and e.kind[0] == .brute and e.pos[0][0] == 1);
 }
 
-test "[game_state] corpses are added for the dead, replace the oldest when full and go once lain long enough" {
-    var e = Enemies{};
-    var c = Corpses{};
-    e.addKind(Vec2f{ 0, 0 }, .shambler, consts.ENEMY_SLOW_SPEED);
-    e.add(Vec2f{ 1, 0 });
-    e.health[0] = 0;
-    c.addDead(&e);
-    try std.testing.expect(c.len == 1 and c.kind[0] == .shambler and c.pos[0][0] == 0);
+test "[game_state] gore stores are rings: when full the newest replace the oldest" {
+    var s = Splats(4){};
+    for (0..4) |i| s.add(Vec2f{ @floatFromInt(i), 0 }, 0);
+    try std.testing.expect(s.len == 4 and s.next == 0);
+    s.add(Vec2f{ 9, 0 }, 1);
+    try std.testing.expect(s.len == 4 and s.pos[0][0] == 9 and s.pos[1][0] == 1); //The oldest went
 
-    e.removeDead();
-    e.health[0] = 0; //The walker, dying over and over
-    for (0..Corpses.capacity) |_| {
-        c.update(0.01);
-        c.addDead(&e);
-    }
-    try std.testing.expect(c.len == Corpses.capacity);
-    try std.testing.expect(std.mem.indexOfScalar(EnemyKind, c.kind[0..c.len], .shambler) == null); //The oldest went
-
-    c.update(consts.CORPSE_TIME);
-    try std.testing.expect(c.len == 0);
+    var g = Gibs{};
+    for (0..Gibs.capacity + 3) |_| g.add(@splat(0), 0, @splat(0), 0, 0, .walker, .head);
+    try std.testing.expect(g.len == Gibs.capacity and g.next == 3 and g.liveCount() == Gibs.capacity);
 }
 
 test "[game_state] reset keeps rng sequence" {

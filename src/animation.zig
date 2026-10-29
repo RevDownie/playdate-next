@@ -59,12 +59,20 @@ pub fn enemyFrame(pos: Vec2f, vel: Vec2f, bumping: bool) BitmapFrame {
     return .{ .index = @intCast(f.index * bitmap_descs.ENEMY_FRAMES + frame), .flipped = f.flipped };
 }
 
-/// A killed enemy `age` seconds after it died: falling down over CORPSE_FALL_TIME, then lying still
+/// A gib's frame in its kind's gib sheet: its part, turned to spin frame `rot` (0..GIB_SPIN_FRAMES)
 ///
-pub fn corpseFrame(dir: Vec2f, age: f32) BitmapFrame {
-    const f = facing(dir, bitmap_descs.ENEMY_FACING_STEP);
-    const frame = stepFrame(age, consts.CORPSE_FALL_TIME / bitmap_descs.ENEMY_DEATH_FRAMES, bitmap_descs.ENEMY_DEATH_FRAMES);
-    return .{ .index = @intCast(f.index * bitmap_descs.ENEMY_FRAMES + bitmap_descs.ENEMY_WALK_FRAMES + 1 + frame), .flipped = f.flipped };
+pub fn gibFrame(part: u8, rot: f32) u8 {
+    const spin: u32 = @min(@as(u32, @intFromFloat(@max(rot, 0))), bitmap_descs.GIB_SPIN_FRAMES - 1);
+    return @intCast(part * bitmap_descs.GIB_SPIN_FRAMES + spin);
+}
+
+/// A pool or spatter `age` seconds old: solid, then thinning through the fade frames over the last SPLAT_FADE_TIME.
+/// Its frame is `variant * SPLAT_FADES + splatFade(age)`
+///
+pub fn splatFade(age: f32) u8 {
+    const fade_start = consts.SPLAT_TIME - consts.SPLAT_FADE_TIME;
+    if (age < fade_start) return 0;
+    return @intCast(1 + stepFrame(age - fade_start, consts.SPLAT_FADE_TIME / (bitmap_descs.SPLAT_FADES - 1), bitmap_descs.SPLAT_FADES - 1));
 }
 
 /// Which of `frames` a loop is on, `dist` along it at `cycle` per loop. Floors into an integer and wraps with an
@@ -162,7 +170,6 @@ test "[animation] character frames stay inside their sheets" {
         for ([_]f32{ 0, 0.1, 99 }) |t| {
             const death = heroDeathFrame(dir, t).index;
             try std.testing.expect(death >= bitmap_descs.HERO_DEATH_START and death < hero_frames);
-            try std.testing.expect(corpseFrame(dir, t).index < enemy_frames);
         }
     }
     try std.testing.expect(hero_frames <= 256 and enemy_frames <= 256); //u8 frame indices
@@ -179,9 +186,20 @@ test "[animation] walk and run cycles step with distance and wrap, death holds i
     for (seen) |s| try std.testing.expect(s);
     try std.testing.expect(enemyFrame(@splat(0), down, true).index == bitmap_descs.ENEMY_WALK_FRAMES); //Knocked back
     try std.testing.expect(heroFrame(down, false, 1.3, false).index == 0); //Standing still
-    try std.testing.expect(corpseFrame(down, 0).index == bitmap_descs.ENEMY_WALK_FRAMES + 1);
-    try std.testing.expect(corpseFrame(down, 10).index == bitmap_descs.ENEMY_FRAMES - 1);
     try std.testing.expect(heroDeathFrame(down, 10).index == bitmap_descs.HERO_DEATH_START + bitmap_descs.HERO_DEATH_FRAMES - 1);
+}
+
+test "[animation] gib frames stay in their part's spin frames, splats fade through every fade frame" {
+    for (0..bitmap_descs.GIB_PARTS) |part| {
+        for ([_]f32{ -0.1, 0, 3.5, 7.99, 8 }) |rot| {
+            const f = gibFrame(@intCast(part), rot);
+            try std.testing.expect(f >= part * bitmap_descs.GIB_SPIN_FRAMES and f < (part + 1) * bitmap_descs.GIB_SPIN_FRAMES);
+        }
+    }
+    try std.testing.expect(splatFade(0) == 0);
+    try std.testing.expect(splatFade(consts.SPLAT_TIME - consts.SPLAT_FADE_TIME + 0.01) == 1);
+    try std.testing.expect(splatFade(consts.SPLAT_TIME - 0.01) == bitmap_descs.SPLAT_FADES - 1);
+    try std.testing.expect(splatFade(99) == bitmap_descs.SPLAT_FADES - 1);
 }
 
 test "[animation] bullet tracers start at the muzzle and converge on the bullet" {

@@ -23,20 +23,47 @@ pub const ENEMY_MAX_SPEED: f32 = ENEMY_RUNNER_SPEED; //The fastest any enemy mov
 
 /// Per kind, in game_state.EnemyKind order. `hit_radius` is the bullet hit circle (drawn size: runners are small,
 /// brutes big), `bump` how far a non-lethal hit knocks it back (0: it doesn't flinch, so fire can't hold it off)
-pub const EnemyKindDef = struct { health: u8, hit_radius: f32, bump: f32 };
+/// Killed, it bursts into its head, arms, legs and torso plus `chunks` more lumps of meat, `droplets` of blood and a
+/// pool, from `burst_height` metres above its feet
+pub const EnemyKindDef = struct { health: u8, hit_radius: f32, bump: f32, chunks: u8, droplets: u8, burst_height: f32 };
 pub const ENEMY_KINDS = [_]EnemyKindDef{
-    .{ .health = 50, .hit_radius = CHAR_BULLET_COLL_RADIUS * 0.8, .bump = BUMP_DISTANCE }, //Runner: one hit
-    .{ .health = 100, .hit_radius = CHAR_BULLET_COLL_RADIUS, .bump = BUMP_DISTANCE }, //Walker: two
-    .{ .health = 150, .hit_radius = CHAR_BULLET_COLL_RADIUS, .bump = BUMP_DISTANCE_SMALL }, //Shambler: three
-    .{ .health = 250, .hit_radius = CHAR_BULLET_COLL_RADIUS * 1.5, .bump = 0 }, //Brute: five
+    .{ .health = 50, .hit_radius = CHAR_BULLET_COLL_RADIUS * 0.8, .bump = BUMP_DISTANCE, .chunks = 1, .droplets = 14, .burst_height = 0.1 }, //Runner: one hit
+    .{ .health = 100, .hit_radius = CHAR_BULLET_COLL_RADIUS, .bump = BUMP_DISTANCE, .chunks = 2, .droplets = 20, .burst_height = 0.15 }, //Walker: two
+    .{ .health = 150, .hit_radius = CHAR_BULLET_COLL_RADIUS, .bump = BUMP_DISTANCE_SMALL, .chunks = 3, .droplets = 22, .burst_height = 0.15 }, //Shambler: three
+    .{ .health = 250, .hit_radius = CHAR_BULLET_COLL_RADIUS * 1.5, .bump = 0, .chunks = 6, .droplets = 36, .burst_height = 0.22 }, //Brute: five
 };
 pub const ENEMY_MIN_HIT_RADIUS: f32 = CHAR_BULLET_COLL_RADIUS * 0.8;
 
-/// Killed enemies fall down (the death frames over CORPSE_FALL_TIME), lie there a moment, then are gone. The newest
-/// replace the oldest when there are more than MAX_CORPSES
-pub const MAX_CORPSES: u8 = 24;
-pub const CORPSE_FALL_TIME: f32 = 0.3;
-pub const CORPSE_TIME: f32 = 1.5;
+/// Gore. A killed enemy bursts: its gibs (body parts) are thrown along the killing blow, spinning, bounce and skid, then
+/// lie on the ground for GIB_TIME (blinking out over the last GIB_BLINK_TIME). Blood droplets spray out with them and
+/// leave a spatter where they land; the body leaves a pool where it burst, and heavy parts (head, torso) a smaller
+/// one where they first land. Non-lethal hits spray WOUND_DROPLETS out of the far side. Pools and spatters stay for
+/// SPLAT_TIME, fading out over the last SPLAT_FADE_TIME. Every store is fixed size: the newest replace the oldest
+pub const MAX_GIBS: u8 = 96;
+pub const MAX_DROPLETS: u8 = 128;
+pub const MAX_POOLS: u8 = 40;
+pub const MAX_SPATTERS: u8 = 160;
+pub const GIB_TIME: f32 = 3.0;
+pub const GIB_BLINK_TIME: f32 = 0.6;
+pub const SPLAT_TIME: f32 = 6.0;
+pub const SPLAT_FADE_TIME: f32 = 2.0;
+pub const GORE_GRAVITY: f32 = 10; //Metres per second squared (screen metres: 128px)
+pub const GIB_SPEED_MIN: f32 = 1.0; //Thrown along the blow, up to GIB_SPREAD radians either side
+pub const GIB_SPEED_MAX: f32 = 3.0;
+pub const GIB_SPREAD: f32 = 1.3;
+pub const GIB_LIFT_MIN: f32 = 1.0; //Thrown upwards at
+pub const GIB_LIFT_MAX: f32 = 2.4;
+pub const GIB_SPIN_MAX: f32 = 28; //Spin frames per second while airborne, either way
+pub const GIB_BOUNCE: f32 = 0.4; //Share of its fall speed a gib bounces back up with
+pub const GIB_SKID: f32 = 0.55; //Share of its speed along the ground kept on each bounce
+pub const GIB_REST_LIFT: f32 = 0.45; //Bounces slower than this and it stops dead
+pub const GIB_WALL_BOUNCE: f32 = 0.3; //Share of its speed kept bouncing off a wall
+pub const DROPLET_SPEED_MIN: f32 = 0.6;
+pub const DROPLET_SPEED_MAX: f32 = 2.6;
+pub const DROPLET_SPREAD: f32 = 0.9;
+pub const DROPLET_LIFT_MIN: f32 = 0.2;
+pub const DROPLET_LIFT_MAX: f32 = 1.4;
+pub const WOUND_DROPLETS: u8 = 4;
 comptime {
     //Enemy steps are only tested at their destination, so one frame's move must stay under the smallest cell side
     //(0.21m on lvl1) even on the longest frame
