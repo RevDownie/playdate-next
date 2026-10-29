@@ -66,13 +66,20 @@ fn between(rand: std.Random, min: f32, max: f32) f32 {
     return min + rand.float(f32) * (max - min);
 }
 
-/// Fly, fall, bounce and settle the gibs and droplets, and age everything
+/// Fly, fall, bounce and settle the gibs and droplets, and fade out what the rings have made room for
 ///
 pub fn update(gore: *state.Gore, grid: *const CollisionGrid, dt: f32) void {
     updateGibs(&gore.gibs, &gore.pools, grid, dt);
     updateDroplets(&gore.droplets, &gore.spatters, grid, dt);
-    for (gore.pools.age[0..gore.pools.len]) |*a| a.* += dt;
-    for (gore.spatters.age[0..gore.spatters.len]) |*a| a.* += dt;
+    fadeOut(gore.gibs.fade[0..gore.gibs.len], dt);
+    fadeOut(gore.pools.fade[0..gore.pools.len], dt);
+    fadeOut(gore.spatters.fade[0..gore.spatters.len], dt);
+}
+
+fn fadeOut(fade: []f32, dt: f32) void {
+    for (fade) |*f| {
+        if (f.* != state.SOLID) f.* += dt;
+    }
 }
 
 /// Gibs fly under gravity, spinning; walls knock them back. Each landing bounces them up with GIB_BOUNCE of their
@@ -81,9 +88,7 @@ pub fn update(gore: *state.Gore, grid: *const CollisionGrid, dt: f32) void {
 ///
 fn updateGibs(gibs: *state.Gibs, pools: anytype, grid: *const CollisionGrid, dt: f32) void {
     for (0..gibs.len) |i| {
-        if (gibs.age[i] >= consts.GIB_TIME) continue;
-        gibs.age[i] += dt;
-        if (gibs.resting[i]) continue;
+        if (gibs.resting[i] or gibs.fade[i] >= consts.GIB_FADE_TIME) continue;
 
         const to = gibs.pos[i] + gibs.vel[i] * @as(Vec2f, @splat(dt));
         if (grid.isSegmentClear(gibs.pos[i], to)) {
@@ -167,7 +172,7 @@ test "[gore_system] a wound only sprays a few droplets out of the far side" {
     for (gore.droplets.vel[0..gore.droplets.len]) |v| try std.testing.expect(v[1] < 0);
 }
 
-test "[gore_system] gibs bounce, come to rest and expire; droplets land as spatters" {
+test "[gore_system] gibs bounce and come to rest, droplets land as spatters, and under the limits it all stays" {
     var prng = std.Random.DefaultPrng.init(3);
     var gore = state.Gore{};
     spawn(&gore, &.{kill(.brute)}, prng.random());
@@ -183,8 +188,21 @@ test "[gore_system] gibs bounce, come to rest and expire; droplets land as spatt
     try std.testing.expect(gore.spatters.len == consts.ENEMY_KINDS[3].droplets);
     try std.testing.expect(gore.pools.len > 1); //Heavy parts splash where they land
 
-    while (t < 1.5 + consts.SPLAT_TIME) : (t += dt) update(&gore, &OPEN_GRID, dt); //Everything had landed by 1.5s
-    try std.testing.expect(gore.gibs.liveCount() == 0 and gore.pools.liveCount() == 0 and gore.spatters.liveCount() == 0);
+    const gibs = gore.gibs.liveCount();
+    const pools = gore.pools.liveCount();
+    while (t < 60) : (t += dt) update(&gore, &OPEN_GRID, dt);
+    try std.testing.expect(gore.gibs.liveCount() == gibs and gore.pools.liveCount() == pools and gore.spatters.liveCount() == consts.ENEMY_KINDS[3].droplets);
+}
+
+test "[gore_system] past a ring's limit the oldest gibs fade out and go" {
+    var gore = state.Gore{};
+    const kept = state.Gibs.capacity - consts.GIB_FADE_SLOTS;
+    for (0..kept + 2) |_| gore.gibs.add(@splat(0), 0, @splat(0), 0, 0, .walker, .arm);
+    const dt: f32 = 1.0 / 50.0;
+    var t: f32 = 0;
+    while (t < consts.GIB_FADE_TIME + dt) : (t += dt) update(&gore, &OPEN_GRID, dt);
+    try std.testing.expect(gore.gibs.liveCount() == kept); //Gibs 0 and 1 have gone
+    try std.testing.expect(gore.gibs.fade[0] >= consts.GIB_FADE_TIME and gore.gibs.fade[2] == state.SOLID);
 }
 
 test "[gore_system] walls stop gibs and droplets, even on the longest frame" {

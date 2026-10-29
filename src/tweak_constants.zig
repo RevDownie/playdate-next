@@ -35,18 +35,20 @@ pub const ENEMY_KINDS = [_]EnemyKindDef{
 pub const ENEMY_MIN_HIT_RADIUS: f32 = CHAR_BULLET_COLL_RADIUS * 0.8;
 
 /// Gore. A killed enemy bursts: its gibs (body parts) are thrown along the killing blow, spinning, bounce and skid, then
-/// lie on the ground for GIB_TIME (fading out through the dither over the last GIB_FADE_TIME). Blood droplets spray out with them and
-/// leave a spatter where they land; the body leaves a pool where it burst, and heavy parts (head, torso) a smaller
-/// one where they first land. Non-lethal hits spray WOUND_DROPLETS out of the far side. Pools and spatters stay for
-/// SPLAT_TIME, fading out over the last SPLAT_FADE_TIME. Every store is fixed size: the newest replace the oldest
+/// lie on the ground. Blood droplets spray out with them and leave a spatter where they land; the body leaves a pool
+/// where it burst, and heavy parts (head, torso) a smaller one where they first land. Non-lethal hits spray
+/// WOUND_DROPLETS out of the far side. Gibs, pools and spatters stay until their store needs the room: each is a ring
+/// of MAX_* where the newest MAX_* - *_FADE_SLOTS are solid, and each one added starts the oldest solid one fading
+/// out through the dither (over *_FADE_TIME), so it has gone before its slot is written again
 pub const MAX_GIBS: u8 = 96;
+pub const GIB_FADE_SLOTS: u8 = 24; //About two brutes' worth, so a burst doesn't overwrite gibs still fading
 pub const MAX_DROPLETS: u8 = 128;
 pub const MAX_POOLS: u8 = 40;
+pub const POOL_FADE_SLOTS: u8 = 8;
 pub const MAX_SPATTERS: u8 = 160;
-pub const GIB_TIME: f32 = 3.0;
+pub const SPATTER_FADE_SLOTS: u8 = 40; //A brute sprays 36
 pub const GIB_FADE_TIME: f32 = 0.8;
-pub const SPLAT_TIME: f32 = 6.0;
-pub const SPLAT_FADE_TIME: f32 = 2.0;
+pub const SPLAT_FADE_TIME: f32 = 1.5;
 pub const GORE_GRAVITY: f32 = 10; //Metres per second squared (screen metres: 128px)
 pub const GIB_SPEED_MIN: f32 = 1.0; //Thrown along the blow, up to GIB_SPREAD radians either side
 pub const GIB_SPEED_MAX: f32 = 3.0;

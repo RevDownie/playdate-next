@@ -277,19 +277,35 @@ pub const Impact = struct {
 
 // Gore (see gore_system and the GIB_*/SPLAT_* constants). Purely visual: nothing collides with it. Each store is a
 // ring: `next` is the slot the next one is written to, overwriting the oldest when full, and `len` how many slots
-// have been used. Entries are never removed, they just expire, so drawing and updating skip the expired ones
+// have been used. Entries are never removed: the ones that stay (gibs, pools, spatters) are solid until the ring needs
+// room, then fade out and are skipped once gone (`fade`: SOLID, or seconds since it began fading)
 
-/// Advance a ring store's write slot, returning the slot to write
-fn ringSlot(len: *u8, next: *u8, capacity: u8) u8 {
+pub const SOLID: f32 = -1;
+
+/// Advance a ring store's write slot, returning the slot to write (solid). Only the newest `capacity - fade_slots`
+/// stay solid: this one being added starts the oldest of them fading, which leaves it `fade_slots` more adds to fade
+/// out before its slot comes round again. So adding entry N (counting from 0, N = capacity - fade_slots) fades entry 0
+fn ringSlot(len: *u8, next: *u8, fade: []f32, comptime capacity: u8, comptime fade_slots: u8) u8 {
+    comptime std.debug.assert(fade_slots >= 1 and fade_slots < capacity);
     const i = next.*;
     next.* = if (i + 1 == capacity) 0 else i + 1;
     len.* = @max(len.*, i + 1);
+    fade[i] = SOLID;
+    const oldest_solid: u8 = @intCast((@as(u16, i) + fade_slots) % capacity);
+    if (oldest_solid < len.* and fade[oldest_solid] == SOLID) fade[oldest_solid] = 0;
     return i;
+}
+
+/// How many entries haven't faded out yet
+fn notGone(fade: []const f32, fade_time: f32) u32 {
+    var n: u32 = 0;
+    for (fade) |f| n += @intFromBool(f < fade_time);
+    return n;
 }
 
 pub const GibPart = enum(u8) { head, arm, leg, torso, chunk }; //In the gib sheets' order
 
-/// Body parts flying about, then lying on the ground until `age` reaches GIB_TIME
+/// Body parts flying about, then lying on the ground until the ring needs the room (see ringSlot)
 ///
 pub const Gibs = struct {
     pub const capacity = consts.MAX_GIBS;
@@ -302,21 +318,20 @@ pub const Gibs = struct {
     lift: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined, //Upward speed
     spin: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined, //Spin frames per second
     rot: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined, //Spin frame, 0..GIB_SPIN_FRAMES
-    age: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined,
+    fade: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined, //SOLID, or seconds fading (gone at GIB_FADE_TIME)
     kind: [capacity]EnemyKind align(memory.CACHE_LINE_SIZE) = undefined, //Whose part it was: which gib sheet
     part: [capacity]GibPart align(memory.CACHE_LINE_SIZE) = undefined,
     resting: [capacity]bool align(memory.CACHE_LINE_SIZE) = undefined, //Stopped on the ground
     landed: [capacity]bool align(memory.CACHE_LINE_SIZE) = undefined, //Has hit the ground (heavy parts splash once)
 
     pub fn add(self: *Gibs, pos: Vec2f, height: f32, vel: Vec2f, lift: f32, spin: f32, kind: EnemyKind, part: GibPart) void {
-        const i = ringSlot(&self.len, &self.next, capacity);
+        const i = ringSlot(&self.len, &self.next, &self.fade, capacity, consts.GIB_FADE_SLOTS);
         self.pos[i] = pos;
         self.vel[i] = vel;
         self.height[i] = height;
         self.lift[i] = lift;
         self.spin[i] = spin;
         self.rot[i] = 0;
-        self.age[i] = 0;
         self.kind[i] = kind;
         self.part[i] = part;
         self.resting[i] = false;
@@ -324,9 +339,7 @@ pub const Gibs = struct {
     }
 
     pub fn liveCount(self: *const Gibs) u32 {
-        var n: u32 = 0;
-        for (self.age[0..self.len]) |a| n += @intFromBool(a < consts.GIB_TIME);
-        return n;
+        return notGone(self.fade[0..self.len], consts.GIB_FADE_TIME);
     }
 };
 
@@ -344,7 +357,9 @@ pub const Droplets = struct {
     live: [capacity]bool align(memory.CACHE_LINE_SIZE) = undefined, //Still in the air
 
     pub fn add(self: *Droplets, pos: Vec2f, height: f32, vel: Vec2f, lift: f32) void {
-        const i = ringSlot(&self.len, &self.next, capacity);
+        const i = self.next;
+        self.next = if (i + 1 == capacity) 0 else i + 1;
+        self.len = @max(self.len, i + 1);
         self.pos[i] = pos;
         self.vel[i] = vel;
         self.height[i] = height;
@@ -359,29 +374,27 @@ pub const Droplets = struct {
     }
 };
 
-/// Blood on the ground until `age` reaches SPLAT_TIME. `variant` picks the sprite (for pools: large ones, then medium)
+/// Blood on the ground until the ring needs the room (see ringSlot). `variant` picks the sprite (for pools: large
+/// ones, then medium)
 ///
-pub fn Splats(comptime cap: u8) type {
+pub fn Splats(comptime cap: u8, comptime fade_slots: u8) type {
     return struct {
         pub const capacity = cap;
 
         len: u8 = 0,
         next: u8 = 0,
         pos: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined,
-        age: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined,
+        fade: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined, //SOLID, or seconds fading (gone at SPLAT_FADE_TIME)
         variant: [capacity]u8 align(memory.CACHE_LINE_SIZE) = undefined,
 
         pub fn add(self: *@This(), pos: Vec2f, variant: u8) void {
-            const i = ringSlot(&self.len, &self.next, capacity);
+            const i = ringSlot(&self.len, &self.next, &self.fade, capacity, fade_slots);
             self.pos[i] = pos;
-            self.age[i] = 0;
             self.variant[i] = variant;
         }
 
         pub fn liveCount(self: *const @This()) u32 {
-            var n: u32 = 0;
-            for (self.age[0..self.len]) |a| n += @intFromBool(a < consts.SPLAT_TIME);
-            return n;
+            return notGone(self.fade[0..self.len], consts.SPLAT_FADE_TIME);
         }
     };
 }
@@ -389,8 +402,8 @@ pub fn Splats(comptime cap: u8) type {
 pub const Gore = struct {
     gibs: Gibs = .{},
     droplets: Droplets = .{},
-    pools: Splats(consts.MAX_POOLS) = .{}, //Where bodies burst and heavy parts landed
-    spatters: Splats(consts.MAX_SPATTERS) = .{}, //Where droplets landed
+    pools: Splats(consts.MAX_POOLS, consts.POOL_FADE_SLOTS) = .{}, //Where bodies burst and heavy parts landed
+    spatters: Splats(consts.MAX_SPATTERS, consts.SPATTER_FADE_SLOTS) = .{}, //Where droplets landed
 };
 
 pub const WavePhase = enum(u8) { lull, wave };
@@ -591,16 +604,26 @@ test "[game_state] enemies keep their kind through removeDead, and start with it
     try std.testing.expect(e.len == 1 and e.kind[0] == .brute and e.pos[0][0] == 1);
 }
 
-test "[game_state] gore stores are rings: when full the newest replace the oldest" {
-    var s = Splats(4){};
-    for (0..4) |i| s.add(Vec2f{ @floatFromInt(i), 0 }, 0);
-    try std.testing.expect(s.len == 4 and s.next == 0);
-    s.add(Vec2f{ 9, 0 }, 1);
-    try std.testing.expect(s.len == 4 and s.pos[0][0] == 9 and s.pos[1][0] == 1); //The oldest went
+test "[game_state] gore stores are rings: past the limit each one added starts the oldest fading, then replaces it" {
+    //Keeps 3 solid, 1 fading
+    var s = Splats(4, 1){};
+    for (0..3) |i| s.add(Vec2f{ @floatFromInt(i), 0 }, 0);
+    for (s.fade[0..s.len]) |f| try std.testing.expect(f == SOLID);
+    s.add(Vec2f{ 3, 0 }, 0); //Entry 3 fades entry 0
+    try std.testing.expect(s.len == 4 and s.next == 0 and s.fade[0] == 0 and s.fade[1] == SOLID and s.fade[3] == SOLID);
+    s.add(Vec2f{ 9, 0 }, 1); //Replaces entry 0 (solid), starts entry 1 fading
+    try std.testing.expect(s.len == 4 and s.pos[0][0] == 9 and s.fade[0] == SOLID and s.fade[1] == 0 and s.fade[2] == SOLID);
 
     var g = Gibs{};
-    for (0..Gibs.capacity + 3) |_| g.add(@splat(0), 0, @splat(0), 0, 0, .walker, .head);
-    try std.testing.expect(g.len == Gibs.capacity and g.next == 3 and g.liveCount() == Gibs.capacity);
+    const kept = Gibs.capacity - consts.GIB_FADE_SLOTS;
+    for (0..kept) |_| g.add(@splat(0), 0, @splat(0), 0, 0, .walker, .head);
+    for (g.fade[0..g.len]) |f| try std.testing.expect(f == SOLID);
+    g.add(@splat(0), 0, @splat(0), 0, 0, .walker, .head);
+    try std.testing.expect(g.fade[0] == 0 and g.fade[1] == SOLID); //Gib N fades gib 0
+    for (0..Gibs.capacity) |_| g.add(@splat(0), 0, @splat(0), 0, 0, .walker, .head);
+    var fading: u32 = 0;
+    for (g.fade[0..g.len]) |f| fading += @intFromBool(f != SOLID);
+    try std.testing.expect(g.len == Gibs.capacity and fading == consts.GIB_FADE_SLOTS and g.liveCount() == Gibs.capacity);
 }
 
 test "[game_state] reset keeps rng sequence" {

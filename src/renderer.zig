@@ -142,11 +142,11 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     //---Gore on the ground under everything standing, so it needs no depth sort: blood pools, spatters, then the
     //body parts lying in them
     const gore = &game.gore;
-    drawSplats(graphics, assets, screen, .pool, gore.pools.pos[0..gore.pools.len], gore.pools.age[0..gore.pools.len], gore.pools.variant[0..gore.pools.len]);
-    drawSplats(graphics, assets, screen, .spatter, gore.spatters.pos[0..gore.spatters.len], gore.spatters.age[0..gore.spatters.len], gore.spatters.variant[0..gore.spatters.len]);
+    drawSplats(graphics, assets, screen, .pool, gore.pools.pos[0..gore.pools.len], gore.pools.fade[0..gore.pools.len], gore.pools.variant[0..gore.pools.len]);
+    drawSplats(graphics, assets, screen, .spatter, gore.spatters.pos[0..gore.spatters.len], gore.spatters.fade[0..gore.spatters.len], gore.spatters.variant[0..gore.spatters.len]);
     const gibs = &gore.gibs;
     for (0..gibs.len) |i| {
-        if (gibs.height[i] > 0 or gibs.age[i] >= consts.GIB_TIME) continue;
+        if (gibs.height[i] > 0 or gibs.fade[i] >= consts.GIB_FADE_TIME) continue;
         drawGib(graphics, assets, screen, gibs, i, GIB_REST_LIFT_PX);
     }
 
@@ -214,7 +214,7 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     //with a white edge so they show over the zombies too)
     for (0..gibs.len) |i| {
         const height = gibs.height[i];
-        if (height <= 0) continue;
+        if (height <= 0 or gibs.fade[i] >= consts.GIB_FADE_TIME) continue; //(A big burst can fade one still flying)
         const ground = screen.toScreen(gibs.pos[i]);
         const shadow_w: i32 = @divTrunc(@as(i32, @intCast(bitmap_descs.GIB_CELLS[@backingInt(gibs.kind[i])])), 2);
         graphics.fillEllipse.?(ground[0] - @divTrunc(shadow_w, 2), ground[1] - 2, shadow_w, 4, 0, 360, @intFromPtr(&PATTERN_SHADOW));
@@ -340,15 +340,15 @@ fn drawCentred(graphics: pd.playdate_graphics, assets: *const Assets, screen: Sc
 
 /// Gib `i`, `lift_px` above the point on the ground under it
 fn drawGib(graphics: pd.playdate_graphics, assets: *const Assets, screen: Screen, gibs: *const state.Gibs, i: usize, lift_px: i32) void {
-    const frame = anim.gibFrame(@backingInt(gibs.part[i]), gibs.rot[i], gibs.age[i]);
+    const frame = anim.gibFrame(@backingInt(gibs.part[i]), gibs.rot[i], gibs.fade[i]);
     drawCentred(graphics, assets, screen, gibSheet(gibs.kind[i]), frame, screen.toScreen(gibs.pos[i]) - Vec2i{ 0, lift_px });
 }
 
-/// Pools or spatters that haven't dried up yet, fading out at the end
-fn drawSplats(graphics: pd.playdate_graphics, assets: *const Assets, screen: Screen, sheet: Sheet, pos: []const Vec2f, age: []const f32, variant: []const u8) void {
-    for (pos, age, variant) |p, a, v| {
-        if (a >= consts.SPLAT_TIME) continue;
-        drawCentred(graphics, assets, screen, sheet, @intCast(v * bitmap_descs.SPLAT_FADES + anim.splatFade(a)), screen.toScreen(p));
+/// Pools or spatters that haven't faded out, thinning while they fade
+fn drawSplats(graphics: pd.playdate_graphics, assets: *const Assets, screen: Screen, sheet: Sheet, pos: []const Vec2f, fade: []const f32, variant: []const u8) void {
+    for (pos, fade, variant) |p, f, v| {
+        if (f >= consts.SPLAT_FADE_TIME) continue;
+        drawCentred(graphics, assets, screen, sheet, @intCast(v * bitmap_descs.SPLAT_FADES + anim.splatFade(f)), screen.toScreen(p));
     }
 }
 
