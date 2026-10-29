@@ -30,7 +30,6 @@
 - Playtest the wave curve on device: `WAVES` table (hold, peak, pack, lull), `WAVES_PER_EXTRA_SIDE`, `WAVE_PACK_INTERVAL`
 - A player who keeps moving can still kite most of a wave: runners (faster than the player, from wave 2) help, but the
   drop-seeking scenario bot still survives its whole 600s. Playtest whether runners need to come sooner or in packs
-- Give the enemy speed types their own look (runner / shambler)
 - Whether a timed-out wave should give any signal (today the next wave just starts)
 - Combo popups and HUD text: draw cost on device with a full horde and 8 popups
 
@@ -45,18 +44,12 @@
 - Subtle interpolation
 - Camera shake in response to firing and impact
 
-## Visuals - Main character
-- Improve character sprites to look more like a battle worn soldier
-- More rotation frames
-- Holding a gun
-- Movement and firing animations
-- Health decrease animations
-- Death animations
-
-## Visuals - Enemies
-- Improve visuals - zombie or horrible creatures
-- Variety of enemies
-- Walk, hit, die and spawn animations
+## Visuals - Characters follow-up
+- Check the character sheets on device: FPS with a full horde (up to 100 masked sprites up to 64x64, plus corpses)
+- Playtest the enemy kinds (`ENEMY_KINDS`, `ENEMY_BRUTE_*`): brutes walk through fire, so is wave 3 too early?
+- Brutes use the walker's separation distance and contact radius, so they overlap other enemies a little
+- Firing animation (barrels turning, muzzle flash)
+- Enemy spawn animation
 
 ## Visuals - Environment
 - Obstacles, walls, buildings and terrain

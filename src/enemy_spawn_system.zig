@@ -71,15 +71,28 @@ pub fn waveDef(n: u16) consts.WaveDef {
     return .{ .hold = def.hold, .peak = @intFromFloat(std.math.clamp(scaled, 1, state.Enemies.capacity)), .pack = def.pack, .lull = def.lull };
 }
 
-/// A new enemy's speed in wave `wave`: a runner (more of them each wave from wave 2), a shambler, or a walker
-/// a little faster or slower than ENEMY_SPEED
+/// A new enemy in wave `wave`: a runner (more of them each wave from wave 2), a brute (from wave 3, a few more each
+/// wave), a shambler, or a walker
 ///
-pub fn enemySpeed(rand: std.Random, wave: u16) f32 {
+pub fn enemyKind(rand: std.Random, wave: u16) state.EnemyKind {
     const runner_chance = @min(consts.ENEMY_RUNNER_CHANCE_MAX, consts.ENEMY_RUNNER_CHANCE_PER_WAVE * @as(f32, @floatFromInt(wave -| 1)));
+    const brute_chance = @min(consts.ENEMY_BRUTE_CHANCE_MAX, consts.ENEMY_BRUTE_CHANCE_PER_WAVE * @as(f32, @floatFromInt(wave -| 2)));
     const roll = rand.float(f32);
-    if (roll < runner_chance) return consts.ENEMY_RUNNER_SPEED;
-    if (roll < runner_chance + consts.ENEMY_SLOW_CHANCE) return consts.ENEMY_SLOW_SPEED;
-    return consts.ENEMY_SPEED * (1 + consts.ENEMY_SPEED_JITTER * (rand.float(f32) * 2 - 1));
+    if (roll < runner_chance) return .runner;
+    if (roll < runner_chance + brute_chance) return .brute;
+    if (roll < runner_chance + brute_chance + consts.ENEMY_SLOW_CHANCE) return .shambler;
+    return .walker;
+}
+
+/// How fast a new enemy of `kind` seeks the player: walkers a little faster or slower than ENEMY_SPEED each
+///
+pub fn enemySpeed(rand: std.Random, kind: state.EnemyKind) f32 {
+    return switch (kind) {
+        .runner => consts.ENEMY_RUNNER_SPEED,
+        .walker => consts.ENEMY_SPEED * (1 + consts.ENEMY_SPEED_JITTER * (rand.float(f32) * 2 - 1)),
+        .shambler => consts.ENEMY_SLOW_SPEED,
+        .brute => consts.ENEMY_BRUTE_SPEED,
+    };
 }
 
 /// How many sides of the map wave `n` comes from
@@ -125,7 +138,8 @@ fn spawnPack(count: u8, sides: u8, wave: u16, enemies: *state.Enemies, rand: std
     const n = @min(count, state.Enemies.capacity - enemies.len);
     for (0..n) |_| {
         const offset = (Vec2f{ rand.float(f32), rand.float(f32) } - @as(Vec2f, @splat(0.5))) * jitter;
-        enemies.addWithSpeed(grid.cellCentre(cell) + offset, enemySpeed(rand, wave));
+        const kind = enemyKind(rand, wave);
+        enemies.addKind(grid.cellCentre(cell) + offset, kind, enemySpeed(rand, kind));
     }
 }
 
@@ -308,18 +322,22 @@ test "[enemy_spawn_system] packs arrive together, spawning never overfills, and 
     try std.testing.expect(numSides(1) == 1 and numSides(100) == level_loader.NUM_SIDES);
 }
 
-test "[enemy_spawn_system] enemy speeds vary, with runners from wave 2 and more of them later" {
+test "[enemy_spawn_system] enemy kinds mix, with runners from wave 2, brutes from wave 3 and more of both later" {
     var prng = std.Random.DefaultPrng.init(4);
-    var runners: [3]u32 = @splat(0);
-    var slow: u32 = 0;
+    var counts: [3][4]u32 = @splat(@splat(0));
     for ([_]u16{ 1, 3, 20 }, 0..) |wave, w| {
         for (0..2000) |_| {
-            const s = enemySpeed(prng.random(), wave);
-            try std.testing.expect(s >= consts.ENEMY_SLOW_SPEED and s <= consts.ENEMY_MAX_SPEED);
-            if (s == consts.ENEMY_RUNNER_SPEED) runners[w] += 1;
-            if (s == consts.ENEMY_SLOW_SPEED) slow += 1;
+            const kind = enemyKind(prng.random(), wave);
+            counts[w][@backingInt(kind)] += 1;
+            const s = enemySpeed(prng.random(), kind);
+            try std.testing.expect(s >= consts.ENEMY_BRUTE_SPEED and s <= consts.ENEMY_MAX_SPEED);
+            if (kind == .walker) try std.testing.expect(s > consts.ENEMY_SLOW_SPEED and s < consts.ENEMY_RUNNER_SPEED);
         }
     }
-    try std.testing.expect(runners[0] == 0 and runners[1] > 0 and runners[2] > runners[1]);
-    try std.testing.expect(runners[2] < 2000 * 0.35 and slow > 6000 / 5);
+    const runner = @backingInt(state.EnemyKind.runner);
+    const brute = @backingInt(state.EnemyKind.brute);
+    try std.testing.expect(counts[0][runner] == 0 and counts[1][runner] > 0 and counts[2][runner] > counts[1][runner]);
+    try std.testing.expect(counts[0][brute] == 0 and counts[1][brute] > 0 and counts[2][brute] > counts[1][brute]);
+    try std.testing.expect(counts[2][runner] < 2000 * 0.35 and counts[2][brute] < 2000 * 0.15);
+    try std.testing.expect(counts[0][@backingInt(state.EnemyKind.shambler)] > 2000 / 5); //Every wave has shamblers
 }

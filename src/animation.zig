@@ -5,46 +5,81 @@ const bitmap_descs = @import("bitmap_descs.zig");
 
 const Vec2f = @Vector(2, f32);
 
-/// Two bytes so the lookup table and the per frame draw lists stay small
+/// Two bytes so the per frame draw lists stay small
 pub const BitmapFrame = struct { index: u8, flipped: bool };
 
-const BITMAP_INDEX_MAP = buildLookupTable();
+// Character sheets (see character_sprites.py) are drawn every `step` degrees from 0 (facing the screen, world -y)
+// round to 180 (facing away) through screen left; the other half is the same frames mirrored. Each sheet's index is
+// facing * frames per facing + frame
 
-/// Our sprites are captured at 10 degree snapshots
-/// 0 is facing towards screen and 18 is facing away
-/// We then mirror the images for rotation in the other direction
+/// The drawn facing nearest to `dir` for a sheet drawn every `step` degrees: its index, and whether to mirror it
 ///
-fn buildLookupTable() [36]BitmapFrame {
-    var table: [36]BitmapFrame = undefined;
-
-    var i: usize = 0;
-    while (i <= 18) : (i += 1) {
-        table[i] = BitmapFrame{ .index = @intCast(i), .flipped = false };
-    }
-    while (i < 36) : (i += 1) {
-        table[i] = BitmapFrame{ .index = @intCast(36 - i), .flipped = true };
-    }
-    return table;
-}
-
-/// Convert the given direction vector to a bitmap frame that best matches
-///
-pub fn bitmapFrameForDir(dir: Vec2f) BitmapFrame {
+pub fn facing(dir: Vec2f, comptime step: u32) BitmapFrame {
+    const directions = 360 / step;
     const deg = maths.angleDegrees360(@Vector(2, f32){ 0, -1 }, dir);
-    const index: usize = @intFromFloat(std.math.clamp(deg * 0.1, 0, @as(f32, BITMAP_INDEX_MAP.len - 1)));
-    return BITMAP_INDEX_MAP[index];
+    const nearest: u32 = if (deg >= 0 and deg < 360) @intFromFloat(@round(deg / @as(f32, step))) else 0; //NaN for a zero dir
+    const i = nearest % directions;
+    return if (i <= directions / 2) .{ .index = @intCast(i), .flipped = false } else .{ .index = @intCast(directions - i), .flipped = true };
 }
 
-/// Given the world pos calculate a screen height offset to have the charater bob
+/// The player's body: aiming along `aim_dir`; the run cycle while moving (stepped by the distance run, so the feet
+/// keep pace), the hurt pose while the hit flash shows
 ///
-pub fn walkBobAnim(world_pos: Vec2f) i32 {
-    const freq: f32 = 24.0;
-    const amp: f32 = 8.0;
-    const t1 = world_pos[0];
-    const x = (std.math.sin(t1 * freq) + 1.0) * 0.5;
-    const t2 = world_pos[1];
-    const y = (std.math.sin(t2 * freq) + 1.0) * 0.5;
-    return @intFromFloat((x * 0.5 + y * 0.5) * amp);
+pub fn heroFrame(aim_dir: Vec2f, moving: bool, run_dist: f32, hurt: bool) BitmapFrame {
+    const f = facing(aim_dir, bitmap_descs.HERO_FACING_STEP);
+    const frame: u32 = if (hurt) bitmap_descs.HERO_FRAMES - 1 else if (moving) 1 + cycleFrame(run_dist, consts.HERO_RUN_CYCLE_DIST, bitmap_descs.HERO_RUN_FRAMES) else 0;
+    return .{ .index = @intCast(f.index * bitmap_descs.HERO_FRAMES + frame), .flipped = f.flipped };
+}
+
+/// The arms and weapon drawn over the body: the gatling (its hurt pose with the body's), or out of ammo the melee
+/// weapon, ready or `swing_progress` (0..1) through a blow
+///
+pub fn heroWeaponFrame(aim_dir: Vec2f, melee: bool, swinging: bool, swing_progress: f32, hurt: bool) BitmapFrame {
+    const f = facing(aim_dir, bitmap_descs.HERO_FACING_STEP);
+    if (!melee) return .{ .index = @intCast(f.index * bitmap_descs.GUN_FRAMES + @intFromBool(hurt)), .flipped = f.flipped };
+    const frame: u32 = if (!swinging) 0 else if (swing_progress < 0.5) 1 else 2;
+    return .{ .index = @intCast(f.index * bitmap_descs.MELEE_FRAMES + frame), .flipped = f.flipped };
+}
+
+/// The player falling down `time` seconds after dying, then lying still (drawn on the run end screen)
+///
+pub fn heroDeathFrame(aim_dir: Vec2f, time: f32) BitmapFrame {
+    const f = facing(aim_dir, bitmap_descs.HERO_DEATH_FACING_STEP);
+    const frame = stepFrame(time, consts.HERO_DEATH_FRAME_TIME, bitmap_descs.HERO_DEATH_FRAMES);
+    return .{ .index = @intCast(bitmap_descs.HERO_DEATH_START + f.index * bitmap_descs.HERO_DEATH_FRAMES + frame), .flipped = f.flipped };
+}
+
+/// An enemy heading along `vel`: rocked back while it is knocked back, otherwise walking. The walk steps with the
+/// distance along its heading, so the feet keep pace with its speed and a crowd doesn't step in unison
+///
+pub fn enemyFrame(pos: Vec2f, vel: Vec2f, bumping: bool) BitmapFrame {
+    const f = facing(vel, bitmap_descs.ENEMY_FACING_STEP);
+    const dir = maths.normaliseSafe(vel, Vec2f{ 0, -1 });
+    const frame: u32 = if (bumping) bitmap_descs.ENEMY_WALK_FRAMES else cycleFrame(maths.dot(pos, dir), consts.ENEMY_WALK_CYCLE_DIST, bitmap_descs.ENEMY_WALK_FRAMES);
+    return .{ .index = @intCast(f.index * bitmap_descs.ENEMY_FRAMES + frame), .flipped = f.flipped };
+}
+
+/// A killed enemy `age` seconds after it died: falling down over CORPSE_FALL_TIME, then lying still
+///
+pub fn corpseFrame(dir: Vec2f, age: f32) BitmapFrame {
+    const f = facing(dir, bitmap_descs.ENEMY_FACING_STEP);
+    const frame = stepFrame(age, consts.CORPSE_FALL_TIME / bitmap_descs.ENEMY_DEATH_FRAMES, bitmap_descs.ENEMY_DEATH_FRAMES);
+    return .{ .index = @intCast(f.index * bitmap_descs.ENEMY_FRAMES + bitmap_descs.ENEMY_WALK_FRAMES + 1 + frame), .flipped = f.flipped };
+}
+
+/// Which of `frames` a loop is on, `dist` along it at `cycle` per loop. Floors into an integer and wraps with an
+/// integer @mod: `dist` can be negative, and a float @mod would call libc's fmodf, which drags newlib's malloc into
+/// the device link
+///
+fn cycleFrame(dist: f32, cycle: f32, comptime frames: u32) u32 {
+    const step = std.math.clamp(@floor(dist * (@as(f32, frames) / cycle)), -1e9, 1e9);
+    return @intCast(@mod(@as(i32, @intFromFloat(step)), frames));
+}
+
+/// A one-shot animation `time` seconds in at `frame_time` each, holding its last frame
+///
+fn stepFrame(time: f32, frame_time: f32, comptime frames: u32) u32 {
+    return @min(@as(u32, @intFromFloat(std.math.clamp(time / frame_time, 0, @as(f32, frames)))), frames - 1);
 }
 
 /// Sideways offset of each gatling barrel from the player (metres to the right of the aim), as the barrels
@@ -93,20 +128,66 @@ pub fn bulletTracer(pos: Vec2f, dir: Vec2f, travelled: f32, barrel: u8) Tracer {
     return .{ .head = head, .tail = head - dir * @as(Vec2f, @splat(length)) };
 }
 
-test "[animation] bitmapFrameForDir covers every direction" {
-    try std.testing.expect(bitmapFrameForDir(Vec2f{ 0, -1 }).index == 0); //Facing the screen
-    try std.testing.expect(bitmapFrameForDir(Vec2f{ 0, 1 }).index == 18); //Facing away
-    const left = bitmapFrameForDir(Vec2f{ -1, 0 });
-    const right = bitmapFrameForDir(Vec2f{ 1, 0 });
-    try std.testing.expect(left.index == right.index and left.flipped != right.flipped);
-    _ = bitmapFrameForDir(Vec2f{ 0, 0 });
-    _ = bitmapFrameForDir(Vec2f{ std.math.nan(f32), 0 });
+test "[animation] facings cover every direction, drawn facing screen left and mirrored for the right" {
+    try std.testing.expect(std.meta.eql(facing(Vec2f{ 0, -1 }, 10), .{ .index = 0, .flipped = false })); //Facing the screen
+    try std.testing.expect(facing(Vec2f{ 0, 1 }, 10).index == 18); //Facing away
+    try std.testing.expect(std.meta.eql(facing(Vec2f{ -1, 0 }, 10), .{ .index = 9, .flipped = false })); //Drawn: screen left (world -x)
+    try std.testing.expect(std.meta.eql(facing(Vec2f{ 1, 0 }, 10), .{ .index = 9, .flipped = true }));
+    try std.testing.expect(std.meta.eql(facing(Vec2f{ -1, 0 }, 18), .{ .index = 5, .flipped = false })); //Enemies: every 18 degrees
+    try std.testing.expect(facing(Vec2f{ 0, 1 }, 18).index == 10);
+    try std.testing.expect(facing(Vec2f{ 0.05, -1 }, 18).index == 0); //Just off straight down rounds to it, either side
+    try std.testing.expect(facing(Vec2f{ -0.05, -1 }, 18).index == 0);
+    for (0..360) |d| {
+        const a = std.math.degreesToRadians(@as(f32, @floatFromInt(d)));
+        try std.testing.expect(facing(Vec2f{ @sin(a), @cos(a) }, 10).index <= 18);
+        try std.testing.expect(facing(Vec2f{ @sin(a), @cos(a) }, 18).index <= 10);
+    }
+    _ = facing(Vec2f{ 0, 0 }, 10);
+    _ = facing(Vec2f{ std.math.nan(f32), 0 }, 10);
+}
+
+test "[animation] character frames stay inside their sheets" {
+    const hero_frames = bitmap_descs.HERO_DEATH_START + (180 / bitmap_descs.HERO_DEATH_FACING_STEP + 1) * bitmap_descs.HERO_DEATH_FRAMES;
+    const enemy_frames = (180 / bitmap_descs.ENEMY_FACING_STEP + 1) * bitmap_descs.ENEMY_FRAMES;
+    for (0..72) |d| {
+        const a = std.math.degreesToRadians(@as(f32, @floatFromInt(d * 5)));
+        const dir = Vec2f{ @sin(a), @cos(a) };
+        for ([_]f32{ -3.7, 0, 0.13, 55.5 }) |dist| {
+            try std.testing.expect(heroFrame(dir, true, @abs(dist), false).index < bitmap_descs.HERO_DEATH_START);
+            try std.testing.expect(enemyFrame(dir * @as(Vec2f, @splat(dist)), dir, false).index < enemy_frames);
+        }
+        try std.testing.expect(heroFrame(dir, false, 0, true).index < bitmap_descs.HERO_DEATH_START);
+        try std.testing.expect(heroWeaponFrame(dir, false, false, 0, true).index < (180 / bitmap_descs.HERO_FACING_STEP + 1) * bitmap_descs.GUN_FRAMES);
+        try std.testing.expect(heroWeaponFrame(dir, true, true, 0.9, false).index < (180 / bitmap_descs.HERO_FACING_STEP + 1) * bitmap_descs.MELEE_FRAMES);
+        for ([_]f32{ 0, 0.1, 99 }) |t| {
+            const death = heroDeathFrame(dir, t).index;
+            try std.testing.expect(death >= bitmap_descs.HERO_DEATH_START and death < hero_frames);
+            try std.testing.expect(corpseFrame(dir, t).index < enemy_frames);
+        }
+    }
+    try std.testing.expect(hero_frames <= 256 and enemy_frames <= 256); //u8 frame indices
+}
+
+test "[animation] walk and run cycles step with distance and wrap, death holds its last frame" {
+    const step = consts.ENEMY_WALK_CYCLE_DIST / bitmap_descs.ENEMY_WALK_FRAMES;
+    const down = Vec2f{ 0, -1 };
+    var seen: [bitmap_descs.ENEMY_WALK_FRAMES]bool = @splat(false);
+    for (0..bitmap_descs.ENEMY_WALK_FRAMES * 2) |i| {
+        const at = Vec2f{ 0, -(@as(f32, @floatFromInt(i)) + 0.5) * step };
+        seen[enemyFrame(at, down, false).index] = true;
+    }
+    for (seen) |s| try std.testing.expect(s);
+    try std.testing.expect(enemyFrame(@splat(0), down, true).index == bitmap_descs.ENEMY_WALK_FRAMES); //Knocked back
+    try std.testing.expect(heroFrame(down, false, 1.3, false).index == 0); //Standing still
+    try std.testing.expect(corpseFrame(down, 0).index == bitmap_descs.ENEMY_WALK_FRAMES + 1);
+    try std.testing.expect(corpseFrame(down, 10).index == bitmap_descs.ENEMY_FRAMES - 1);
+    try std.testing.expect(heroDeathFrame(down, 10).index == bitmap_descs.HERO_DEATH_START + bitmap_descs.HERO_DEATH_FRAMES - 1);
 }
 
 test "[animation] bullet tracers start at the muzzle and converge on the bullet" {
     const fired = bulletTracer(@splat(0), Vec2f{ 1, 0 }, 0, 0);
     try std.testing.expectApproxEqAbs(fired.head[0], consts.MUZZLE_FORWARD, 0.0001);
-    try std.testing.expect(fired.head[1] < 0); //Held on the right when aiming along +x
+    try std.testing.expect(@abs(fired.head[1]) <= consts.BARREL_RADIUS + 0.0001); //Held in the middle, so mirroring needs no side swap
     try std.testing.expect(fired.tail[0] > 0); //Doesn't poke back through the player
 
     const far = bulletTracer(Vec2f{ 3, 0 }, Vec2f{ 1, 0 }, consts.MUZZLE_CONVERGE_DIST, 3);

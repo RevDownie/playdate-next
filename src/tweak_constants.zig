@@ -5,9 +5,10 @@ pub const MAX_ENEMIES: u8 = 100;
 
 pub const PLAYER_ACC: f32 = 2.0;
 pub const PLAYER_MAX_SPEED: f32 = 1.5;
-/// Enemies don't all move alike. Most walk at about ENEMY_SPEED (a little faster or slower each), some shamble, and
-/// from wave 2 a growing share are runners, faster than the player, so a crowd strings out as it closes in and the
-/// player can't simply outrun every wave. No visual difference yet
+/// Enemies come in four kinds (game_state.EnemyKind), each with its own look (character_sprites.py). Most are walkers
+/// at about ENEMY_SPEED (a little faster or slower each), some shamblers, from wave 2 a growing share are runners,
+/// faster than the player, so a crowd strings out as it closes in and the player can't simply outrun every wave,
+/// and from wave 3 a few brutes: big, slow and hard to kill, they shrug off the knock back and walk through fire
 pub const ENEMY_SPEED: f32 = 1.2;
 pub const ENEMY_SPEED_JITTER: f32 = 0.1; //Walkers vary by up to this fraction either way
 pub const ENEMY_SLOW_SPEED: f32 = 0.85;
@@ -15,7 +16,27 @@ pub const ENEMY_SLOW_CHANCE: f32 = 0.25;
 pub const ENEMY_RUNNER_SPEED: f32 = 1.75; //Faster than PLAYER_MAX_SPEED
 pub const ENEMY_RUNNER_CHANCE_PER_WAVE: f32 = 0.04; //From wave 2: 4% of a wave's enemies, then 8%, ...
 pub const ENEMY_RUNNER_CHANCE_MAX: f32 = 0.3;
+pub const ENEMY_BRUTE_SPEED: f32 = 0.6;
+pub const ENEMY_BRUTE_CHANCE_PER_WAVE: f32 = 0.03; //From wave 3: 3% of a wave's enemies, then 6%, ...
+pub const ENEMY_BRUTE_CHANCE_MAX: f32 = 0.12;
 pub const ENEMY_MAX_SPEED: f32 = ENEMY_RUNNER_SPEED; //The fastest any enemy moves
+
+/// Per kind, in game_state.EnemyKind order. `hit_radius` is the bullet hit circle (drawn size: runners are small,
+/// brutes big), `bump` how far a non-lethal hit knocks it back (0: it doesn't flinch, so fire can't hold it off)
+pub const EnemyKindDef = struct { health: u8, hit_radius: f32, bump: f32 };
+pub const ENEMY_KINDS = [_]EnemyKindDef{
+    .{ .health = 50, .hit_radius = CHAR_BULLET_COLL_RADIUS * 0.8, .bump = BUMP_DISTANCE }, //Runner: one hit
+    .{ .health = 100, .hit_radius = CHAR_BULLET_COLL_RADIUS, .bump = BUMP_DISTANCE }, //Walker: two
+    .{ .health = 150, .hit_radius = CHAR_BULLET_COLL_RADIUS, .bump = BUMP_DISTANCE_SMALL }, //Shambler: three
+    .{ .health = 250, .hit_radius = CHAR_BULLET_COLL_RADIUS * 1.5, .bump = 0 }, //Brute: five
+};
+pub const ENEMY_MIN_HIT_RADIUS: f32 = CHAR_BULLET_COLL_RADIUS * 0.8;
+
+/// Killed enemies fall down (the death frames over CORPSE_FALL_TIME), lie there a moment, then are gone. The newest
+/// replace the oldest when there are more than MAX_CORPSES
+pub const MAX_CORPSES: u8 = 24;
+pub const CORPSE_FALL_TIME: f32 = 0.3;
+pub const CORPSE_TIME: f32 = 1.5;
 comptime {
     //Enemy steps are only tested at their destination, so one frame's move must stay under the smallest cell side
     //(0.21m on lvl1) even on the longest frame
@@ -31,7 +52,7 @@ pub const ENEMY_TURN_RATE: f32 = 6.0; //How quickly enemies steer onto a new hea
 pub const FLOW_FIELD_CELLS_PER_FRAME: u32 = 300;
 
 pub const PLAYER_MAX_HEALTH: u8 = 100;
-pub const ENEMY_MAX_HEALTH: u8 = 100;
+pub const ENEMY_MAX_HEALTH: u8 = 100; //A walker's (see ENEMY_KINDS)
 pub const CONTACT_DMG: u8 = 5; //Damage an enemy does to the player when it walks into them
 pub const SCORE_PER_KILL: u64 = 10; //Multiplied by the kill streak (the combo), which resets when the player is hurt
 
@@ -162,14 +183,19 @@ pub const HEALTH_DROP_LARGE: u8 = 45;
 /// Gatling gun. Only affects where bullets are drawn: they are simulated from the player's feet so enemies
 /// right up against the player can still be hit
 pub const GUN_BARRELS: u8 = 6; //One shot per FIRE_ANGLE_DELTA of crank, so the barrels turn twice per crank revolution
-pub const GUN_HEIGHT_PX: i32 = 16; //Height of the barrels above the player's feet
+pub const GUN_HEIGHT_PX: i32 = 12; //Height of the barrels above the player's feet (GUN_Z in character_sprites.py, on screen)
 pub const MUZZLE_FORWARD: f32 = 0.14; //Metres ahead of the player the barrels end
-pub const MUZZLE_SIDE: f32 = 0.08; //Metres to the player's right the gun is held
-pub const BARREL_RADIUS: f32 = 0.02; //Metres from the gun's axis to each barrel
+pub const MUZZLE_SIDE: f32 = 0; //Held two-handed in the middle of the body, so mirrored facings need no side swap
+pub const BARREL_RADIUS: f32 = 0.013; //Metres from the gun's axis to each barrel
 pub const MUZZLE_CONVERGE_DIST: f32 = 1.5; //The drawn muzzle offset fades out over this many metres so tracers meet the aim line
 pub const TRACER_LENGTH: f32 = 0.3; //Metres of trail drawn behind each bullet (longer than a 50 FPS step so the stream looks unbroken)
 
-pub const FLASH_HIT_EFFECT_DURATION: f32 = 0.3;
+pub const FLASH_HIT_EFFECT_DURATION: f32 = 0.3; //The player shows the hurt pose for as long
+
+/// Character animation (frames in character_sprites.py). Walk and run cycles step with the distance covered
+pub const HERO_RUN_CYCLE_DIST: f32 = 0.4; //Metres per run cycle (two steps)
+pub const ENEMY_WALK_CYCLE_DIST: f32 = 0.35;
+pub const HERO_DEATH_FRAME_TIME: f32 = 0.12; //Seconds per frame of the player falling down
 
 /// Melee. Out of ammo, the player strikes the few nearest enemies in reach with the gun's stock (see melee_system)
 pub const MELEE_RANGE: f32 = CHAR_ENEMY_COLL_RADIUS * 1.5; //Reaches the ring enemies crowd the player at, and a bit beyond
@@ -185,6 +211,10 @@ pub const DROP_MARKER_INSET_SIDE: i32 = 24;
 
 pub const MAX_SCORE: u64 = 9999999999;
 pub const GAME_OVER_INPUT_DELAY: f32 = 1.0; //Seconds the run end screen ignores fire before A/B starts the next run
+pub const GAME_OVER_PANEL_DELAY: f32 = 0.8; //Seconds the player is seen falling down before the run end panel covers them
+comptime {
+    if (GAME_OVER_PANEL_DELAY > GAME_OVER_INPUT_DELAY) @compileError("The run end panel must show before A/B can restart");
+}
 
 /// Longest step the simulation takes in one frame. Larger gaps (e.g. returning from the system menu) are clamped
 /// so enemies and bullets don't teleport

@@ -8,13 +8,21 @@ const Hit = state.Hit;
 
 const Vec2f = @Vector(2, f32);
 
-const CHAR_BULLET_COLL_RADIUS_SQRD = consts.CHAR_BULLET_COLL_RADIUS * consts.CHAR_BULLET_COLL_RADIUS;
+/// Each EnemyKind's hit circle, squared
+const HIT_RADIUS_SQRD = blk: {
+    var r: [consts.ENEMY_KINDS.len]f32 = undefined;
+    for (&r, consts.ENEMY_KINDS) |*o, k| o.* = k.hit_radius * k.hit_radius;
+    break :blk r;
+};
 
 /// `collide` tests a point after each move, so a bullet must not step over an enemy's hit circle in one
 /// frame at the target 50 FPS (longer frames can, which is acceptable for the odd hitch)
 const TARGET_FRAME_DT: f32 = 1.0 / 50.0;
 comptime {
-    if (consts.BULLET_MAX_SPEED * TARGET_FRAME_DT >= 2 * consts.CHAR_BULLET_COLL_RADIUS) @compileError("Bullets are fast enough to skip over enemies in one frame");
+    for (consts.ENEMY_KINDS) |k| {
+        if (k.hit_radius < consts.ENEMY_MIN_HIT_RADIUS) @compileError("ENEMY_MIN_HIT_RADIUS must be the smallest hit radius");
+    }
+    if (consts.BULLET_MAX_SPEED * TARGET_FRAME_DT >= 2 * consts.ENEMY_MIN_HIT_RADIUS) @compileError("Bullets are fast enough to skip over enemies in one frame");
 }
 
 /// Spawn a new bullet at `world_pos` (the player's feet) heading along `world_dir`, turned sideways by
@@ -71,14 +79,14 @@ pub fn update(bullets: *Bullets, grid: *const CollisionGrid, dt: f32) void {
 ///
 /// TODO: Non brute force collision
 ///
-pub fn collide(bullets: *Bullets, enemy_positions: []const Vec2f, hits_out: []Hit) []Hit {
-    std.debug.assert(hits_out.len >= bullets.len);
+pub fn collide(bullets: *Bullets, enemy_positions: []const Vec2f, enemy_kinds: []const state.EnemyKind, hits_out: []Hit) []Hit {
+    std.debug.assert(hits_out.len >= bullets.len and enemy_kinds.len >= enemy_positions.len);
     var num_hits: usize = 0;
 
     for (bullets.pos[0..bullets.len], bullets.lifetime[0..bullets.len], 0..) |bullet_pos, *lifetime, bullet_idx| {
         if (lifetime.* <= 0) continue;
-        for (enemy_positions, 0..) |enemy_pos, enemy_idx| {
-            if (maths.magnitudeSqrd(enemy_pos - bullet_pos) <= CHAR_BULLET_COLL_RADIUS_SQRD) {
+        for (enemy_positions, enemy_kinds[0..enemy_positions.len], 0..) |enemy_pos, kind, enemy_idx| {
+            if (maths.magnitudeSqrd(enemy_pos - bullet_pos) <= HIT_RADIUS_SQRD[@backingInt(kind)]) {
                 hits_out[num_hits] = .{ .enemy_idx = @intCast(enemy_idx), .impact_dir = bullets.dir[bullet_idx] };
                 num_hits += 1;
                 lifetime.* = 0; //Destroy the bullet
@@ -137,15 +145,28 @@ test "[bullet_system] each bullet hits one enemy once" {
     fire(&b, Vec2f{ 0, 0 }, Vec2f{ 1, 0 }, 0);
     fire(&b, Vec2f{ 5, 0 }, Vec2f{ 1, 0 }, 0);
     const enemies = [_]Vec2f{ Vec2f{ 0, 0 }, Vec2f{ 0.01, 0 }, Vec2f{ 100, 0 } };
+    const kinds: [3]state.EnemyKind = @splat(.walker);
     var hits: [Bullets.capacity]Hit = undefined;
 
-    const first = collide(&b, &enemies, &hits);
+    const first = collide(&b, &enemies, &kinds, &hits);
     try std.testing.expect(first.len == 1);
     try std.testing.expect(first[0].enemy_idx == 0);
 
     //The bullet that hit is dead so can't hit again before it is removed
-    const second = collide(&b, &enemies, &hits);
+    const second = collide(&b, &enemies, &kinds, &hits);
     try std.testing.expect(second.len == 0);
+}
+
+test "[bullet_system] big enemies are easier to hit than small ones" {
+    var b = Bullets{};
+    const off = (consts.CHAR_BULLET_COLL_RADIUS + state.EnemyKind.brute.def().hit_radius) / 2; //Inside a brute, outside a walker
+    fire(&b, Vec2f{ 0, off }, Vec2f{ 1, 0 }, 0);
+    fire(&b, Vec2f{ 5, off }, Vec2f{ 1, 0 }, 0);
+    const enemies = [_]Vec2f{ Vec2f{ 0, 0 }, Vec2f{ 5, 0 } };
+    const kinds = [_]state.EnemyKind{ .walker, .brute };
+    var hits: [Bullets.capacity]Hit = undefined;
+    const got = collide(&b, &enemies, &kinds, &hits);
+    try std.testing.expect(got.len == 1 and got[0].enemy_idx == 1);
 }
 
 test "[bullet_system] walls stop bullets, even on the longest frame" {

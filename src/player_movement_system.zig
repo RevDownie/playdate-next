@@ -1,5 +1,6 @@
 const std = @import("std");
 const consts = @import("tweak_constants.zig");
+const maths = @import("maths.zig");
 const state = @import("game_state.zig");
 const CollisionGrid = @import("collision_grid.zig").CollisionGrid;
 
@@ -34,6 +35,9 @@ pub fn update(player: *state.Player, input: state.Input, collision_grid: *const 
         new_pos[1] = pos[1];
     }
 
+    //Distance run drives the run cycle; only its place in a cycle matters, so it wraps rather than growing forever
+    player.run_dist += maths.magnitude(new_pos - pos);
+    while (player.run_dist >= consts.HERO_RUN_CYCLE_DIST) player.run_dist -= consts.HERO_RUN_CYCLE_DIST;
     player.pos = new_pos;
     player.vel = vel;
 }
