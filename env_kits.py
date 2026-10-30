@@ -996,14 +996,21 @@ def cg_road(cracked, line=False, zebra=False):
     return draw
 
 
+def joint(p, x0, y0, x1, y1):
+    """A LIGHT joint line on open ground, 2 px thick: 25% dither in phase variants puts its one dot per 2 x 2 on
+    alternate rows and columns, so a 1 px line is dotted in one screen phase and gone in the other and blinks in and
+    out as the view scrolls. 2 px always holds one row (column) of dots"""
+    p.rect([x0, y0, x1 + (1 if x0 == x1 else 0), y1 + (1 if y0 == y1 else 0)], LIGHT)
+
+
 def cg_pavement(p):
-    p.line([(0, -27), (56, -27)], LIGHT)
-    p.line([(0, -27), (0, -1)], LIGHT)
-    p.line([(28, -27), (28, -1)], LIGHT)
+    joint(p, 0, -27, 56, -27)
+    joint(p, 0, -27, 0, -1)
+    joint(p, 28, -27, 28, -1)
 
 
 def cg_kerb(p):
-    p.line([(0, -27), (0, -2)], LIGHT)
+    joint(p, 0, -27, 0, -6)
     p.line([(0, -5), (56, -5)], BLACK)
     p.line([(0, -1), (56, -1)], BLACK)
 
@@ -1423,8 +1430,8 @@ def qd_floodlight(p):
 
 def qg_concrete(p):
     """Slabs: the joints only"""
-    p.line([(0, -27), (56, -27)], LIGHT)
-    p.line([(0, -27), (0, -1)], LIGHT)
+    joint(p, 0, -27, 56, -27)
+    joint(p, 0, -27, 0, -1)
 
 
 def qg_tracks(vertical):
@@ -1443,8 +1450,8 @@ def qg_tracks(vertical):
 def qg_helipad(p):
     """3x3 cells (anchor bottom-left): a painted H in a ring on a concrete pad"""
     w, h = 3 * 57, 3 * 27
-    for x0, y0, x1, y1 in ((0, -h, w - 1, -h), (0, -1, w - 1, -1), (0, -h, 0, -1), (w - 1, -h, w - 1, -1)):
-        p.line([(x0, y0), (x1, y1)], LIGHT)  # The pad's edge
+    for x0, y0, x1, y1 in ((0, -h, w - 1, -h), (0, -2, w - 1, -2), (0, -h, 0, -1), (w - 2, -h, w - 2, -1)):
+        joint(p, x0, y0, x1, y1)  # The pad's edge
     cx, cy = w // 2, -h // 2
     p.ellipse([cx - 64, cy - 32, cx + 64, cy + 32], None, BLACK)
     p.ellipse([cx - 60, cy - 30, cx + 60, cy + 30], None, BLACK)
