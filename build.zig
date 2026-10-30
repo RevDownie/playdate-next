@@ -9,6 +9,8 @@ pub fn build(b: *std.Build) void {
     const invincible = b.option(bool, "invincible", "Debug builds: start with the player invincible (toggle it from the system menu)") orelse false;
     const build_options = b.addOptions();
     build_options.addOption(bool, "invincible", invincible);
+    const level = b.option([]const u8, "level", "Debug: play only this level (a name from LEVEL_NAMES in main.zig; also a system menu option) instead of a random one per run") orelse "";
+    build_options.addOption([]const u8, "level", level);
 
     const environ = b.graph.environ_map;
     const sdk_path = environ.get("PLAYDATE_SDK_PATH") orelse @panic("PLAYDATE_SDK_PATH is not set");

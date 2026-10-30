@@ -3,13 +3,15 @@ const pd = @import("playdate.zig").api;
 const graphics_coords = @import("graphics_coords.zig");
 const anim = @import("animation.zig");
 const bitmap_descs = @import("bitmap_descs.zig");
+const kit_descs = @import("kit_descs.zig");
 const consts = @import("tweak_constants.zig");
 const memory = @import("memory.zig");
 const hud_mod = @import("hud.zig");
 const maths = @import("maths.zig");
 const state = @import("game_state.zig");
 const GameState = state.GameState;
-const Level = @import("level_loader.zig").Level;
+const level_loader = @import("level_loader.zig");
+const Level = level_loader.Level;
 const Arena = memory.Arena;
 
 const Vec2i = @Vector(2, i32);
@@ -17,7 +19,8 @@ const Vec2f = @Vector(2, f32);
 
 pub const Hud = hud_mod.Hud;
 
-/// Which bitmap table a sprite is drawn from. The zombie and gib sheets are in EnemyKind order
+/// Which bitmap table a sprite is drawn from. The zombie and gib sheets are in EnemyKind order. `env` is the
+/// exception: its frame is a piece of the level's kit, each piece its own bitmap (they differ in size)
 ///
 const Sheet = enum(u8) { player, gun, melee, runner, walker, shambler, brute, env, drop, gibs_runner, gibs_walker, gibs_shambler, gibs_brute, pool, spatter };
 
@@ -35,10 +38,13 @@ fn gibSheet(kind: state.EnemyKind) Sheet {
 /// Bitmaps owned by the Playdate runtime, loaded once up front
 ///
 pub const Assets = struct {
-    bg_bitmap: *pd.LCDBitmap,
-    tables: [std.enums.values(Sheet).len]*pd.LCDBitmapTable, //Indexed by Sheet
+    tables: [std.enums.values(Sheet).len]*pd.LCDBitmapTable, //Indexed by Sheet (not env)
+    kit_pieces: [kit_descs.KITS.len][kit_descs.MAX_KIT_PIECES]*pd.LCDBitmap, //Every kit's pieces, by kit and piece
+    grounds: [MAX_LEVELS]*pd.LCDBitmap, //Each level's baked floor, by level index
     fonts: hud_mod.Fonts,
 };
+
+pub const MAX_LEVELS = 8;
 
 /// One entry in the per frame draw list, already in screen space with the sprite's anchor applied.
 /// Kept to 8 bytes (no pointers, sizes or offsets - those come from the Sheet) so the whole list plus its
@@ -68,7 +74,7 @@ const BLINK_PERIOD: f32 = 0.25;
 
 /// Drop shadow ellipses in pixels, a little narrower than the drawn drop
 const DROP_SHADOW_W = 30;
-const DROP_SHADOW_W_LARGE = 44;
+const DROP_SHADOW_W_LARGE = 32;
 const DROP_SHADOW_H = 8;
 
 /// Something about to vanish (`lifetime` seconds left) blinks for its last `blink_time`: hidden every other half
@@ -103,16 +109,27 @@ pub const RenderStats = struct {
     drawn: u16, //Sprites that survived culling this frame
 };
 
-/// Load the rendering assets - bitmaps and bitmap tables
+/// Load the rendering assets - bitmaps and bitmap tables, every kit's pieces and every level's ground (`level_names`,
+/// whose ground is `ground-<name>`), all up front so changing level between runs reads no image files
 ///
-pub fn loadAssets(playdate_api: *pd.PlaydateAPI, level_bitmap_name: [*:0]const u8) Assets {
+pub fn loadAssets(playdate_api: *pd.PlaydateAPI, level_names: []const [:0]const u8) Assets {
     const graphics = playdate_api.graphics.*;
     var assets: Assets = undefined;
-    assets.bg_bitmap = graphics.loadBitmap.?("bg", null) orelse @panic("loadAssets: Failed to load bg");
     for (SHEET_FILES, 0..) |name, i| {
         assets.tables[i] = graphics.loadBitmapTable.?(name, null) orelse @panic("loadAssets: Failed to load a character sheet");
     }
-    assets.tables[@backingInt(Sheet.env)] = graphics.loadBitmapTable.?(level_bitmap_name, null) orelse @panic("loadAssets: Failed to load level bitmaps");
+    var name_buf: [64]u8 = undefined;
+    for (kit_descs.KITS, 0..) |kit, k| {
+        for (0..kit.pieces.len) |i| {
+            const name = std.fmt.bufPrintSentinel(&name_buf, "{s}-piece-{d}", .{ kit.name, i }, 0) catch unreachable;
+            assets.kit_pieces[k][i] = graphics.loadBitmap.?(name, null) orelse @panic("loadAssets: Failed to load a kit piece");
+        }
+    }
+    std.debug.assert(level_names.len <= MAX_LEVELS);
+    for (level_names, 0..) |level_name, i| {
+        const name = std.fmt.bufPrintSentinel(&name_buf, "ground-{s}", .{level_name}, 0) catch unreachable;
+        assets.grounds[i] = graphics.loadBitmap.?(name, null) orelse @panic("loadAssets: Failed to load a level's ground");
+    }
     assets.tables[@backingInt(Sheet.drop)] = graphics.loadBitmapTable.?("drops", null) orelse @panic("loadAssets: Failed to load drops");
     for (GORE_SHEET_FILES, @backingInt(Sheet.gibs_runner)..) |name, i| {
         assets.tables[i] = graphics.loadBitmapTable.?(name, null) orelse @panic("loadAssets: Failed to load a gore sheet");
@@ -124,7 +141,7 @@ pub fn loadAssets(playdate_api: *pd.PlaydateAPI, level_bitmap_name: [*:0]const u
 /// Build a draw list of everything on screen, sort it by "depth order" and draw it, then the bullets, the HUD
 /// and (when the run is over) the run end screen. Per frame buffers come from the frame arena
 ///
-pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const GameState, level: *const Level, hud: Hud, frame_arena: *Arena) RenderStats {
+pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const GameState, level: *const Level, level_index: usize, hud: Hud, frame_arena: *Arena) RenderStats {
     const sys = playdate_api.system.*;
     const disp = playdate_api.display.*;
     const graphics = playdate_api.graphics.*;
@@ -134,10 +151,17 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     //Inverting the whole screen is the hit flash
     _ = graphics.setDrawMode.?(if (game.player.hit_flash_timer > 0) pd.kDrawModeInverted else pd.kDrawModeCopy);
 
-    //---Render the BG
-    const bg_screen_pos = screen.toScreen(Vec2f{ 0, 0 });
-    const bg_size = level.bg_size_pixels;
-    graphics.tileBitmap.?(assets.bg_bitmap, bg_screen_pos[0] - @divTrunc(bg_size[0], 2), bg_screen_pos[1] - @divTrunc(bg_size[1], 2), bg_size[0], bg_size[1], pd.kBitmapUnflipped);
+    //---The floor: one bitmap baked offline (convert_tilemaps.py) with the ground art, decals and the view beyond the
+    //map, which extends GROUND_MARGIN_X/Y past the map's edges. Its pixel under the world origin (the centre of
+    //the middle cell) goes on the origin's screen position, floored like the sprites' (on screen) positions
+    const grid = &level.collision_grid;
+    const ground_origin = Vec2i{
+        kit_descs.GROUND_MARGIN_X + @as(i32, grid.width / 2) * grid.cell_width + grid.cell_width / 2,
+        kit_descs.GROUND_MARGIN_Y + @as(i32, grid.height / 2) * grid.cell_height + grid.cell_height / 2,
+    };
+    const origin_on_screen = Vec2f{ -screen.camera_pos[0] * consts.METRES_TO_PIXELS + @as(f32, @floatFromInt(screen.width >> 1)), screen.camera_pos[1] * consts.METRES_TO_PIXELS + @as(f32, @floatFromInt(screen.height >> 1)) };
+    const ground_pos = Vec2i{ @intFromFloat(@floor(origin_on_screen[0])), @intFromFloat(@floor(origin_on_screen[1])) } - ground_origin;
+    graphics.drawBitmap.?(assets.grounds[level_index], ground_pos[0], ground_pos[1], pd.kBitmapUnflipped);
 
     //---Gore on the ground under everything standing, so it needs no depth sort: blood pools, spatters, then the
     //body parts lying in them
@@ -172,21 +196,21 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
 
     const player = &game.player;
     if (hud.game_over) |over| {
-        list.add(screen, .player, player.pos, anim.heroDeathFrame(player.facing_dir, over.time), sheetAnchor(.player));
+        list.add(screen, .player, player.pos, anim.heroDeathFrame(player.facing_dir, over.time), sheetAnchor(.player), sheetSize(.player));
     } else {
         //The body, then the arms and weapon over it: same depth, and added straight after so it draws just after
         const moving = player.vel[0] != 0 or player.vel[1] != 0;
         const hurt = player.hit_flash_timer > 0;
-        list.add(screen, .player, player.pos, anim.heroFrame(player.facing_dir, moving, player.run_dist, hurt), sheetAnchor(.player));
+        list.add(screen, .player, player.pos, anim.heroFrame(player.facing_dir, moving, player.run_dist, hurt), sheetAnchor(.player), sheetSize(.player));
         const melee = game.bullets.ammo == 0;
         const swing_progress = 1 - game.melee.swing_timer / consts.MELEE_SWING_TIME;
         const weapon = anim.heroWeaponFrame(player.facing_dir, melee, game.melee.swing_timer > 0, swing_progress, hurt);
-        list.add(screen, if (melee) .melee else .gun, player.pos, weapon, sheetAnchor(.player));
+        list.add(screen, if (melee) .melee else .gun, player.pos, weapon, sheetAnchor(.player), sheetSize(.player));
     }
     const enemies = &game.enemies;
     for (enemies.positions(), enemies.velocities(), enemies.kind[0..enemies.len], 0..) |p, v, kind, i| {
         const sheet = enemySheet(kind);
-        list.add(screen, sheet, p, anim.enemyFrame(p, v, enemies.isBumping(i)), sheetAnchor(sheet));
+        list.add(screen, sheet, p, anim.enemyFrame(p, v, enemies.isBumping(i)), sheetAnchor(sheet), sheetSize(sheet));
     }
     //Drops bob above their point with a glint now and then, blinking for their last few seconds before they vanish.
     //The bob goes in the anchor so the depth sort still uses the point on the ground
@@ -195,10 +219,15 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
         const age = consts.DROP_LIFETIME - l;
         const frame = @as(u32, @backingInt(k)) * bitmap_descs.DROP_FRAMES_PER_KIND + anim.dropSheenFrame(age, point);
         const anchor = Vec2i{ bitmap_descs.DROP_W / 2, @as(i32, bitmap_descs.DROP_H) - 1 + anim.dropBounce(age) };
-        list.add(screen, .drop, p, .{ .index = @intCast(frame), .flipped = false }, anchor);
+        list.add(screen, .drop, p, .{ .index = @intCast(frame), .flipped = false }, anchor, sheetSize(.drop));
     }
-    for (level.obj_world_positions, level.obj_bitmap_indices) |p, bi| {
-        list.add(screen, .env, p, .{ .index = bi, .flipped = false }, .{ bitmap_descs.ENV_OBJ_W / 2, bitmap_descs.ENV_OBJ_H });
+    //Level objects: each piece has its own size and anchor (mirrored pieces have their own anchor too)
+    const kit_pieces = kit_descs.KITS[level.kit].pieces;
+    for (level.obj_world_positions, level.obj_pieces) |p, piece_byte| {
+        const flipped = piece_byte & level_loader.PIECE_FLIPPED != 0;
+        const index = piece_byte & ~level_loader.PIECE_FLIPPED;
+        const piece = kit_pieces[index];
+        list.add(screen, .env, p, .{ .index = index, .flipped = flipped }, .{ if (flipped) piece.anchor_x_flipped else piece.anchor_x, piece.anchor_y }, .{ piece.w, piece.h });
     }
 
     //---Sort by depth and draw back to front
@@ -206,7 +235,7 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     std.sort.pdq(SortKey, keys, {}, std.sort.asc(SortKey));
     for (keys) |key| {
         const item = list.items[@as(u16, @truncate(key))];
-        const bitmap = graphics.getTableBitmap.?(assets.tables[@backingInt(item.sheet)], item.frame) orelse @panic("render: Bitmap index out of range for its table");
+        const bitmap = if (item.sheet == .env) assets.kit_pieces[level.kit][item.frame] else graphics.getTableBitmap.?(assets.tables[@backingInt(item.sheet)], item.frame) orelse @panic("render: Bitmap index out of range for its table");
         graphics.drawBitmap.?(bitmap, item.x, item.y, if (item.flipped) pd.kBitmapFlippedX else pd.kBitmapUnflipped);
     }
 
@@ -300,12 +329,12 @@ const DrawList = struct {
     keys: []SortKey,
     len: usize = 0,
 
-    /// Add a sprite whose `anchor` (pixels from its top left) sits at `world_pos`, unless it is off screen
+    /// Add a sprite of `size` pixels whose `anchor` (pixels from its top left) sits at `world_pos`, unless it is off
+    /// screen
     ///
-    fn add(self: *DrawList, screen: Screen, sheet: Sheet, world_pos: Vec2f, frame: anim.BitmapFrame, anchor: Vec2i) void {
+    fn add(self: *DrawList, screen: Screen, sheet: Sheet, world_pos: Vec2f, frame: anim.BitmapFrame, anchor: Vec2i, size: Vec2i) void {
         const feet = screen.toScreen(world_pos);
         const top_left = feet - anchor;
-        const size = sheetSize(sheet);
         if (top_left[0] >= screen.width or top_left[1] >= screen.height or top_left[0] + size[0] <= 0 or top_left[1] + size[1] <= 0) return;
 
         //On screen, so every coordinate is well within i16 range
@@ -321,7 +350,7 @@ fn sheetSize(sheet: Sheet) Vec2i {
     return switch (sheet) {
         .player, .gun, .melee => .{ bitmap_descs.HERO_W, bitmap_descs.HERO_H },
         .runner, .walker, .shambler, .brute => .{ enemyCell(sheet)[0], enemyCell(sheet)[1] },
-        .env => .{ bitmap_descs.ENV_OBJ_W, bitmap_descs.ENV_OBJ_H },
+        .env => unreachable, //Per piece: kit_descs
         .drop => .{ bitmap_descs.DROP_W, bitmap_descs.DROP_H },
         .gibs_runner, .gibs_walker, .gibs_shambler, .gibs_brute => @splat(@intCast(bitmap_descs.GIB_CELLS[@backingInt(sheet) - @backingInt(Sheet.gibs_runner)])),
         .pool => .{ bitmap_descs.SPLAT_W, bitmap_descs.SPLAT_H },

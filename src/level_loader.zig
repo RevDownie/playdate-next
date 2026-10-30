@@ -3,6 +3,7 @@ const pd = @import("playdate.zig").api;
 const consts = @import("tweak_constants.zig");
 const CollisionGrid = @import("collision_grid.zig").CollisionGrid;
 const Arena = @import("memory.zig").Arena;
+const kit_descs = @import("kit_descs.zig");
 
 const Vec2f = @Vector(2, f32);
 const Vec2i = @Vector(2, i32);
@@ -23,16 +24,20 @@ pub const SpawnCells = struct {
     sides: [NUM_SIDES][]const u16,
 };
 
+/// Set in an object's piece byte when it is drawn mirrored
+pub const PIECE_FLIPPED: u8 = 0x80;
+
 /// Everything loaded for a level. All slices live in the level arena
 ///
 pub const Level = struct {
-    obj_world_positions: []const Vec2f,
-    obj_bitmap_indices: []const u8,
+    kit: u8, //Index into kit_descs.KITS: the environment the objects are drawn from
+    start_pos: Vec2f, //Where the player starts a run: the centre of the start cell
+    obj_world_positions: []const Vec2f, //Centre of each object's anchor cell (the bottom-left of its footprint)
+    obj_pieces: []const u8, //Piece index into its kit, PIECE_FLIPPED if mirrored
     collision_grid: CollisionGrid,
     spawn_cells: SpawnCells, //Free cells around the edge of the map that enemies drop in on
     drop_cells: []const u16, //Free cells ammo and health drops appear on, placed by the level designer
     drop_sizes: []const DropSize, //Size of drop each of `drop_cells` gives
-    bg_size_pixels: Vec2i,
 };
 
 pub const Error = error{
@@ -46,9 +51,12 @@ pub const Error = error{
     EmptyGrid,
     CellOutOfRange,
     InvalidSpriteId,
+    InvalidKit,
+    TruncatedCells,
+    StartOnBlockedCell,
 };
 
-const HEADER_SIZE = 5;
+const HEADER_SIZE = 8;
 const DROP_SIZE = 3;
 const OBJ_SIZE = 3;
 
@@ -74,11 +82,12 @@ pub fn load(playdate_api: *pd.PlaydateAPI, level_file_name: [*:0]const u8, arena
     return parse(bytes, arena);
 }
 
-/// Parse the level binary (see convert_tilemaps.py) converting the cell co-ords into world positions,
-/// and build the bitmap table indices and collision grid.
-/// Format: u8 grid width, u8 grid height, u8 cell width px, u8 cell height px, u8 drop point count,
-/// then per drop point: u16 LE cell index, u8 size (`DropSize`),
-/// then per object until the end: u16 LE cell index, u8 sprite id (1 based)
+/// Parse the level binary (see convert_tilemaps.py) converting the cell co-ords into world positions and building
+/// the collision grid.
+/// Format: u8 grid width, u8 grid height, u8 cell width px, u8 cell height px, u8 kit, u8 drop point count,
+/// u16 LE player start cell, then per drop point: u16 LE cell index, u8 size (`DropSize`),
+/// then the blocked cells as a bitmask (bit i % 8 of byte i / 8: the objects' footprints),
+/// then per object until the end: u16 LE anchor cell index, u8 piece index (PIECE_FLIPPED if mirrored)
 ///
 pub fn parse(bytes: []const u8, arena: *Arena) Error!Level {
     if (bytes.len < HEADER_SIZE) return Error.TruncatedHeader;
@@ -86,36 +95,46 @@ pub fn parse(bytes: []const u8, arena: *Arena) Error!Level {
     const grid_height = bytes[1];
     const cell_width = bytes[2];
     const cell_height = bytes[3];
+    const kit = bytes[4];
     if (grid_width == 0 or grid_height == 0 or cell_width == 0 or cell_height == 0) return Error.EmptyGrid;
+    if (kit >= kit_descs.KITS.len) return Error.InvalidKit;
 
-    const num_drops: usize = bytes[4];
+    const num_drops: usize = bytes[5];
+    const start_cell = std.mem.readInt(u16, bytes[6..8], .little);
     if (bytes.len < HEADER_SIZE + num_drops * DROP_SIZE) return Error.TruncatedDrops;
     const drop_bytes = bytes[HEADER_SIZE..][0 .. num_drops * DROP_SIZE];
 
-    const obj_bytes = bytes[HEADER_SIZE + drop_bytes.len ..];
+    const num_cells = @as(usize, grid_width) * grid_height;
+    const mask_len = (num_cells + 7) / 8;
+    if (bytes.len < HEADER_SIZE + drop_bytes.len + mask_len) return Error.TruncatedCells;
+    const mask = bytes[HEADER_SIZE + drop_bytes.len ..][0..mask_len];
+
+    const obj_bytes = bytes[HEADER_SIZE + drop_bytes.len + mask_len ..];
     if (obj_bytes.len % OBJ_SIZE != 0) return Error.TruncatedObject;
     const num_objs = obj_bytes.len / OBJ_SIZE;
-    const num_cells = @as(usize, grid_width) * grid_height;
 
     const world_positions = arena.alloc(Vec2f, num_objs);
-    const bitmap_indices = arena.alloc(u8, num_objs);
+    const pieces = arena.alloc(u8, num_objs);
     const cells = arena.alloc(bool, num_cells);
-    @memset(cells, false);
+    for (cells, 0..) |*c, i| c.* = mask[i / 8] & (@as(u8, 1) << @intCast(i % 8)) != 0;
 
-    const half_w: i32 = grid_width / 2;
-    const half_h: i32 = grid_height / 2;
+    const grid = CollisionGrid{
+        .cells = cells,
+        .width = grid_width,
+        .height = grid_height,
+        .cell_width = cell_width,
+        .cell_height = cell_height,
+    };
+    if (start_cell >= num_cells) return Error.CellOutOfRange;
+    if (cells[start_cell]) return Error.StartOnBlockedCell;
+    const num_pieces = kit_descs.KITS[kit].pieces.len;
     for (0..num_objs) |i| {
         const obj = obj_bytes[i * OBJ_SIZE ..][0..OBJ_SIZE];
         const idx = std.mem.readInt(u16, obj[0..2], .little);
         if (idx >= num_cells) return Error.CellOutOfRange;
-        const sprite_id = obj[2];
-        if (sprite_id == 0) return Error.InvalidSpriteId;
-
-        cells[idx] = true;
-        const x = @as(i32, idx % grid_width) - half_w;
-        const y = @as(i32, idx / grid_width) - half_h;
-        world_positions[i] = Vec2f{ @floatFromInt(x * cell_width), @floatFromInt(-y * cell_height) } / @as(Vec2f, @splat(consts.METRES_TO_PIXELS));
-        bitmap_indices[i] = sprite_id - 1;
+        if (obj[2] & ~PIECE_FLIPPED >= num_pieces) return Error.InvalidSpriteId;
+        world_positions[i] = grid.cellCentre(idx);
+        pieces[i] = obj[2];
     }
 
     //Drop points come after the objects are placed, so they can be checked against the collision
@@ -130,21 +149,15 @@ pub fn parse(bytes: []const u8, arena: *Arena) Error!Level {
         drop_sizes[i] = std.enums.fromInt(DropSize, drop[2]) orelse return Error.InvalidDropSize;
     }
 
-    const grid = CollisionGrid{
-        .cells = cells,
-        .width = grid_width,
-        .height = grid_height,
-        .cell_width = cell_width,
-        .cell_height = cell_height,
-    };
     return Level{
+        .kit = kit,
+        .start_pos = grid.cellCentre(start_cell),
         .obj_world_positions = world_positions,
-        .obj_bitmap_indices = bitmap_indices,
+        .obj_pieces = pieces,
         .collision_grid = grid,
         .spawn_cells = findSpawnCells(&grid, arena),
         .drop_cells = drop_cells,
         .drop_sizes = drop_sizes,
-        .bg_size_pixels = Vec2i{ @as(i32, grid_width) * cell_width * 2, @as(i32, grid_height) * cell_height * 2 },
     };
 }
 
@@ -231,19 +244,30 @@ test "[level_loader] spawn cells are the free cells around the edge" {
     }
 }
 
-test "[level_loader] parse objects and collision" {
+test "[level_loader] parse objects, footprints and collision" {
     var buffer: [1024]u8 = undefined;
     var arena = Arena.init("level", &buffer);
-    //4x4 grid of 128px cells, a large drop point in cell 5, an object in cell 0 (top left) with sprite 2
-    const bytes = [_]u8{ 4, 4, 128, 128, 1, 5, 0, 1, 0, 0, 2 };
+    //4x4 grid of 128px cells, kit 0, the player starting in cell 6, a large drop point in cell 5. A mirrored 2x2
+    //piece placed on cell 12 (column 0 of the bottom row: its footprint's bottom-left) whose footprint, extending
+    //right and up, blocks 8, 9, 12 and 13
+    const bytes = [_]u8{ 4, 4, 128, 128, 0, 1, 6, 0, 5, 0, 1, 0b0000_0000, 0b0011_0011, 12, 0, 1 | PIECE_FLIPPED };
     const level = try parse(&bytes, &arena);
 
+    try std.testing.expect(level.kit == 0);
+    try std.testing.expect(level.start_pos[0] == 0 and level.start_pos[1] == 1); //Cell 6: column 2, row 1
     try std.testing.expect(level.obj_world_positions.len == 1);
-    try std.testing.expect(level.obj_bitmap_indices[0] == 1);
-    try std.testing.expect(level.obj_world_positions[0][0] == -2 and level.obj_world_positions[0][1] == 2);
-    try std.testing.expect(level.collision_grid.isOccupied(level.obj_world_positions[0]));
-    try std.testing.expect(!level.collision_grid.isOccupied(Vec2f{ 0, 0 }));
-    try std.testing.expect(level.spawn_cells.all.len == 12 - 1); //The edge of a 4x4 grid, minus the object
+    try std.testing.expect(level.obj_pieces[0] == 1 | PIECE_FLIPPED);
+    //Its position is its anchor cell's centre: column 0, row 3 of a 4x4 grid centred on the origin
+    try std.testing.expect(level.obj_world_positions[0][0] == -2 and level.obj_world_positions[0][1] == -1);
+    const grid = &level.collision_grid;
+    for ([_]u16{ 8, 9, 12, 13 }) |c| try std.testing.expect(grid.cells[c]);
+    var blocked: usize = 0;
+    for (grid.cells) |c| blocked += @intFromBool(c);
+    try std.testing.expect(blocked == 4);
+    try std.testing.expect(grid.isOccupied(level.obj_world_positions[0]));
+    try std.testing.expect(grid.isOccupied(level.obj_world_positions[0] + Vec2f{ 1, 1 })); //Up and right: cell 9
+    try std.testing.expect(!grid.isOccupied(Vec2f{ 0, 0 }));
+    try std.testing.expect(level.spawn_cells.all.len == 12 - 3); //The edge of a 4x4 grid, minus cells 8, 12 and 13
     try std.testing.expect(level.drop_cells.len == 1 and level.drop_cells[0] == 5 and level.drop_sizes[0] == .large);
 }
 
@@ -251,13 +275,17 @@ test "[level_loader] parse rejects bad input" {
     var buffer: [1024]u8 = undefined;
     var arena = Arena.init("level", &buffer);
     try std.testing.expectError(Error.TruncatedHeader, parse(&[_]u8{ 4, 4 }, &arena));
-    try std.testing.expectError(Error.TruncatedHeader, parse(&[_]u8{ 4, 4, 128, 128 }, &arena));
-    try std.testing.expectError(Error.EmptyGrid, parse(&[_]u8{ 0, 4, 128, 128, 0 }, &arena));
-    try std.testing.expectError(Error.TruncatedObject, parse(&[_]u8{ 4, 4, 128, 128, 0, 0, 0 }, &arena));
-    try std.testing.expectError(Error.CellOutOfRange, parse(&[_]u8{ 4, 4, 128, 128, 0, 16, 0, 1 }, &arena));
-    try std.testing.expectError(Error.InvalidSpriteId, parse(&[_]u8{ 4, 4, 128, 128, 0, 1, 0, 0 }, &arena));
-    try std.testing.expectError(Error.TruncatedDrops, parse(&[_]u8{ 4, 4, 128, 128, 2, 5, 0, 0 }, &arena));
-    try std.testing.expectError(Error.CellOutOfRange, parse(&[_]u8{ 4, 4, 128, 128, 1, 16, 0, 0 }, &arena));
-    try std.testing.expectError(Error.InvalidDropSize, parse(&[_]u8{ 4, 4, 128, 128, 1, 5, 0, 2 }, &arena));
-    try std.testing.expectError(Error.DropOnBlockedCell, parse(&[_]u8{ 4, 4, 128, 128, 1, 0, 0, 0, 0, 0, 1 }, &arena));
+    try std.testing.expectError(Error.TruncatedHeader, parse(&[_]u8{ 4, 4, 128, 128, 0, 0, 0 }, &arena));
+    try std.testing.expectError(Error.EmptyGrid, parse(&[_]u8{ 0, 4, 128, 128, 0, 0, 0, 0 }, &arena));
+    try std.testing.expectError(Error.InvalidKit, parse(&[_]u8{ 4, 4, 128, 128, kit_descs.KITS.len, 0, 0, 0, 0, 0 }, &arena));
+    try std.testing.expectError(Error.TruncatedCells, parse(&[_]u8{ 4, 4, 128, 128, 0, 0, 0, 0, 0 }, &arena));
+    try std.testing.expectError(Error.TruncatedObject, parse(&[_]u8{ 4, 4, 128, 128, 0, 0, 0, 0, 0, 0, 0 }, &arena));
+    try std.testing.expectError(Error.CellOutOfRange, parse(&[_]u8{ 4, 4, 128, 128, 0, 0, 16, 0, 0, 0 }, &arena));
+    try std.testing.expectError(Error.StartOnBlockedCell, parse(&[_]u8{ 4, 4, 128, 128, 0, 0, 0, 0, 1, 0 }, &arena));
+    try std.testing.expectError(Error.CellOutOfRange, parse(&[_]u8{ 4, 4, 128, 128, 0, 0, 0, 0, 0, 0, 16, 0, 1 }, &arena));
+    try std.testing.expectError(Error.InvalidSpriteId, parse(&[_]u8{ 4, 4, 128, 128, 0, 0, 0, 0, 0, 0, 1, 0, 127 }, &arena));
+    try std.testing.expectError(Error.TruncatedDrops, parse(&[_]u8{ 4, 4, 128, 128, 0, 2, 0, 0, 5, 0, 0 }, &arena));
+    try std.testing.expectError(Error.CellOutOfRange, parse(&[_]u8{ 4, 4, 128, 128, 0, 1, 0, 0, 16, 0, 0, 0, 0 }, &arena));
+    try std.testing.expectError(Error.InvalidDropSize, parse(&[_]u8{ 4, 4, 128, 128, 0, 1, 0, 0, 5, 0, 2, 0, 0 }, &arena));
+    try std.testing.expectError(Error.DropOnBlockedCell, parse(&[_]u8{ 4, 4, 128, 128, 0, 1, 2, 0, 0, 0, 0, 1, 0 }, &arena));
 }

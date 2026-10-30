@@ -1,10 +1,11 @@
 # Launch the game in the Playdate Simulator, capture its output and screenshot the window.
-#   powershell -File tools/sim.ps1 [-Seconds 8] [-NoBuild] [-Invincible]
+#   powershell -File tools/sim.ps1 [-Seconds 8] [-NoBuild] [-Invincible] [-Level <name>]
 # Outputs (git-ignored) in logs/: sim-stdout.log, sim-stderr.log, screenshot.png
 param(
     [int]$Seconds = 8,
     [switch]$NoBuild,
-    [switch]$Invincible # Debug build where enemies can't hurt the player (also a system menu checkmark)
+    [switch]$Invincible, # Debug build where enemies can't hurt the player (also a system menu checkmark)
+    [string]$Level = "" # Debug build that only plays this level (LEVEL_NAMES in main.zig; also a system menu option)
 )
 
 . "$PSScriptRoot\sim-common.ps1"
@@ -25,6 +26,7 @@ if (-not $NoBuild) {
     Push-Location $root
     $buildArgs = @("build")
     if ($Invincible) { $buildArgs += "-Dinvincible=true" }
+    if ($Level) { $buildArgs += "-Dlevel=$Level" }
     zig @buildArgs 2>&1 | Where-Object { $_ -notmatch '^\s*[+|]|^Copying|^Unrecognized' }
     $buildOk = $LASTEXITCODE -eq 0
     Pop-Location

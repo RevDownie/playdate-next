@@ -8,6 +8,7 @@ const state = @import("game_state.zig");
 const game = @import("game.zig");
 const renderer = @import("renderer.zig");
 const level_loader = @import("level_loader.zig");
+const level_select = @import("level_select.zig");
 const save_data = @import("save_data.zig");
 const FlowField = @import("flow_field.zig").FlowField;
 const enemy_separation_sys = @import("enemy_separation_system.zig");
@@ -34,6 +35,29 @@ var level: level_loader.Level = undefined;
 var flow_field: FlowField = undefined; //The enemies' path to the player, sized to the level
 var game_state: state.GameState = .{};
 var save: save_data.SaveData = .{}; //Read once at init, written when a run ends with a new best
+
+/// The levels (convert_tilemaps.py's LEVEL_NAMES): levels/<name>.bin, drawn over images/ground-<name>.png. Each run
+/// is on a random one, never the same twice in a row, unless a level is forced (debug: `zig build -Dlevel=<name>`
+/// or the system menu)
+const LEVEL_NAMES = [_][:0]const u8{ "woods", "city", "quarantine" };
+var current_level: ?usize = null;
+var forced_level: ?usize = forcedLevelOption();
+var level_rng: std.Random.DefaultPrng = undefined; //Seeded from the clock at init: picks levels only, never gameplay
+var level_menu_item: ?*pd.PDMenuItem = null; //Debug builds only
+const LEVEL_MENU_OPTIONS = [_][*c]const u8{"random"} ++ blk: {
+    var names: [LEVEL_NAMES.len][*c]const u8 = undefined;
+    for (LEVEL_NAMES, 0..) |n, i| names[i] = n.ptr;
+    break :blk names;
+};
+
+/// The level `-Dlevel=<name>` names, checked at compile time
+fn forcedLevelOption() ?usize {
+    if (build_options.level.len == 0) return null;
+    inline for (LEVEL_NAMES, 0..) |n, i| {
+        if (comptime std.mem.eql(u8, n, build_options.level)) return i;
+    }
+    @compileError("-Dlevel must name one of the LEVEL_NAMES in main.zig");
+}
 
 /// The simulation only ticks while playing. When the player dies the last frame stays up under the run end
 /// screen until they choose to go again
@@ -85,13 +109,15 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
         //Debug only: `zig build -Dinvincible` (or `tools/sim.ps1 -Invincible`) starts with it ticked
         game_state.invincible = build_options.invincible;
         invincible_menu_item = sys.addCheckmarkMenuItem.?("Invincible", @intFromBool(game_state.invincible), toggleInvincible, null);
+        //Force a level from the next run on (`zig build -Dlevel=<name>` starts with it chosen)
+        level_menu_item = sys.addOptionsMenuItem.?("Level", @constCast(&LEVEL_MENU_OPTIONS), LEVEL_MENU_OPTIONS.len, chooseLevel, null);
+        sys.setMenuItemValue.?(level_menu_item, if (forced_level) |f| @intCast(f + 1) else 0);
     }
 
     playdate_api.display.*.setRefreshRate.?(0);
 
-    //TODO: Decide if we change level on restart and also decide if we have shared bitmap atlas
-    loadLevel("lvl1.bin");
-    assets = renderer.loadAssets(playdate_api, "lvl1");
+    level_rng = std.Random.DefaultPrng.init(@as(u64, sys.getSecondsSinceEpoch.?(null)) << 16 ^ sys.getCurrentTimeMilliseconds.?());
+    assets = renderer.loadAssets(playdate_api, &LEVEL_NAMES);
 
     save = readSave();
     startRun();
@@ -101,18 +127,27 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     if (level.collision_grid.cells.len > memory.HOT_SET_BUDGET) debugLog("WARNING: collision grid ({d} bytes) is larger than the L1 hot set budget, bullet wall tests will miss the cache", .{level.collision_grid.cells.len});
 }
 
-/// Replace the current level, releasing everything the previous one allocated
+/// Replace the current level, releasing everything the previous one allocated. The flow field starts out leading
+/// to the level's start cell
 ///
-fn loadLevel(file_name: [*:0]const u8) void {
+fn loadLevel(index: usize) void {
+    var name_buf: [64]u8 = undefined;
+    const file_name = std.fmt.bufPrintSentinel(&name_buf, "{s}.bin", .{LEVEL_NAMES[index]}, 0) catch unreachable;
     level_arena.reset();
-    level = level_loader.load(playdate_api, file_name, &level_arena) catch |err| std.debug.panic("loadLevel: {s}", .{@errorName(err)});
-    flow_field = FlowField.init(&level_arena, &level.collision_grid, level.collision_grid.cellIndex(game_state.player.pos));
+    level = level_loader.load(playdate_api, file_name, &level_arena) catch |err| std.debug.panic("loadLevel {s}: {s}", .{ file_name, @errorName(err) });
+    flow_field = FlowField.init(&level_arena, &level.collision_grid, level.collision_grid.cellIndex(level.start_pos));
+    current_level = index;
+    debugLog("level {s}: {d} objects, {d} drop points, {d} spawn cells", .{ LEVEL_NAMES[index], level.obj_world_positions.len, level.drop_cells.len, level.spawn_cells.all.len });
 }
 
-/// Start a fresh run (also leaves the run end screen)
+/// Start a fresh run (also leaves the run end screen) on the next level: a file read, once per run
 ///
 fn startRun() void {
     game_state.reset();
+    const next = level_select.next(level_rng.random(), LEVEL_NAMES.len, current_level, forced_level);
+    if (next != current_level) loadLevel(next);
+    game_state.player.pos = level.start_pos;
+    game_state.camera_pos = level.start_pos;
     game_state.trigger.button_cooldown = consts.FIRE_BUTTON_DELAY; //The A/B press that starts the run doesn't also fire
     phase = .playing;
     new_best = false;
@@ -169,6 +204,13 @@ fn toggleInvincible(_: ?*anyopaque) callconv(.c) void {
     game_state.invincible = playdate_api.system.*.getMenuItemValue.?(invincible_menu_item) != 0;
 }
 
+/// Debug system menu option: force a level (or go back to random) from the next run on
+///
+fn chooseLevel(_: ?*anyopaque) callconv(.c) void {
+    const value = playdate_api.system.*.getMenuItemValue.?(level_menu_item);
+    forced_level = if (value > 0) @intCast(value - 1) else null;
+}
+
 fn resetFrameTimer() void {
     time_last_tick_ms = playdate_api.system.*.getCurrentTimeMilliseconds.?();
 }
@@ -206,7 +248,7 @@ fn gameUpdateWrapper(_: ?*anyopaque) callconv(.c) c_int {
         .best_score = save.best_score,
         .game_over = if (phase == .game_over) .{ .new_best = new_best, .can_restart = game_over_time >= consts.GAME_OVER_INPUT_DELAY, .time = game_over_time } else null,
     };
-    last_render_stats = renderer.render(playdate_api, &assets, &game_state, &level, hud, &frame_arena);
+    last_render_stats = renderer.render(playdate_api, &assets, &game_state, &level, current_level.?, hud, &frame_arena);
 
     logStatus(now_ms);
     return 1; //Inform the SDK we have stuff to render
@@ -252,7 +294,7 @@ fn logStatus(now_ms: u32) void {
         const d = e - game_state.camera_pos;
         if (@abs(d[0]) < consts.VIEW_HALF_WIDTH and @abs(d[1]) < consts.VIEW_HALF_HEIGHT) on_screen += 1;
     }
-    debugLog("t={d}ms wave={d}:{s} enemies={d} on_screen={d} health={d} score={d} combo={d} pos=({d:.2},{d:.2}) bullets={d} reload={d:.1} drops={d} invincible={} near={s}({d:.2},{d:.2}) aim=({d:.2},{d:.2}) target={s} crank={d:.1} frame_mem={d} drawn={d} gibs={d} droplets={d} splats={d} sim_ms_max={d:.2}", .{ now_ms, game_state.spawner.wave, @tagName(game_state.spawner.phase), game_state.enemies.len, on_screen, p.health, p.score, p.kill_streak, p.pos[0], p.pos[1], game_state.bullets.ammo, @max(game_state.bullets.reload_timer, 0), drops.len, game_state.invincible, if (drops.len > 0) @tagName(drops.kind[near]) else "none", near_pos[0], near_pos[1], p.facing_dir[0], p.facing_dir[1], if (p.target_pos != null) "yes" else "no", playdate_api.system.*.getCrankAngle.?(), frame_arena.high_water, last_render_stats.drawn, game_state.gore.gibs.liveCount(), game_state.gore.droplets.liveCount(), game_state.gore.pools.liveCount() + game_state.gore.spatters.liveCount(), sim_ms_max });
+    debugLog("t={d}ms level={s} wave={d}:{s} enemies={d} on_screen={d} health={d} score={d} combo={d} pos=({d:.2},{d:.2}) bullets={d} reload={d:.1} drops={d} invincible={} near={s}({d:.2},{d:.2}) aim=({d:.2},{d:.2}) target={s} crank={d:.1} frame_mem={d} drawn={d} gibs={d} droplets={d} splats={d} sim_ms_max={d:.2}", .{ now_ms, LEVEL_NAMES[current_level.?], game_state.spawner.wave, @tagName(game_state.spawner.phase), game_state.enemies.len, on_screen, p.health, p.score, p.kill_streak, p.pos[0], p.pos[1], game_state.bullets.ammo, @max(game_state.bullets.reload_timer, 0), drops.len, game_state.invincible, if (drops.len > 0) @tagName(drops.kind[near]) else "none", near_pos[0], near_pos[1], p.facing_dir[0], p.facing_dir[1], if (p.target_pos != null) "yes" else "no", playdate_api.system.*.getCrankAngle.?(), frame_arena.high_water, last_render_stats.drawn, game_state.gore.gibs.liveCount(), game_state.gore.droplets.liveCount(), game_state.gore.pools.liveCount() + game_state.gore.spatters.liveCount(), sim_ms_max });
     sim_ms_max = 0;
 }
 

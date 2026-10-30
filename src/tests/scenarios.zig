@@ -34,13 +34,14 @@ const TestLevel = struct {
             for (3..13) |col| self.cells[8 * 30 + col] = true;
         }
         self.level = .{
+            .kit = 0,
+            .start_pos = @splat(0),
             .obj_world_positions = &.{},
-            .obj_bitmap_indices = &.{},
+            .obj_pieces = &.{},
             .collision_grid = .{ .cells = &self.cells, .width = 30, .height = 30, .cell_width = 64, .cell_height = 64 },
             .spawn_cells = .{ .all = &.{}, .sides = @splat(&.{}) },
             .drop_cells = &.{},
             .drop_sizes = &.{},
-            .bg_size_pixels = .{ 0, 0 },
         };
         self.level_arena = Arena.init("level", &self.level_buffer);
         self.level.spawn_cells = level_loader.findSpawnCells(&self.level.collision_grid, &self.level_arena);
@@ -162,7 +163,7 @@ test "[scenario] balance: a steadily cranked gun holds the horde off for a while
     //Measured at the time of tuning: the first waves are mown down as they walk on screen, the wave 4 climax
     //crowds the screen (~12 enemies in view) and hurts, and with shamblers taking four bullets the player is overrun
     //in wave 6 after 200-220s and ~540 kills (over a few RNG seeds). Since the spawn ring moved in to fit the
-    //smaller lvl1 (screen shaped, 2.3m to the sides) the horde arrives sooner: overrun in wave 4 after ~100s and
+    //smaller 16x20 levels (screen shaped, 2.3m to the sides) the horde arrives sooner: overrun in wave 4 after ~100s and
     //~350 kills
     const dt: f32 = 1.0 / 50.0;
     var t: TestLevel = .{};

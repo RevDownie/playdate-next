@@ -69,7 +69,7 @@ pub const DROPLET_LIFT_MAX: f32 = 1.4;
 pub const WOUND_DROPLETS: u8 = 4;
 comptime {
     //Enemy steps are only tested at their destination, so one frame's move must stay under the smallest cell side
-    //(0.21m on lvl1) even on the longest frame
+    //(0.21m on the levels) even on the longest frame
     if (ENEMY_MAX_SPEED * MAX_FRAME_DT >= 0.2) @compileError("Enemies are fast enough to step over a cell in one frame");
 }
 pub const ENEMY_SEPARATION_DIST: f32 = CHAR_WIDTH_M * 0.75; //Enemies are pushed apart when their centres are closer than this
@@ -145,7 +145,7 @@ pub const SPAWN_MIN_PLAYER_DIST: f32 = 2.3;
 /// Waves drop their packs in a ring just off screen in the wave's direction(s), this far from the player at most,
 /// so they arrive within a few seconds as a crowd the player can see (spawning only at the map's edge, the gun
 /// picked each enemy off as it walked into view and the screen never filled). The map's edge band is the fallback
-pub const SPAWN_RING_MAX_DIST: f32 = 3.0; //1.8m above and below, inside lvl1's height
+pub const SPAWN_RING_MAX_DIST: f32 = 3.0; //1.8m above and below, inside the levels' height
 pub const SPAWN_ATTEMPTS: u8 = 6; //Random spawn cells tried per enemy before giving up (they must be reachable and far enough away)
 pub const RNG_SEED: u64 = 42;
 
@@ -214,7 +214,7 @@ pub const DROP_LULL_LARGE_CHANCE: f32 = 0.6; //...and are more often large
 pub const DROP_MIN_PLAYER_DIST: f32 = 2.0; //Drops never appear this close to the player: they have to go and get them
 pub const DROP_SPAWN_ATTEMPTS: u8 = 4; //Random points tried per drop (must be free and far enough away), then retried next frame
 pub const DROP_PICKUP_RADIUS: f32 = CHAR_WIDTH_M * 0.5;
-pub const DROP_PICKUP_RADIUS_LARGE: f32 = CHAR_WIDTH_M * 0.75; //Large drops are drawn about as wide as the player
+pub const DROP_PICKUP_RADIUS_LARGE: f32 = CHAR_WIDTH_M * 0.6; //Large drops are drawn only a little bigger than the small ones
 /// Drops bob gently and a glint sweeps across them now and then, so they catch the eye
 pub const DROP_BOUNCE_PX: f32 = 5; //Height of each hop
 pub const DROP_BOUNCE_PERIOD: f32 = 0.8; //Seconds per hop

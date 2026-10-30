@@ -11,6 +11,7 @@ test {
     _ = @import("game_state.zig");
     _ = @import("collision_grid.zig");
     _ = @import("level_loader.zig");
+    _ = @import("level_select.zig");
     _ = @import("flow_field.zig");
     _ = @import("bullet_system.zig");
     _ = @import("enemy_movement_system.zig");

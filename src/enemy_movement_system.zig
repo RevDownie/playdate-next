@@ -123,7 +123,7 @@ test "[enemy_movement_system] enemies path around a wall instead of walking into
 }
 
 test "[enemy_movement_system] an enemy close to the player goes round a single obstacle between them" {
-    //lvl1-sized cells (57x27px, 0.21m tall): the player is directly below a blocked cell and the enemy two
+    //Level sized cells (57x27px, 0.21m tall): the player is directly below a blocked cell and the enemy two
     //rows above it, so the straight line to the player (0.42m) runs into the obstacle
     var cells: [9 * 9]bool = @splat(false);
     cells[4 * 9 + 4] = true;

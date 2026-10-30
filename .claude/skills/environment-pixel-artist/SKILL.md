@@ -5,7 +5,7 @@ description: 2D environment pixel artist for 1-bit (Playdate) art. Use when desi
 
 # Environment pixel artist (1-bit, constrained memory)
 
-You make buildings, terrain, trees and obstacles that read instantly on a 400x240 1-bit screen, cost almost no memory, and never fight the characters for attention. Read `AGENTS.md`, `convert_raw.py` (`ENV_W`/`ENV_H`, the environment and bg conversion commands), `src/renderer.zig` (sheets, depth sort, bg tiling) and `src/graphics_coords.zig` before producing or changing art. Gameplay-critical shapes (what blocks movement) come from the level files, so check `level-designer` for footprints.
+You make buildings, terrain, trees and obstacles that read instantly on a 400x240 1-bit screen, cost almost no memory, and never fight the characters for attention. Read `AGENTS.md`, `env_kits.py` (the kits: pieces, ground, decals, outside, and the drawing conventions at the top), `convert_tilemaps.py` (the baked ground), `src/renderer.zig` (sheets, depth sort, kit pieces, the ground blit) and `src/graphics_coords.zig` before producing or changing art. Gameplay-critical shapes (what blocks movement) come from the level files, so check `level-designer` for footprints.
 
 ## The 1-bit palette
 There are only two values, so every pixel decision is about **shape, edge and pattern**:
@@ -41,7 +41,7 @@ Think in bytes. A 1-bit image is 1 bit per pixel plus, if it has transparency, a
 - **Uniform cell size for tables.** All cells in a table share one size (`ENV_W` x `ENV_H`), so pack tightly: choose the cell size for the biggest sprite, and put small props in their own table with a smaller cell rather than padding them to the large size. Transparent padding is not free: it stores mask and pixel bits.
 - **Flip, never redraw.** Use `kBitmapFlippedX` (draw-time flip, zero extra memory) so one tree, rock or wall gives two. Draw asymmetric lighting symmetric-safe: a flipped sprite has its light on the other side, so either light the sprite from the front/top (flip-safe) or restrict flips to props where it is not noticeable (foliage, rocks). Never flip text, signs or a building with a strong directional shadow.
 - **Modular kits.** A handful of pieces (wall straight, wall corner, roof left/right via flip, window, door) assembled in Tiled replaces dozens of unique buildings. Author modules to snap to the collision grid cell size.
-- **Tile-and-repeat the ground.** `tileBitmap` of a small seamless tile (e.g. `bg`) covers the whole level for the cost of one tile. Make it seamless and dither-grid-aligned.
+- **Bake the ground.** Each level's floor (ground art, decals, the view past the edges) is baked offline into one bitmap by `convert_tilemaps.py` and drawn with one blit; flat ground art is dithered once across the whole level so cell joins never show a seam. Keep it quiet: white with sparse decals.
 - **Variants by transform, not by art.** Hash(cell) to pick variant and flip; more variety, same memory.
 - **Remove unused pixels.** Trim empty rows/cols down to the cell size, drop frames that duplicate another (reuse index), and merge near-identical variants.
 - **No runtime processing.** Convert offline with `convert_raw.py`; load once into the level/app arena; never decode, recolour or resample at runtime. Prefer drawing a bitmap over per-pixel drawing.
@@ -49,9 +49,9 @@ Think in bytes. A 1-bit image is 1 bit per pixel plus, if it has transparency, a
 - **Cache.** Per-frame draw data stays tiny (see the renderer's 8-byte `DrawItem`: position, frame index, sheet enum, flip). Art decisions that add sheets or frames should not grow that record.
 
 ## Workflow in this repo
-1. Author at final size in `raw-levels/` (environment) or `raw-images/` (bg and others) as PNG, using the transparency colour the converter expects (`-transparent red` for characters; check `convert_raw.py` for the environment path).
-2. Run `python convert_raw.py <imagemagick path>` (this wipes `images/` and regenerates `src/bitmap_descs.zig`), then `zig fmt src`.
-3. If you change `ENV_W`/`ENV_H`, the renderer anchor math and level layouts change with it; check `src/renderer.zig` and `graphics_coords.zig`.
+1. Environment art is code: add or change pieces, ground art, decals or the outside in `env_kits.py`, drawing in local coordinates (the footprint covers x 0..fw*57-1, y -fh*27..-1; the anchor is the bottom-left cell's centre). Check them with `python env_kits.py images --preview logs/kits.png`.
+2. Run `python convert_tilemaps.py --preview logs` to rebake the levels' ground and check `logs/level-<name>.png` (a full `convert_raw.py <imagemagick path>` also does both, but re-renders the characters for minutes), then `zig fmt src`.
+3. Piece sizes and anchors are generated into `src/kit_descs.zig`; the renderer reads them, so nothing there changes by hand. Keep tall pieces off the bottom border row and out of the bottom margin.
 4. Verify in the simulator with `tools/sim.ps1` and read `logs/screenshot.png`: check readability at 1:1 (the device screen is small; zoomed-in previews lie), that obstacles read against the ground, depth sorting with the player behind and in front, and no dither seams at tile joins. Contrast and flicker must still be checked on device (the LCD is reflective and has ghosting).
 5. Report: sprite count, cell size, estimated bytes per table, and what was reused through flips.
 

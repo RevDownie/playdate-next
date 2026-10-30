@@ -97,8 +97,8 @@ test "[collision_grid] cell index and centre round trip with non-square cells an
     try std.testing.expect(grid.cellIndex(Vec2f{ 100, 0 }) == null);
 }
 
-test "[collision_grid] line of sight is blocked by walls, with lvl1's cell size" {
-    //30x30 grid of lvl1's 57x27px cells with a wall down column 17 (x = 0.67m to 1.11m)
+test "[collision_grid] line of sight is blocked by walls, with the levels' cell size" {
+    //30x30 grid of the levels' 57x27px cells with a wall down column 17 (x = 0.67m to 1.11m)
     var cells: [30 * 30]bool = @splat(false);
     for (0..30) |row| cells[row * 30 + 17] = true;
     const grid = CollisionGrid{ .cells = &cells, .width = 30, .height = 30, .cell_width = 57, .cell_height = 27 };

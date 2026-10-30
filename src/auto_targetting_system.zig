@@ -69,7 +69,7 @@ pub fn findTarget(player_pos: Vec2f, move_dir: Vec2f, aim_dir: Vec2f, view_centr
     return null;
 }
 
-/// 30x30 grid of lvl1's 57x27px cells (about 13.4 x 6.3m), open apart from a wall down column 17 (x = 0.67m to 1.11m)
+/// 30x30 grid of the levels' 57x27px cells (about 13.4 x 6.3m), open apart from a wall down column 17 (x = 0.67m to 1.11m)
 fn testGrid(cells: *[30 * 30]bool, wall: bool) CollisionGrid {
     @memset(cells, false);
     if (wall) {
