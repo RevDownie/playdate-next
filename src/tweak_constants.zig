@@ -169,6 +169,12 @@ pub const CAMERA_MOVE_LEAD_X: f32 = 0.1; //Lean the way the player moves at full
 pub const CAMERA_MOVE_LEAD_Y: f32 = 0.04;
 pub const CAMERA_LEAD_FREQ: f32 = 4.0; //Spring stiffness of the leans going out (radians per second: most of the way in ~1s)
 pub const CAMERA_RETURN_FREQ: f32 = 2.0; //...and coming back (~2s)
+/// Each shot kicks the view back against the aim a pixel or two and it eases straight back, so a steady crank
+/// gives a gentle recoil buzz. Visual only (added when drawing; targeting uses the unshaken camera)
+pub const CAMERA_KICK: f32 = 1.5 / METRES_TO_PIXELS;
+pub const CAMERA_KICK_JOLT: f32 = 1.0 / METRES_TO_PIXELS; //Random sideways, up to this either way
+pub const CAMERA_SHAKE_MAX: f32 = 3.0 / METRES_TO_PIXELS;
+pub const CAMERA_SHAKE_SETTLE_RATE: f32 = 25; //Per second: most of a kick has gone in a few frames
 
 pub const FIRE_ANGLE_DELTA: f32 = 30; //12 bullets per crank revolution
 pub const FIRE_BUTTON_DELAY: f32 = 0.25; //Button fire is the fallback: well under the rate of a steadily turned crank
@@ -247,9 +253,9 @@ pub const MELEE_MAX_TARGETS: u8 = 3; //Enemies hit per blow: holds off a few, no
 pub const MELEE_SWING_TIME: f32 = 0.15; //How long the swing shows
 
 /// Off screen drops are marked at the screen's edge, pointing the way to them
-/// Insets are to the marker's centre: room for its disc and arrow (~22px) clear of the HUD rows
-pub const DROP_MARKER_INSET_TOP: i32 = 50; //Above the player's head, which reaches ~48px above the centre
-pub const DROP_MARKER_INSET_BOTTOM: i32 = 46;
+/// Insets are to the marker's centre: room for its disc and arrow (~22px) clear of the one row HUD (~15px)
+pub const DROP_MARKER_INSET_TOP: i32 = 38;
+pub const DROP_MARKER_INSET_BOTTOM: i32 = 36;
 pub const DROP_MARKER_INSET_SIDE: i32 = 24;
 
 pub const MAX_SCORE: u64 = 9999999999;

@@ -24,13 +24,15 @@ pub const Hud = struct {
 /// System fonts, loaded once up front
 ///
 pub const Fonts = struct {
-    small: *pd.LCDFont, //HUD and labels
+    hud: *pd.LCDFont, //The always-on HUD: small, so it covers as little of the screen as it can
+    small: *pd.LCDFont, //Labels
     big: *pd.LCDFont, //Banners and titles
 };
 
 pub fn loadFonts(playdate_api: *pd.PlaydateAPI) Fonts {
     const graphics = playdate_api.graphics.*;
     return .{
+        .hud = graphics.loadFont.?("/System/Fonts/Roobert-10-Bold.pft", null) orelse @panic("loadFonts: Failed to load Roobert-10-Bold"),
         .small = graphics.loadFont.?("/System/Fonts/Roobert-11-Bold.pft", null) orelse @panic("loadFonts: Failed to load Roobert-11-Bold"),
         .big = graphics.loadFont.?("/System/Fonts/Roobert-20-Medium.pft", null) orelse @panic("loadFonts: Failed to load Roobert-20-Medium"),
     };
@@ -67,52 +69,56 @@ pub fn format(buffer: []u8, comptime fmt: []const u8, args: anytype) []const u8 
     return std.fmt.bufPrint(buffer, fmt, args) catch buffer;
 }
 
-/// The always-on HUD: the wave, health and ammo, score and the best to beat, and the wave banners
+/// The always-on HUD, one short row at the top and bottom so it hides as little of the horde as it can: the wave,
+/// the score (and combo), health and ammo, and the wave banners. The best to beat is on the run end screen; the
+/// score turns loud once it is being beaten
 ///
 pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameState, hud: Hud, width: c_int, height: c_int) void {
     var buf: [48]u8 = undefined;
-    const small_h: c_int = graphics.getFontHeight.?(fonts.small) + BOX_PAD_Y * 2 + 1;
+    const font = fonts.hud;
+    const row_h: c_int = graphics.getFontHeight.?(font) + BOX_PAD_Y * 2 + 1;
 
     //Top left (after the FPS counter): the wave, or the countdown to the next one
     const spawner = &game.spawner;
     const wave_text = switch (spawner.phase) {
         .wave => if (spawner.isHolding())
-            format(&buf, "Wave {d}  Hold {d}", .{ spawner.wave, secondsLeft(spawner.hold - spawner.phase_time) })
+            format(&buf, "Wave {d}  {d}s", .{ spawner.wave, secondsLeft(spawner.hold - spawner.phase_time) })
         else
             format(&buf, "Wave {d}  Clear!", .{spawner.wave}),
         .lull => format(&buf, "Wave {d} in {d}", .{ spawner.wave + 1, secondsLeft(spawner.timer) }),
     };
-    drawBoxed(graphics, fonts.small, wave_text, WAVE_LABEL_X, BOX_PAD_Y, .left, .normal);
+    drawBoxed(graphics, font, wave_text, WAVE_LABEL_X, BOX_PAD_Y, .left, .normal);
     drawWaveBanner(graphics, fonts, spawner, width);
 
     //Bottom left: health, next to the ammo so the two resources read together
-    drawBoxed(graphics, fonts.small, format(&buf, "Health {d}/{d}", .{ game.player.health, consts.PLAYER_MAX_HEALTH }), BOX_PAD_X, height - small_h, .left, if (game.player.health <= 25) .loud else .normal);
+    const bottom_y = height - row_h;
+    drawBoxed(graphics, font, format(&buf, "HP {d}", .{game.player.health}), BOX_PAD_X, bottom_y, .left, if (game.player.health <= 25) .loud else .normal);
 
-    //Top right: score, then the best to beat (or that it is being beaten)
+    //Top right, one row: the score, loud once it beats the best, and to its left the combo multiplying each kill's
+    //score, louder once it is worth protecting
     const right = width - BOX_PAD_X;
-    drawBoxed(graphics, fonts.small, format(&buf, "Score {d}", .{game.player.score}), right, BOX_PAD_Y, .right, .normal);
-    if (hud.best_score > 0 and game.player.score > hud.best_score) {
-        drawBoxed(graphics, fonts.small, "NEW BEST!", right, BOX_PAD_Y + small_h, .right, .loud);
-    } else {
-        drawBoxed(graphics, fonts.small, format(&buf, "Best {d}", .{hud.best_score}), right, BOX_PAD_Y + small_h, .right, .normal);
-    }
-    //...and the combo multiplying each kill's score, louder once it is worth protecting
+    const beating_best = hud.best_score > 0 and game.player.score > hud.best_score;
+    const score_text = format(&buf, "{d}", .{game.player.score});
+    drawBoxed(graphics, font, score_text, right, BOX_PAD_Y, .right, if (beating_best) .loud else .normal);
     const combo = game.player.kill_streak;
     if (combo >= consts.COMBO_SHOW_FROM) {
-        drawBoxed(graphics, fonts.small, format(&buf, "Combo x{d}", .{combo}), right, BOX_PAD_Y + small_h * 2, .right, if (combo >= consts.COMBO_LOST_MIN) .loud else .normal);
+        const combo_right = right - graphics.getTextWidth.?(font, score_text.ptr, score_text.len, pd.kASCIIEncoding, 0) - BOX_PAD_X * 2 - 2;
+        var combo_buf: [16]u8 = undefined;
+        drawBoxed(graphics, font, format(&combo_buf, "x{d}", .{combo}), combo_right, BOX_PAD_Y, .right, if (combo >= consts.COMBO_LOST_MIN) .loud else .normal);
     }
 
-    //Bottom right: ammo (health is bottom left)
-    const ammo_y = height - small_h;
+    //Bottom right: ammo (health is bottom left). Full says so, as ammo drops are then left lying
     if (game.bullets.isReloading()) {
-        drawBoxed(graphics, fonts.small, format(&buf, "Reloading {d}/{d}", .{ game.bullets.ammo, consts.MAX_AMMO }), right, ammo_y, .right, .normal);
+        drawBoxed(graphics, font, format(&buf, "Reloading {d}", .{game.bullets.ammo}), right, bottom_y, .right, .normal);
     } else if (game.bullets.ammo == 0) {
-        drawBoxed(graphics, fonts.small, "OUT OF AMMO", right, ammo_y, .right, .loud);
+        drawBoxed(graphics, font, "OUT OF AMMO", right, bottom_y, .right, .loud);
+    } else if (game.bullets.ammo >= consts.MAX_AMMO) {
+        drawBoxed(graphics, font, format(&buf, "Ammo {d} MAX", .{game.bullets.ammo}), right, bottom_y, .right, .normal);
     } else {
-        drawBoxed(graphics, fonts.small, format(&buf, "Ammo {d}/{d}", .{ game.bullets.ammo, consts.MAX_AMMO }), right, ammo_y, .right, .normal);
+        drawBoxed(graphics, font, format(&buf, "Ammo {d}", .{game.bullets.ammo}), right, bottom_y, .right, .normal);
     }
 
-    if (game.invincible) drawBoxed(graphics, fonts.small, "INVINCIBLE", WAVE_LABEL_X, BOX_PAD_Y + small_h, .left, .loud); //Debug, so screenshots don't mislead
+    if (game.invincible) drawBoxed(graphics, font, "INVINCIBLE", WAVE_LABEL_X, BOX_PAD_Y + row_h, .left, .loud); //Debug, so screenshots don't mislead
 }
 
 /// A combo message in the world, centred on `x` with its bottom at `y`

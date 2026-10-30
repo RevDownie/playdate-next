@@ -129,7 +129,7 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     const disp = playdate_api.display.*;
     const graphics = playdate_api.graphics.*;
 
-    const screen = Screen{ .width = disp.getWidth.?(), .height = disp.getHeight.?(), .camera_pos = game.camera_pos };
+    const screen = Screen{ .width = disp.getWidth.?(), .height = disp.getHeight.?(), .camera_pos = game.camera_pos + game.camera_shake }; //Shaken for drawing only
 
     //Inverting the whole screen is the hit flash
     _ = graphics.setDrawMode.?(if (game.player.hit_flash_timer > 0) pd.kDrawModeInverted else pd.kDrawModeCopy);

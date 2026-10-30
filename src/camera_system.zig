@@ -39,6 +39,24 @@ pub fn update(camera_pos: *Vec2f, lead: *Vec2f, lead_vel: *Vec2f, player_pos: Ve
     camera_pos.* = follow + lead.*;
 }
 
+/// A shot kicks the view back against the aim (`aim_dir`, unit length), with a little random sideways jolt
+/// (`jolt`, -1 to 1), adding to any kick still easing out. Purely visual: the shake is added when drawing, so
+/// targeting never sees it. Bounded by CAMERA_SHAKE_MAX
+///
+pub fn kick(shake: *Vec2f, aim_dir: Vec2f, jolt: f32) void {
+    const side = Vec2f{ -aim_dir[1], aim_dir[0] };
+    const k = -aim_dir * @as(Vec2f, @splat(consts.CAMERA_KICK)) + side * @as(Vec2f, @splat(jolt * consts.CAMERA_KICK_JOLT));
+    shake.* += k;
+    const len = maths.magnitude(shake.*);
+    if (len > consts.CAMERA_SHAKE_MAX) shake.* *= @as(Vec2f, @splat(consts.CAMERA_SHAKE_MAX / len));
+}
+
+/// Ease the shake back to nothing (CAMERA_SHAKE_SETTLE_RATE, without a runtime exp)
+///
+pub fn settleShake(shake: *Vec2f, dt: f32) void {
+    shake.* *= @as(Vec2f, @splat(1 / (1 + consts.CAMERA_SHAKE_SETTLE_RATE * dt)));
+}
+
 comptime {
     //The player must stay well clear of the HUD rows and screen edges with the full lag and lead
     if (LAG_MAX[0] + LEAD_MAX[0] > consts.VIEW_HALF_WIDTH * 0.5 or LAG_MAX[1] + LEAD_MAX[1] > consts.VIEW_HALF_HEIGHT * 0.3) @compileError("Camera lag and lead push the player too near the screen edge");
@@ -68,6 +86,16 @@ test "[camera_system] a running player sits ahead of centre, and the camera catc
     for (0..500) |_| update(&cam, &lead, &lead_vel, pos, @splat(0), aim, TEST_DT);
     //Standing still it settles back on the player, whichever way the gun is aimed
     try std.testing.expectApproxEqAbs(pos[0], cam[0], 0.001);
+}
+
+test "[camera_system] firing kicks the view back against the aim, bounded, and it settles within a few frames" {
+    var shake: Vec2f = @splat(0);
+    kick(&shake, .{ 1, 0 }, 0);
+    try std.testing.expect(shake[0] < 0 and shake[1] == 0);
+    for (0..50) |_| kick(&shake, .{ 0, 1 }, 1); //A long burst
+    try std.testing.expect(maths.magnitude(shake) <= consts.CAMERA_SHAKE_MAX * 1.0001);
+    for (0..10) |_| settleShake(&shake, TEST_DT);
+    try std.testing.expect(maths.magnitude(shake) < 0.5 / consts.METRES_TO_PIXELS); //Under half a pixel after 0.2s
 }
 
 test "[camera_system] lag and lead stay within their limits, even on long frames" {

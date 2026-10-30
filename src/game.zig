@@ -78,8 +78,12 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     const move_dir = maths.normaliseSafe(game.player.vel, @splat(0));
     const target = auto_target_sys.findTarget(game.player.pos, move_dir, game.player.facing_dir, game.camera_pos, game.enemies.positions(), game.enemies.health[0..game.enemies.len], game.enemies.kind[0..game.enemies.len], grid, frame_arena.alloc(f32, game.enemies.len));
     const aim_dir = if (target) |t| t.dir else maths.normaliseSafe(move_dir, game.player.facing_dir);
+    camera_sys.settleShake(&game.camera_shake, dt);
     if (firing_sys.update(&game.trigger, input, dt)) {
+        const ammo = game.bullets.ammo;
         bullet_sys.fire(&game.bullets, game.player.pos, aim_dir, game.rng.random().float(f32) * 2 - 1);
+        //A shot that went off kicks the view (from the gore rng: visual only)
+        if (game.bullets.ammo < ammo) camera_sys.kick(&game.camera_shake, aim_dir, game.gore_rng.random().float(f32) * 2 - 1);
     }
     game.player.facing_dir = aim_dir; //Player faces the way they are firing
     game.player.target_pos = if (target) |t| t.pos else null;

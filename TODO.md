@@ -2,7 +2,7 @@
 
 - Swap level mid run
 - Reloading should happen in player eyeline - maybe it's not even needed
-- HUD is overwhelming
+- HUD is overwhelming (condensed to one row top and bottom; playtest on device whether it is enough)
 
 ## Improve auto-targetting
 - Needs design input
@@ -44,7 +44,7 @@
 
 ## Camera improvements
 - Playtest the camera on device: trailing (`CAMERA_FOLLOW_RATE`, `CAMERA_LAG_MAX_*`), the aim and movement leans (`CAMERA_AIM_LEAD_*`, `CAMERA_MOVE_LEAD_*`) and their springs
-- Camera shake in response to firing and impact
+- Camera shake: firing kicks it (`CAMERA_KICK*`); maybe also on taking hits and brute kills
 
 ## Visuals - Characters follow-up
 - Check the character sheets on device: FPS with a full horde (up to 100 masked sprites up to 64x64, plus gore: up to `MAX_GIBS` gibs, 200 pools and spatters and `MAX_DROPLETS` droplets drawn outside the draw list)

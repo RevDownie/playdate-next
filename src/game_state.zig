@@ -509,6 +509,7 @@ pub const GameState = struct {
     camera_pos: Vec2f = @splat(0),
     camera_lead: Vec2f = @splat(0), //The camera's lean towards the aim and movement, on top of where it trails the player
     camera_lead_vel: Vec2f = @splat(0), //...and how fast it is moving (it is on a spring)
+    camera_shake: Vec2f = @splat(0), //Recoil kick added to camera_pos when drawing only
     run_time: f32 = 0, //Seconds survived this run
     rng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(consts.RNG_SEED), //Not reset between runs
     gore_rng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(consts.RNG_SEED + 1), //Gore only, so it never changes the gameplay rolls
