@@ -24,13 +24,14 @@ pub const ENEMY_MAX_SPEED: f32 = ENEMY_RUNNER_SPEED; //The fastest any enemy mov
 /// Per kind, in game_state.EnemyKind order. `hit_radius` is the bullet hit circle (drawn size: runners are small,
 /// brutes big), `bump` how far a non-lethal hit knocks it back (0: it doesn't flinch, so fire can't hold it off)
 /// Killed, it bursts into its head, arms, legs and torso plus `chunks` more lumps of meat, `droplets` of blood and a
-/// pool, from `burst_height` metres above its feet
+/// pool, from `burst_height` metres above its feet. Health is in bullets of DMG_PER_HIT: the slow kinds take several
+/// times a walker's, so they feel like a wall of meat rather than one more bullet
 pub const EnemyKindDef = struct { health: u8, hit_radius: f32, bump: f32, chunks: u8, droplets: u8, burst_height: f32 };
 pub const ENEMY_KINDS = [_]EnemyKindDef{
-    .{ .health = 50, .hit_radius = CHAR_BULLET_COLL_RADIUS * 0.8, .bump = BUMP_DISTANCE, .chunks = 1, .droplets = 14, .burst_height = 0.1 }, //Runner: one hit
-    .{ .health = 100, .hit_radius = CHAR_BULLET_COLL_RADIUS, .bump = BUMP_DISTANCE, .chunks = 2, .droplets = 20, .burst_height = 0.15 }, //Walker: two
-    .{ .health = 150, .hit_radius = CHAR_BULLET_COLL_RADIUS, .bump = BUMP_DISTANCE_SMALL, .chunks = 3, .droplets = 22, .burst_height = 0.15 }, //Shambler: three
-    .{ .health = 250, .hit_radius = CHAR_BULLET_COLL_RADIUS * 1.5, .bump = 0, .chunks = 6, .droplets = 36, .burst_height = 0.22 }, //Brute: five
+    .{ .health = 25, .hit_radius = CHAR_BULLET_COLL_RADIUS * 0.8, .bump = BUMP_DISTANCE, .chunks = 1, .droplets = 14, .burst_height = 0.1 }, //Runner: one hit
+    .{ .health = 50, .hit_radius = CHAR_BULLET_COLL_RADIUS, .bump = BUMP_DISTANCE, .chunks = 2, .droplets = 20, .burst_height = 0.15 }, //Walker: two
+    .{ .health = 100, .hit_radius = CHAR_BULLET_COLL_RADIUS, .bump = BUMP_DISTANCE_SMALL, .chunks = 3, .droplets = 22, .burst_height = 0.15 }, //Shambler: four
+    .{ .health = 250, .hit_radius = CHAR_BULLET_COLL_RADIUS * 1.5, .bump = 0, .chunks = 6, .droplets = 36, .burst_height = 0.22 }, //Brute: ten
 };
 pub const ENEMY_MIN_HIT_RADIUS: f32 = CHAR_BULLET_COLL_RADIUS * 0.8;
 
@@ -81,7 +82,7 @@ pub const ENEMY_TURN_RATE: f32 = 6.0; //How quickly enemies steer onto a new hea
 pub const FLOW_FIELD_CELLS_PER_FRAME: u32 = 300;
 
 pub const PLAYER_MAX_HEALTH: u8 = 100;
-pub const ENEMY_MAX_HEALTH: u8 = 100; //A walker's (see ENEMY_KINDS)
+pub const ENEMY_MAX_HEALTH: u8 = 50; //A walker's (see ENEMY_KINDS)
 pub const CONTACT_DMG: u8 = 5; //Damage an enemy does to the player when it walks into them
 pub const SCORE_PER_KILL: u64 = 10; //Multiplied by the kill streak (the combo), which resets when the player is hurt
 
@@ -156,6 +157,19 @@ pub const TARGET_FINISH_WEIGHT: f32 = 0.5; //...a nearly dead one up to 50% clos
 pub const TARGET_STICKY_WEIGHT: f32 = 0.15; //...and one along the current aim 15% closer, so the aim doesn't flick
 pub const TARGET_MAX_LOS_TESTS: u8 = 8; //Line of sight tests per frame, on the best candidates first
 
+/// Camera (see camera_system). It trails the player a little, so a player running from the horde sits ahead of
+/// centre and sees what is chasing them, and leans towards where the gun is aimed and, slightly, the way they move.
+/// Vertical amounts are smaller: the screen is short and the HUD sits top and bottom. Set a lead to 0 to turn it off
+pub const CAMERA_FOLLOW_RATE: f32 = 6.0; //Catch up per second: at full speed the camera trails ~0.28m (36px)
+pub const CAMERA_LAG_MAX_X: f32 = 0.35; //Most it trails the player
+pub const CAMERA_LAG_MAX_Y: f32 = 0.12;
+pub const CAMERA_AIM_LEAD_X: f32 = 0.3; //Lean towards the aim at full speed (about 38px); none standing still
+pub const CAMERA_AIM_LEAD_Y: f32 = 0.1;
+pub const CAMERA_MOVE_LEAD_X: f32 = 0.1; //Lean the way the player moves at full speed (less than the lag, so a runner still sits ahead of centre)
+pub const CAMERA_MOVE_LEAD_Y: f32 = 0.04;
+pub const CAMERA_LEAD_FREQ: f32 = 4.0; //Spring stiffness of the leans going out (radians per second: most of the way in ~1s)
+pub const CAMERA_RETURN_FREQ: f32 = 2.0; //...and coming back (~2s)
+
 pub const FIRE_ANGLE_DELTA: f32 = 30; //12 bullets per crank revolution
 pub const FIRE_BUTTON_DELAY: f32 = 0.25; //Button fire is the fallback: well under the rate of a steadily turned crank
 
@@ -163,7 +177,7 @@ pub const BUMP_DISTANCE = 0.2;
 pub const BUMP_DISTANCE_SMALL = 0.125;
 pub const BUMP_TIME = 0.5;
 
-pub const DMG_PER_HIT: u8 = 50; //Two hits per enemy: the first knocks it back (and it can't hurt the player while recoiling), the second kills
+pub const DMG_PER_HIT: u8 = 25; //A bullet's (or melee blow's) damage. A walker takes two: the first knocks it back (and it can't hurt the player while recoiling), the second kills
 pub const BULLET_POOL_SIZE: u8 = 90; //The gun fires at most once a frame, so this covers BULLET_LIFETIME at up to 200 FPS
 pub const BULLET_MAX_SPEED: f32 = 14; //Must not step over an enemy's hit circle in one frame (checked in bullet_system)
 pub const BULLET_RANGE: f32 = 6.0; //Metres a bullet flies before it is spent (about two screen widths)

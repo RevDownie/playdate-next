@@ -91,7 +91,7 @@ test "[combat_system] a second hit on a killed enemy is ignored" {
     try std.testing.expect(player.kills == 1 and player.best_streak == 1);
 }
 
-test "[combat_system] a fresh enemy is knocked back by the first hit and killed by the second" {
+test "[combat_system] a fresh walker is knocked back by the first hit and killed by the second" {
     var enemies = state.Enemies{};
     var player = state.Player{};
     var popups = state.Popups{};
@@ -103,6 +103,13 @@ test "[combat_system] a fresh enemy is knocked back by the first hit and killed 
     try std.testing.expect(enemies.health[0] > 0 and enemies.isBumping(0));
     _ = applyHits(&hit, &enemies, &player, &popups, &test_impacts);
     try std.testing.expect(enemies.health[0] == 0);
+}
+
+test "[combat_system] the slow kinds take several times a walker's hits" {
+    const walker_hits = state.EnemyKind.walker.def().health / consts.DMG_PER_HIT;
+    try std.testing.expect(state.EnemyKind.shambler.def().health / consts.DMG_PER_HIT >= 2 * walker_hits);
+    try std.testing.expect(state.EnemyKind.brute.def().health / consts.DMG_PER_HIT >= 5 * walker_hits);
+    for (consts.ENEMY_KINDS) |k| try std.testing.expect(k.health % consts.DMG_PER_HIT == 0); //No wasted damage
 }
 
 test "[combat_system] many enemies in contact can't overflow the damage" {

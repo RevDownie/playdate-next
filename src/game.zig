@@ -16,6 +16,7 @@ const firing_sys = @import("firing_system.zig");
 const drop_sys = @import("drop_system.zig");
 const melee_sys = @import("melee_system.zig");
 const gore_sys = @import("gore_system.zig");
+const camera_sys = @import("camera_system.zig");
 
 const Vec2f = @Vector(2, f32);
 
@@ -68,8 +69,9 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
         return .player_died;
     }
 
-    //5. Camera. Before targeting, as the gun only aims at what is on screen
-    game.camera_pos = game.player.pos; //Follow the player directly for now
+    //5. Camera, trailing the player and leaning towards last frame's aim. Before targeting, as the gun only aims at
+    //what is on screen
+    camera_sys.update(&game.camera_pos, &game.camera_lead, &game.camera_lead_vel, game.player.pos, game.player.vel, game.player.facing_dir, dt);
 
     //6. Now that the enemy positions are final, aim at the best target the player can see and fire.
     //With nothing in sight aim the way the player is moving, or keep the last aim while standing still

@@ -22,6 +22,7 @@ test {
     _ = @import("melee_system.zig");
     _ = @import("gore_system.zig");
     _ = @import("auto_targetting_system.zig");
+    _ = @import("camera_system.zig");
     _ = @import("player_movement_system.zig");
     _ = @import("game.zig");
     _ = @import("tests/scenarios.zig");

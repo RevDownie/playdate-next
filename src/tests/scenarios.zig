@@ -160,7 +160,8 @@ test "[scenario] balance: a steadily cranked gun holds the horde off for a while
     //A player standing still in the open turning the crank once a second, at the device's 50 FPS, with ammo
     //kept topped up (this measures the gun against the waves; ammo comes from drops, see the drop scenarios).
     //Measured at the time of tuning: the first waves are mown down as they walk on screen, the wave 4 climax
-    //crowds the screen (~12 enemies in view) and hurts, and the player is overrun in wave 6 after ~210s and ~720 kills
+    //crowds the screen (~12 enemies in view) and hurts, and with shamblers taking four bullets the player is overrun
+    //in wave 6 after 200-220s and ~540 kills (over a few RNG seeds)
     const dt: f32 = 1.0 / 50.0;
     var t: TestLevel = .{};
     t.init(true);

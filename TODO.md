@@ -1,5 +1,9 @@
 # TODO List
 
+- Swap level mid run
+- Reloading should happen in player eyeline - maybe it's not even needed
+- HUD is overwhelming
+
 ## Improve auto-targetting
 - Needs design input
 - Constrain player visibility of targets based on distance and line of sight
@@ -39,15 +43,14 @@
 - Reload feedback on the player (the HUD says "Reloading")
 
 ## Camera improvements
-- With input from design
-- Have camera track in direction of movement to improve line of sight
-- Subtle interpolation
+- Playtest the camera on device: trailing (`CAMERA_FOLLOW_RATE`, `CAMERA_LAG_MAX_*`), the aim and movement leans (`CAMERA_AIM_LEAD_*`, `CAMERA_MOVE_LEAD_*`) and their springs
 - Camera shake in response to firing and impact
 
 ## Visuals - Characters follow-up
 - Check the character sheets on device: FPS with a full horde (up to 100 masked sprites up to 64x64, plus gore: up to `MAX_GIBS` gibs, 200 pools and spatters and `MAX_DROPLETS` droplets drawn outside the draw list)
 - Gore: tune the spray (`GIB_*`, `DROPLET_*`) in play; maybe a bigger burst for melee kills, blood on the hero, a short hit stop on brute kills
 - Playtest the enemy kinds (`ENEMY_KINDS`, `ENEMY_BRUTE_*`): brutes walk through fire, so is wave 3 too early?
+  Shamblers now take four bullets and brutes ten (walkers two), which shortens the balance scenario by about a seventh
 - Brutes use the walker's separation distance and contact radius, so they overlap other enemies a little
 - Firing animation (barrels turning, muzzle flash)
 - Enemy spawn animation
