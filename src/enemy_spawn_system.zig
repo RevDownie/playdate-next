@@ -10,6 +10,9 @@ const SpawnCells = level_loader.SpawnCells;
 const Vec2f = @Vector(2, f32);
 
 const SPAWN_MIN_PLAYER_DIST_SQRD = consts.SPAWN_MIN_PLAYER_DIST * consts.SPAWN_MIN_PLAYER_DIST;
+/// The spawn ring is an ellipse squashed to the screen's aspect, so "just off screen" is as close above and below
+/// as it is to the sides (a round ring far enough out at the sides is well outside a short map above and below)
+const RING_SQUASH = Vec2f{ 1, consts.VIEW_HALF_HEIGHT / consts.VIEW_HALF_WIDTH };
 
 /// Run the waves. A lull counts down to each wave. A wave has two parts:
 /// - hold out (`hold` seconds): packs keep spawning so the number of enemies alive tracks a target that climbs
@@ -152,10 +155,10 @@ fn ringCell(rand: std.Random, sides: u8, player_world_pos: Vec2f, field: *const 
         const dir = SIDE_DIRS[randomSide(rand, sides)];
         const across = Vec2f{ -dir[1], dir[0] } * @as(Vec2f, @splat(rand.float(f32) * 2 - 1));
         const dist = consts.SPAWN_MIN_PLAYER_DIST + rand.float(f32) * (consts.SPAWN_RING_MAX_DIST - consts.SPAWN_MIN_PLAYER_DIST);
-        const pos = player_world_pos + maths.normaliseSafe(dir + across, dir) * @as(Vec2f, @splat(dist));
+        const pos = player_world_pos + maths.normaliseSafe(dir + across, dir) * @as(Vec2f, @splat(dist)) * RING_SQUASH;
         const cell = grid.cellIndex(pos) orelse continue;
         if (grid.cells[cell] or !field.isReachable(cell)) continue;
-        if (maths.magnitudeSqrd(grid.cellCentre(cell) - player_world_pos) < SPAWN_MIN_PLAYER_DIST_SQRD) continue;
+        if (ringDistSqrd(grid.cellCentre(cell) - player_world_pos) < SPAWN_MIN_PLAYER_DIST_SQRD) continue;
         return cell;
     }
     return null;
@@ -168,10 +171,16 @@ fn edgeCell(rand: std.Random, sides: u8, player_world_pos: Vec2f, spawn: *const 
         const cells = if (attempt + 1 < consts.SPAWN_ATTEMPTS and side_cells.len > 0) side_cells else spawn.all;
         const cell = cells[rand.uintLessThan(usize, cells.len)];
         if (!field.isReachable(cell)) continue;
-        if (maths.magnitudeSqrd(grid.cellCentre(cell) - player_world_pos) < SPAWN_MIN_PLAYER_DIST_SQRD) continue;
+        if (ringDistSqrd(grid.cellCentre(cell) - player_world_pos) < SPAWN_MIN_PLAYER_DIST_SQRD) continue;
         return cell;
     }
     return null;
+}
+
+/// Squared distance of an offset from the player, measured on the squashed spawn ring
+///
+fn ringDistSqrd(offset: Vec2f) f32 {
+    return maths.magnitudeSqrd(offset / RING_SQUASH);
 }
 
 /// One of the sides set in `mask` (a bit per MapSide), at random
@@ -263,9 +272,10 @@ test "[enemy_spawn_system] a wave holds out, refilling as enemies die, then is c
     const dir = SIDE_DIRS[@ctz(spawner.sides)];
     for (enemies.positions()) |p| {
         try std.testing.expect(map.field.isReachable(grid.cellIndex(p).?));
-        const d = maths.magnitude(p - player);
-        try std.testing.expect(d >= consts.SPAWN_MIN_PLAYER_DIST - 0.3 and d <= consts.SPAWN_RING_MAX_DIST + 0.3);
-        try std.testing.expect(@reduce(.Add, maths.normalise(p - player) * dir) > 0.6); //Within ~50 degrees
+        const d = @sqrt(ringDistSqrd(p - player));
+        //Half a 0.5m cell of slack: picks snap to cell centres, which the squash stretches vertically
+        try std.testing.expect(d >= consts.SPAWN_MIN_PLAYER_DIST - 0.5 and d <= consts.SPAWN_RING_MAX_DIST + 0.5);
+        try std.testing.expect(@reduce(.Add, maths.normalise((p - player) / RING_SQUASH) * dir) > 0.6); //Within ~50 degrees
     }
 
     //Clearing: nothing more spawns; survived once down to WAVE_CLEAR_LEFT

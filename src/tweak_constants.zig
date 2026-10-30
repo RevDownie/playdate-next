@@ -139,11 +139,13 @@ pub const FIRST_WAVE_DELAY: f32 = 3.0;
 pub const WAVE_BANNER_TIME: f32 = 2.0; //How long "WAVE N" shows when a wave starts, and "CLEAR THE REST" after the hold
 pub const WAVE_SURVIVED_BANNER_TIME: f32 = 2.5; //...and "WAVE N SURVIVED" when it is survived
 pub const SPAWN_EDGE_BAND: f32 = 1.0; //Enemies drop in on free cells within this many metres of the map's edge
-pub const SPAWN_MIN_PLAYER_DIST: f32 = 3.0; //...but never closer than this to the player
+/// ...but never closer than this to the player, measured on the spawn ring (an ellipse with the screen's aspect:
+/// 2.3m to the sides is 1.38m above and below), which keeps the screen's corners inside it
+pub const SPAWN_MIN_PLAYER_DIST: f32 = 2.3;
 /// Waves drop their packs in a ring just off screen in the wave's direction(s), this far from the player at most,
 /// so they arrive within a few seconds as a crowd the player can see (spawning only at the map's edge, the gun
 /// picked each enemy off as it walked into view and the screen never filled). The map's edge band is the fallback
-pub const SPAWN_RING_MAX_DIST: f32 = 4.5;
+pub const SPAWN_RING_MAX_DIST: f32 = 3.0; //1.8m above and below, inside lvl1's height
 pub const SPAWN_ATTEMPTS: u8 = 6; //Random spawn cells tried per enemy before giving up (they must be reachable and far enough away)
 pub const RNG_SEED: u64 = 42;
 
@@ -226,8 +228,8 @@ pub const AMMO_DROP_SMALL: u8 = 40;
 pub const AMMO_DROP_LARGE: u8 = 150;
 pub const RELOAD_TIME_SMALL: f32 = 0.6; //Picking up ammo takes this long before the gun fires again
 pub const RELOAD_TIME_LARGE: f32 = 2.0; //...a large crate leaves the player defenceless for a while, out where the enemies spawn
-pub const HEALTH_DROP_SMALL: u8 = 15;
-pub const HEALTH_DROP_LARGE: u8 = 45;
+pub const HEALTH_DROP_SMALL: u8 = 12;
+pub const HEALTH_DROP_LARGE: u8 = 35;
 
 /// Gatling gun. Only affects where bullets are drawn: they are simulated from the player's feet so enemies
 /// right up against the player can still be hit

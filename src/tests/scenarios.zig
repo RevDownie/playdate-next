@@ -161,7 +161,9 @@ test "[scenario] balance: a steadily cranked gun holds the horde off for a while
     //kept topped up (this measures the gun against the waves; ammo comes from drops, see the drop scenarios).
     //Measured at the time of tuning: the first waves are mown down as they walk on screen, the wave 4 climax
     //crowds the screen (~12 enemies in view) and hurts, and with shamblers taking four bullets the player is overrun
-    //in wave 6 after 200-220s and ~540 kills (over a few RNG seeds)
+    //in wave 6 after 200-220s and ~540 kills (over a few RNG seeds). Since the spawn ring moved in to fit the
+    //smaller lvl1 (screen shaped, 2.3m to the sides) the horde arrives sooner: overrun in wave 4 after ~100s and
+    //~350 kills
     const dt: f32 = 1.0 / 50.0;
     var t: TestLevel = .{};
     t.init(true);
@@ -179,9 +181,9 @@ test "[scenario] balance: a steadily cranked gun holds the horde off for a while
     }
     const secs = @as(f32, @floatFromInt(frames)) * dt;
     try std.testing.expect(result == .player_died);
-    try std.testing.expect(secs > 150 and secs < 300);
-    try std.testing.expect(game.spawner.wave >= 5 and game.spawner.wave <= 9);
-    try std.testing.expect(kills > 400);
+    try std.testing.expect(secs > 80 and secs < 300);
+    try std.testing.expect(game.spawner.wave >= 4 and game.spawner.wave <= 9);
+    try std.testing.expect(kills > 280);
 }
 
 test "[scenario] an enemy right up against the player can be shot" {
