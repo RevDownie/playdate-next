@@ -7,11 +7,15 @@ pub const GROUND_MARGIN_Y: i32 = 160;
 /// A piece's bitmap size and the pixel that sits on its anchor cell's centre, drawn as is and mirrored
 pub const Piece = struct { w: i16, h: i16, anchor_x: i16, anchor_x_flipped: i16, anchor_y: i16 };
 
-pub const Kit = struct { name: [:0]const u8, pieces: []const Piece };
+/// `phases`: 1, or PHASES when every piece (and the kit's levels' floors) come in phase variants
+pub const Kit = struct { name: [:0]const u8, phases: u8, pieces: []const Piece };
+
+pub const PHASES = 4;
 
 pub const KITS = [_]Kit{
     .{
         .name = "woods",
+        .phases = 4,
         .pieces = &.{
             .{ .w = 53, .h = 71, .anchor_x = 22, .anchor_x_flipped = 30, .anchor_y = 54 }, //pine_tall 1x1
             .{ .w = 53, .h = 59, .anchor_x = 22, .anchor_x_flipped = 30, .anchor_y = 42 }, //pine_short 1x1
@@ -29,6 +33,7 @@ pub const KITS = [_]Kit{
     },
     .{
         .name = "city",
+        .phases = 4,
         .pieces = &.{
             .{ .w = 57, .h = 76, .anchor_x = 28, .anchor_x_flipped = 28, .anchor_y = 62 }, //facade_a 1x1
             .{ .w = 57, .h = 53, .anchor_x = 28, .anchor_x_flipped = 28, .anchor_y = 39 }, //facade_b 1x1
@@ -47,6 +52,7 @@ pub const KITS = [_]Kit{
     },
     .{
         .name = "quarantine",
+        .phases = 4,
         .pieces = &.{
             .{ .w = 57, .h = 64, .anchor_x = 28, .anchor_x_flipped = 28, .anchor_y = 50 }, //fence_h 1x1
             .{ .w = 22, .h = 67, .anchor_x = 7, .anchor_x_flipped = 14, .anchor_y = 52 }, //fence_v 1x1

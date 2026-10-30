@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<tileset version="1.9" tiledversion="1.9.2" name="city_ground" tilewidth="63" tileheight="29" tilecount="8" columns="0">
+<tileset version="1.9" tiledversion="1.9.2" name="city_ground" tilewidth="57" tileheight="27" tilecount="8" columns="0">
  <grid orientation="orthogonal" width="1" height="1"/>
  <tile id="0">
   <properties>
@@ -48,13 +48,13 @@
    <property name="name" value="manhole"/>
    <property name="footprint" value="1x1"/>
   </properties>
-  <image width="57" height="27" source="city/ground/manhole.png"/>
+  <image width="25" height="14" source="city/ground/manhole.png"/>
  </tile>
  <tile id="7">
   <properties>
    <property name="name" value="scorch"/>
    <property name="footprint" value="1x1"/>
   </properties>
-  <image width="63" height="29" source="city/ground/scorch.png"/>
+  <image width="52" height="26" source="city/ground/scorch.png"/>
  </tile>
 </tileset>

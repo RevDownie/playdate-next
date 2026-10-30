@@ -13,14 +13,14 @@
    <property name="name" value="tracks_h"/>
    <property name="footprint" value="1x1"/>
   </properties>
-  <image width="58" height="13" source="quarantine/ground/tracks_h.png"/>
+  <image width="57" height="13" source="quarantine/ground/tracks_h.png"/>
  </tile>
  <tile id="2">
   <properties>
    <property name="name" value="tracks_v"/>
    <property name="footprint" value="1x1"/>
   </properties>
-  <image width="20" height="27" source="quarantine/ground/tracks_v.png"/>
+  <image width="19" height="27" source="quarantine/ground/tracks_v.png"/>
  </tile>
  <tile id="3">
   <properties>
@@ -34,6 +34,6 @@
    <property name="name" value="mud"/>
    <property name="footprint" value="1x1"/>
   </properties>
-  <image width="53" height="27" source="quarantine/ground/mud.png"/>
+  <image width="46" height="25" source="quarantine/ground/mud.png"/>
  </tile>
 </tileset>

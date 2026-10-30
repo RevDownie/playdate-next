@@ -20,7 +20,9 @@ are** is a code change with knock-on effects. Each section below says which is w
 | Camera | Top-down 3/4 view (seen from above and slightly in front). Never mix in side or true top-down views |
 | Light | From the **top left**, everywhere. Top faces lightest, front faces mid, cast shadows fall down and to the right |
 | Tones | Five, through one ordered **4x4 Bayer** dither: white, light (25% black), mid (50%), dark (75%), black. No error diffusion (it crawls when things move) |
-| Contrast order | Characters (highest) > obstacles > ground (quietest). Ground is white with sparse detail |
+| Flicker | The view scrolls 1 px at a time, and on this LCD any pixel that flips reads as flicker. A single pixel checker flips *every* pixel on a 1 px move; a solid area only flips along its outline. So every kit is drawn in **phase variants** (next row), which keeps its fine shading still on screen. A kit left out of `DITHERED_KITS` falls back to the **solid** style: lit faces white, shadow faces and cast shadows solid black, detail in black or white lines, and dither (50%, in 2 x 2 pixel clusters, `DITHER_CELL`) only as small accents. Never use 12.5% fills, and keep the ground quiet line work either way. Measure: shift a level preview (`convert_tilemaps.py --preview logs`) by 1 px and count the flipped pixels: 3-7% of the screen now (single pixel dither was 11-17%) |
+| Phase variants | The other way to keep fine dithering: draw the art in **phase variants** (`PHASES` in `env_kits.py`; every kit in `DITHERED_KITS`, currently all three). Each piece and the kit's levels' floors are rendered four times, once per screen pixel phase (x even/odd, y even/odd), and the renderer draws the version whose dither lines up with the screen, so the pattern stays still while the shapes move (3-4% flips, like the solid style). Rules: single pixel dither (`cell=1`), only the 25/50/75% tones (`LIGHT`, `MID`, `DARK`: they repeat every 2 px; anything finer needs 16 versions), dithered shadows with `p.dshadow`. Costs 4x the bitmaps per kit (each level's floors are about 600 KB in memory, 1.8 MB for the three) and nothing per frame |
+| Contrast order | Characters (highest) > obstacles > ground (quietest). Ground is white with sparse detail. Each kit leans one way for identity: woods black foliage with white lit edges, city white concrete with black burnt vehicles, quarantine dark canvas with white markings |
 | Grid | Level cells are **57 x 27 px** (0.445 x 0.211 m). Levels are 16 x 20 cells |
 | Characters | Hero cell 48 x 48 (about 41 px tall on screen), zombies 32 to 64 px cells |
 
@@ -179,8 +181,8 @@ Three kits: `woods`, `city`, `quarantine`. Each kit has:
 - Draw the object's base inside the footprint, near the bottom of it. Overhangs (canopies, roofs, shadows) may extend
   outside it; they will overlap characters correctly through depth sorting.
 - Footprints extend **right and up** from the cell the piece is placed on (like a Tiled tile).
-- Use `p.shadow(...)` / `p.shadow_ellipse(...)` for cast shadows: they are "ink", only their black dither pixels are
-  opaque, so they darken whatever is under them instead of painting white specks.
+- Use `p.shadow(...)` / `p.shadow_ellipse(...)` for cast shadows: solid black, down and to the right. `ink=True` on
+  a shape makes only its black pixels opaque (for a dithered accent laid over the ground without white specks).
 - **Border pieces** (the ring round each level: `facade_*` and `wall_side` in city, `fence_h`/`fence_v` in quarantine,
   trees and bushes in woods) must be exactly one cell wide with no side outline where they join, so a row reads as one
   wall or street.
@@ -189,6 +191,16 @@ Three kits: `woods`, `city`, `quarantine`. Each kit has:
 - Mirroring: pieces can be flipped per placement in Tiled. The flipped anchor is computed (`anchor_x_flipped`), so
   flipping is free, but light then comes from the right on that copy: flip foliage and rubble, not buildings with
   strong shadows or text.
+
+### Phase variants
+
+- A kit built with `Kit(..., cell=1, phases=PHASES)` and its pieces with `Art(..., cell=1, phases=PHASES)` gets four
+  bitmaps per piece (`<kit>-piece-<n>-p<v>.png`) and four floors per level (`ground-<level>-p<v>.png`); `kit_descs.zig`
+  records `phases` and the renderer loads and picks them itself. Nothing else changes.
+- `DITHERED_KITS` picks which kits use their fine dithered art in phase variants (`wd_*`, `cd_*`, `qd_*` pieces);
+  the rest use the solid style (`w_*`, `c_*`, `q_*`, one bitmap per piece). Re-run `env_kits.py` and
+  `convert_tilemaps.py` after changing it. Edit the style in use (both sets keep the same names, footprints and order).
+- Characters, gore and drops are not in phase variants (yet), so their dither still moves with them.
 
 ### Safe to change (no code change)
 
@@ -231,8 +243,9 @@ Three kits: `woods`, `city`, `quarantine`. Each kit has:
   cache. Fewer, larger sprites beat many tiny ones. At 100 enemies about 100 sprites are drawn.
 - **Overdraw and draw calls** cost more than maths on device. Avoid big mostly-transparent bitmaps: transparency still
   stores a mask (1-bit image + 1-bit mask).
-- **Memory**: all kit pieces and every level's floor are loaded at startup (currently about 37 pieces and three
-  ~150 KB floors). Keep pieces trimmed (the script trims to what is drawn).
+- **Memory**: all kit pieces and every level's floor are loaded at startup (currently 37 pieces x 4 phases = 148
+  bitmaps, and three levels x 4 phases of ~150 KB floors, about 1.8 MB). Keep pieces trimmed (the script trims to
+  what is drawn).
 - **50 FPS on the device is the bar**, and the simulator hides performance problems. Anything that adds sprites,
   enlarges cells or adds sheets needs a device FPS check at worst case.
 

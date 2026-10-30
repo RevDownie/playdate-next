@@ -39,8 +39,12 @@ fn gibSheet(kind: state.EnemyKind) Sheet {
 ///
 pub const Assets = struct {
     tables: [std.enums.values(Sheet).len]*pd.LCDBitmapTable, //Indexed by Sheet (not env)
-    kit_pieces: [kit_descs.KITS.len][kit_descs.MAX_KIT_PIECES]*pd.LCDBitmap, //Every kit's pieces, by kit and piece
-    grounds: [MAX_LEVELS]*pd.LCDBitmap, //Each level's baked floor, by level index
+    //Every kit's pieces, by kit, piece and pixel phase, and each level's baked floor by level index and phase. Art in
+    //phase variants (kit_descs.PHASES) is dithered once per screen pixel phase (x even/odd, y even/odd) and drawn with
+    //the version matching where it lands, so its dither stays fixed to the screen and doesn't flicker as it scrolls.
+    //Everything else has one bitmap in every phase slot
+    kit_pieces: [kit_descs.KITS.len][kit_descs.MAX_KIT_PIECES][kit_descs.PHASES]*pd.LCDBitmap,
+    grounds: [MAX_LEVELS][kit_descs.PHASES]*pd.LCDBitmap,
     fonts: hud_mod.Fonts,
 };
 
@@ -121,14 +125,32 @@ pub fn loadAssets(playdate_api: *pd.PlaydateAPI, level_names: []const [:0]const 
     var name_buf: [64]u8 = undefined;
     for (kit_descs.KITS, 0..) |kit, k| {
         for (0..kit.pieces.len) |i| {
-            const name = std.fmt.bufPrintSentinel(&name_buf, "{s}-piece-{d}", .{ kit.name, i }, 0) catch unreachable;
-            assets.kit_pieces[k][i] = graphics.loadBitmap.?(name, null) orelse @panic("loadAssets: Failed to load a kit piece");
+            if (kit.phases == 1) {
+                const name = std.fmt.bufPrintSentinel(&name_buf, "{s}-piece-{d}", .{ kit.name, i }, 0) catch unreachable;
+                assets.kit_pieces[k][i] = @splat(graphics.loadBitmap.?(name, null) orelse @panic("loadAssets: Failed to load a kit piece"));
+                continue;
+            }
+            for (0..kit_descs.PHASES) |v| {
+                const name = std.fmt.bufPrintSentinel(&name_buf, "{s}-piece-{d}-p{d}", .{ kit.name, i, v }, 0) catch unreachable;
+                assets.kit_pieces[k][i][v] = graphics.loadBitmap.?(name, null) orelse @panic("loadAssets: Failed to load a kit piece");
+            }
         }
     }
     std.debug.assert(level_names.len <= MAX_LEVELS);
     for (level_names, 0..) |level_name, i| {
-        const name = std.fmt.bufPrintSentinel(&name_buf, "ground-{s}", .{level_name}, 0) catch unreachable;
-        assets.grounds[i] = graphics.loadBitmap.?(name, null) orelse @panic("loadAssets: Failed to load a level's ground");
+        //A level of a phased kit has ground-<name>-p0..3, any other ground-<name>
+        var err: [*c]const u8 = null;
+        const p0 = std.fmt.bufPrintSentinel(&name_buf, "ground-{s}-p0", .{level_name}, 0) catch unreachable;
+        if (graphics.loadBitmap.?(p0, &err)) |first| {
+            assets.grounds[i][0] = first;
+            for (1..kit_descs.PHASES) |v| {
+                const name = std.fmt.bufPrintSentinel(&name_buf, "ground-{s}-p{d}", .{ level_name, v }, 0) catch unreachable;
+                assets.grounds[i][v] = graphics.loadBitmap.?(name, null) orelse @panic("loadAssets: Failed to load a level's ground");
+            }
+        } else {
+            const name = std.fmt.bufPrintSentinel(&name_buf, "ground-{s}", .{level_name}, 0) catch unreachable;
+            assets.grounds[i] = @splat(graphics.loadBitmap.?(name, null) orelse @panic("loadAssets: Failed to load a level's ground"));
+        }
     }
     assets.tables[@backingInt(Sheet.drop)] = graphics.loadBitmapTable.?("drops", null) orelse @panic("loadAssets: Failed to load drops");
     for (GORE_SHEET_FILES, @backingInt(Sheet.gibs_runner)..) |name, i| {
@@ -161,7 +183,7 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     };
     const origin_on_screen = Vec2f{ -screen.camera_pos[0] * consts.METRES_TO_PIXELS + @as(f32, @floatFromInt(screen.width >> 1)), screen.camera_pos[1] * consts.METRES_TO_PIXELS + @as(f32, @floatFromInt(screen.height >> 1)) };
     const ground_pos = Vec2i{ @intFromFloat(@floor(origin_on_screen[0])), @intFromFloat(@floor(origin_on_screen[1])) } - ground_origin;
-    graphics.drawBitmap.?(assets.grounds[level_index], ground_pos[0], ground_pos[1], pd.kBitmapUnflipped);
+    graphics.drawBitmap.?(assets.grounds[level_index][phaseAt(ground_pos[0], ground_pos[1])], ground_pos[0], ground_pos[1], pd.kBitmapUnflipped);
 
     //---Gore on the ground under everything standing, so it needs no depth sort: blood pools, spatters, then the
     //body parts lying in them
@@ -235,7 +257,7 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     std.sort.pdq(SortKey, keys, {}, std.sort.asc(SortKey));
     for (keys) |key| {
         const item = list.items[@as(u16, @truncate(key))];
-        const bitmap = if (item.sheet == .env) assets.kit_pieces[level.kit][item.frame] else graphics.getTableBitmap.?(assets.tables[@backingInt(item.sheet)], item.frame) orelse @panic("render: Bitmap index out of range for its table");
+        const bitmap = if (item.sheet == .env) envBitmap(assets, level.kit, item) else graphics.getTableBitmap.?(assets.tables[@backingInt(item.sheet)], item.frame) orelse @panic("render: Bitmap index out of range for its table");
         graphics.drawBitmap.?(bitmap, item.x, item.y, if (item.flipped) pd.kBitmapFlippedX else pd.kBitmapUnflipped);
     }
 
@@ -345,6 +367,20 @@ const DrawList = struct {
         self.len += 1;
     }
 };
+
+/// Which phase variant to draw for a bitmap whose left column lands on screen column `x` and top row on `y`
+/// (see Assets.kit_pieces)
+fn phaseAt(x: i32, y: i32) usize {
+    return @intCast((x & 1) | ((y & 1) << 1));
+}
+
+/// A level object's bitmap, in the phase that matches where it lands. Mirrored, its left column on screen is its
+/// last one, so its phase follows the right edge
+fn envBitmap(assets: *const Assets, kit: u8, item: DrawItem) *pd.LCDBitmap {
+    const piece = kit_descs.KITS[kit].pieces[item.frame];
+    const x: i32 = @as(i32, item.x) + if (item.flipped) @as(i32, piece.w) - 1 else 0;
+    return assets.kit_pieces[kit][item.frame][phaseAt(x, item.y)];
+}
 
 fn sheetSize(sheet: Sheet) Vec2i {
     return switch (sheet) {
