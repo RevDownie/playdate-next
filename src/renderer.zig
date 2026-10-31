@@ -286,6 +286,14 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
         drawTracer(graphics, head, tail);
     }
 
+    //---The last shot's muzzle flash at the barrel it left from, unless the player has asked the system to reduce
+    //flashing
+    if (hud.game_over == null and bullets.flash_timer > 0 and sys.getReduceFlashing.?() == 0) {
+        const aim = game.player.facing_dir;
+        const muzzle = screen.toScreen(game.player.pos + anim.muzzleOffset(aim, bullets.flash_barrel)) - gun_height;
+        drawMuzzleFlash(graphics, muzzle, aim, bullets.flash_barrel, bullets.flash_timer / consts.MUZZLE_FLASH_TIME);
+    }
+
     //---The melee swing: an arc sweeping round the player towards the enemy struck, at chest height
     const melee = &game.melee;
     if (melee.swing_timer > 0) {
@@ -442,6 +450,36 @@ fn drawTracer(graphics: pd.playdate_graphics, head: Vec2i, tail: Vec2i) void {
     graphics.drawLine.?(back[0], back[1], front[0], front[1], 4, @intFromPtr(&PATTERN_HALF));
     graphics.drawLine.?(front[0], front[1], head[0], head[1], 4, pd.kColorBlack);
     graphics.fillEllipse.?(head[0] - 3, head[1] - 3, 6, 6, 0, 360, pd.kColorBlack);
+}
+
+/// The muzzle flash's spikes as (along the aim, across it) times its length: a long one forward, two shorter
+/// diagonals and two stubs to the sides
+const FLASH_SPIKES = [_]Vec2f{ .{ 1, 0 }, .{ 0.6, 0.5 }, .{ 0.6, -0.5 }, .{ 0.1, 0.45 }, .{ 0.1, -0.45 } };
+/// Forward spike length in pixels by barrel, so a burst's flashes differ as the barrels turn
+const FLASH_LENGTHS = [_]f32{ 18, 13, 15 };
+
+/// A starburst at `at` pointing along `aim` (world, unit length): a black outline round a white core so it shows on
+/// the light ground and the dark zombies alike. It shrinks as `life` runs from 1 down to 0
+///
+fn drawMuzzleFlash(graphics: pd.playdate_graphics, at: Vec2i, aim: Vec2f, barrel: u8, life: f32) void {
+    const fwd = Vec2f{ aim[0], -aim[1] }; //Screen y is down
+    const side = Vec2f{ -fwd[1], fwd[0] };
+    const c: Vec2f = @floatFromInt(at);
+    const length = FLASH_LENGTHS[barrel % FLASH_LENGTHS.len] * (0.5 + 0.5 * life);
+    //Black then white over it, each spike a triangle from a base across its root
+    for ([_]struct { scale: f32, half_w: f32, colour: pd.LCDColor }{ .{ .scale = 1, .half_w = 4, .colour = pd.kColorBlack }, .{ .scale = 0.75, .half_w = 2.5, .colour = pd.kColorWhite } }) |pass| {
+        for (FLASH_SPIKES) |s| {
+            const d = fwd * @as(Vec2f, @splat(s[0])) + side * @as(Vec2f, @splat(s[1]));
+            const n = maths.normaliseSafe(d, fwd);
+            const across = Vec2f{ -n[1], n[0] } * @as(Vec2f, @splat(pass.half_w));
+            const tip: Vec2i = @intFromFloat(@round(c + d * @as(Vec2f, @splat(length * pass.scale))));
+            const a: Vec2i = @intFromFloat(@round(c + across));
+            const b: Vec2i = @intFromFloat(@round(c - across));
+            graphics.fillTriangle.?(a[0], a[1], b[0], b[1], tip[0], tip[1], pass.colour);
+        }
+        const r: i32 = @intFromFloat(@round(pass.half_w * 1.5));
+        graphics.fillEllipse.?(at[0] - r, at[1] - r, 2 * r, 2 * r, 0, 360, pass.colour);
+    }
 }
 
 fn lerpPoint(a: Vec2i, b: Vec2i, t: f32) Vec2i {

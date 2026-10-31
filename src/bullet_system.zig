@@ -28,7 +28,7 @@ comptime {
 
 /// Spawn a new bullet at `world_pos` (the player's feet) heading along `world_dir`, turned sideways by
 /// `stray` (-1 to 1) times BULLET_SPREAD for a little machine gun scatter. Nothing fires when out of ammo: the
-/// gun is only refilled by ammo drops (see drop_system).
+/// gun is only refilled by ammo drops (see drop_system). A shot that goes off flashes at its barrel's muzzle.
 /// Returns whether a shot went off
 ///
 pub fn fire(bullets: *Bullets, world_pos: Vec2f, world_dir: Vec2f, stray: f32) bool {
@@ -43,15 +43,18 @@ pub fn fire(bullets: *Bullets, world_pos: Vec2f, world_dir: Vec2f, stray: f32) b
     bullets.lifetime[i] = consts.BULLET_LIFETIME;
     bullets.len += 1;
     bullets.ammo -= 1;
+    bullets.flash_timer = consts.MUZZLE_FLASH_TIME;
+    bullets.flash_barrel = bullets.next_barrel;
     bullets.next_barrel = (bullets.next_barrel + 1) % consts.GUN_BARRELS;
     return true;
 }
 
-/// Age the bullets and move them along their trajectories. Each move is sampled at least every half
+/// Fade the muzzle flash, age the bullets and move them along their trajectories. Each move is sampled at least every half
 /// cell so a bullet can't tunnel through a wall; one that reaches a blocked cell (or leaves the map) stops
 /// at its last free point. Expired and blocked bullets are flagged (lifetime <= 0) and removed by `Bullets.removeDead`
 ///
 pub fn update(bullets: *Bullets, grid: *const CollisionGrid, dt: f32) void {
+    bullets.flash_timer = @max(bullets.flash_timer - dt, 0);
     const step = consts.BULLET_MAX_SPEED * dt;
     const num_samples: u32 = @intFromFloat(@max(@ceil(step / grid.sampleLength()), 1));
     const sample_step: Vec2f = @splat(step / @as(f32, @floatFromInt(num_samples)));
@@ -217,4 +220,18 @@ test "[bullet_system] spread strays a little and the barrels turn with each shot
     try std.testing.expect(d[0] > 0 and d[0] < consts.BULLET_SPREAD * 1.01); //Full stray is to the right
     for (0..consts.GUN_BARRELS) |i| try std.testing.expect(b.barrel[i] == i);
     try std.testing.expect(b.barrel[consts.GUN_BARRELS] == 0);
+}
+
+test "[bullet_system] each shot flashes at its barrel until the flash fades, and an empty gun doesn't flash" {
+    var b = Bullets{};
+    b.ammo = 2;
+    _ = fire(&b, @splat(0), Vec2f{ 1, 0 }, 0);
+    _ = fire(&b, @splat(0), Vec2f{ 1, 0 }, 0);
+    try std.testing.expect(b.flash_timer == consts.MUZZLE_FLASH_TIME and b.flash_barrel == b.barrel[1]);
+    update(&b, &OPEN_GRID, consts.MUZZLE_FLASH_TIME / 2);
+    try std.testing.expect(b.flash_timer > 0);
+    update(&b, &OPEN_GRID, consts.MUZZLE_FLASH_TIME);
+    try std.testing.expect(b.flash_timer == 0);
+    try std.testing.expect(!fire(&b, @splat(0), Vec2f{ 1, 0 }, 0)); //Empty
+    try std.testing.expect(b.flash_timer == 0);
 }

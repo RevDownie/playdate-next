@@ -1,11 +1,12 @@
 # Launch the game in the Playdate Simulator, capture its output and screenshot the window.
-#   powershell -File tools/sim.ps1 [-Seconds 8] [-NoBuild] [-Invincible] [-Level <name>]
+#   powershell -File tools/sim.ps1 [-Seconds 8] [-NoBuild] [-Invincible] [-Level <name>] [-Uncapped]
 # Outputs (git-ignored) in logs/: sim-stdout.log, sim-stderr.log, screenshot.png
 param(
     [int]$Seconds = 8,
     [switch]$NoBuild,
     [switch]$Invincible, # Debug build where enemies can't hurt the player (also a system menu checkmark)
-    [string]$Level = "" # Debug build that only plays this level (LEVEL_NAMES in src/level_descs.zig; also a system menu option)
+    [string]$Level = "", # Debug build that only plays this level (LEVEL_NAMES in src/level_descs.zig; also a system menu option)
+    [switch]$Uncapped # Not locked at TARGET_FPS, so the FPS counter shows the headroom
 )
 
 . "$PSScriptRoot\sim-common.ps1"
@@ -27,6 +28,7 @@ if (-not $NoBuild) {
     $buildArgs = @("build")
     if ($Invincible) { $buildArgs += "-Dinvincible=true" }
     if ($Level) { $buildArgs += "-Dlevel=$Level" }
+    if ($Uncapped) { $buildArgs += "-Duncapped=true" }
     zig @buildArgs 2>&1 | Where-Object { $_ -notmatch '^\s*[+|]|^Copying|^Unrecognized' }
     $buildOk = $LASTEXITCODE -eq 0
     Pop-Location

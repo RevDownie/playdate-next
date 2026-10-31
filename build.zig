@@ -13,6 +13,8 @@ pub fn build(b: *std.Build) void {
     build_options.addOption([]const u8, "level", level);
     const fps = b.option(bool, "fps", "Draw the SDK's FPS counter (bottom centre, clear of the HUD); turn it off for shipping builds") orelse true;
     build_options.addOption(bool, "fps", fps);
+    const uncapped = b.option(bool, "uncapped", "Run as fast as the hardware allows instead of locked at TARGET_FPS, so the FPS counter shows the headroom (performance testing)") orelse false;
+    build_options.addOption(bool, "uncapped", uncapped);
 
     const environ = b.graph.environ_map;
     const sdk_path = environ.get("PLAYDATE_SDK_PATH") orelse @panic("PLAYDATE_SDK_PATH is not set");

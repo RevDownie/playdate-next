@@ -149,6 +149,8 @@ pub const Bullets = struct {
 
     ammo: u8 = consts.START_AMMO,
     next_barrel: u8 = 0, //Barrel the next shot leaves from, turns with every shot
+    flash_timer: f32 = 0, //Counts down while the last shot's muzzle flash shows (visual only)
+    flash_barrel: u8 = 0, //Barrel the last shot left from: where the flash is, and its shape
 
     /// Swap-remove every bullet whose lifetime has run out
     ///

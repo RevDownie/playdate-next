@@ -122,6 +122,14 @@ pub fn dropSheenFrame(age: f32, point: u8) u8 {
     return if (frame < sheen_frames) @intCast(frame + 1) else 0;
 }
 
+/// Where the end of `barrel` is, from the player's feet, with the gun aimed along `dir` (world metres, on the ground;
+/// the renderer lifts it to gun height)
+///
+pub fn muzzleOffset(dir: Vec2f, barrel: u8) Vec2f {
+    const right = Vec2f{ dir[1], -dir[0] };
+    return dir * @as(Vec2f, @splat(consts.MUZZLE_FORWARD)) + right * @as(Vec2f, @splat(BARREL_SIDE_OFFSETS[barrel % consts.GUN_BARRELS]));
+}
+
 pub const Tracer = struct { head: Vec2f, tail: Vec2f };
 
 /// Where to draw a bullet's tracer streak (world metres, on the ground; the renderer lifts it to gun height).
@@ -130,10 +138,8 @@ pub const Tracer = struct { head: Vec2f, tail: Vec2f };
 /// travels. The tail never reaches back past the muzzle
 ///
 pub fn bulletTracer(pos: Vec2f, dir: Vec2f, travelled: f32, barrel: u8) Tracer {
-    const right = Vec2f{ dir[1], -dir[0] };
     const fade = @max(1 - travelled / consts.MUZZLE_CONVERGE_DIST, 0);
-    const muzzle = dir * @as(Vec2f, @splat(consts.MUZZLE_FORWARD)) + right * @as(Vec2f, @splat(BARREL_SIDE_OFFSETS[barrel % consts.GUN_BARRELS]));
-    const head = pos + muzzle * @as(Vec2f, @splat(fade));
+    const head = pos + muzzleOffset(dir, barrel) * @as(Vec2f, @splat(fade));
     const length = std.math.clamp(travelled, 0.02, consts.TRACER_LENGTH);
     return .{ .head = head, .tail = head - dir * @as(Vec2f, @splat(length)) };
 }

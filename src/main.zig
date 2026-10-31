@@ -110,7 +110,8 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
         sys.setMenuItemValue.?(level_menu_item, if (forced_level) |f| @intCast(f + 1) else 0);
     }
 
-    playdate_api.display.*.setRefreshRate.?(0);
+    //Locked at TARGET_FPS; `zig build -Duncapped` runs flat out (0) so the FPS counter shows the headroom
+    playdate_api.display.*.setRefreshRate.?(if (build_options.uncapped) 0 else @floatFromInt(consts.TARGET_FPS));
 
     level_rng = std.Random.DefaultPrng.init(@as(u64, sys.getSecondsSinceEpoch.?(null)) << 16 ^ sys.getCurrentTimeMilliseconds.?());
     if (debug_logging) sys.resetElapsedTime.?();
