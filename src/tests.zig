@@ -1,6 +1,6 @@
 //! Single entry point for `zig build test`. Unit tests live next to the code they test (so they can reach
 //! private functions); scenario tests that span systems live in `tests/`. Importing a file here runs its
-//! tests - add every new module that doesn't need the Playdate API (main.zig and renderer.zig do).
+//! tests - add every new module that doesn't need the Playdate API (main.zig, renderer.zig and hud.zig do).
 
 test {
     _ = @import("maths.zig");
@@ -16,7 +16,6 @@ test {
     _ = @import("bullet_system.zig");
     _ = @import("enemy_movement_system.zig");
     _ = @import("enemy_spawn_system.zig");
-    _ = @import("enemy_separation_system.zig");
     _ = @import("combat_system.zig");
     _ = @import("firing_system.zig");
     _ = @import("drop_system.zig");

@@ -74,11 +74,6 @@ pub const Enemies = struct {
         self.addKind(world_pos, .walker, consts.ENEMY_SPEED);
     }
 
-    /// Add a walker moving at `speed`
-    pub fn addWithSpeed(self: *Enemies, world_pos: Vec2f, speed: f32) void {
-        self.addKind(world_pos, .walker, speed);
-    }
-
     pub fn addKind(self: *Enemies, world_pos: Vec2f, kind: EnemyKind, speed: f32) void {
         std.debug.assert(self.len < capacity);
         std.debug.assert(speed <= consts.ENEMY_MAX_SPEED);
@@ -147,7 +142,7 @@ pub const Bullets = struct {
     len: u8 = 0,
     pos: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined,
     lifetime: [capacity]f32 align(memory.CACHE_LINE_SIZE) = undefined,
-    dir: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined, //Only read when moving or on a hit
+    dir: [capacity]Vec2f align(memory.CACHE_LINE_SIZE) = undefined, //Not part of the collision test: only read when moving or on a hit
     barrel: [capacity]u8 align(memory.CACHE_LINE_SIZE) = undefined, //Gatling barrel it left from, only read when drawn
 
     ammo: u8 = consts.START_AMMO,
@@ -286,7 +281,7 @@ pub const SOLID: f32 = -1;
 /// stay solid: this one being added starts the oldest of them fading, which leaves it `fade_slots` more adds to fade
 /// out before its slot comes round again. So adding entry N (counting from 0, N = capacity - fade_slots) fades entry 0
 fn ringSlot(len: *u8, next: *u8, fade: []f32, comptime capacity: u8, comptime fade_slots: u8) u8 {
-    comptime std.debug.assert(fade_slots >= 1 and fade_slots < capacity);
+    if (fade_slots < 1 or fade_slots >= capacity) @compileError("fade_slots must be at least 1 and less than the capacity");
     const i = next.*;
     next.* = if (i + 1 == capacity) 0 else i + 1;
     len.* = @max(len.*, i + 1);
@@ -399,11 +394,14 @@ pub fn Splats(comptime cap: u8, comptime fade_slots: u8) type {
     };
 }
 
+pub const Pools = Splats(consts.MAX_POOLS, consts.POOL_FADE_SLOTS); //Where bodies burst and heavy parts landed
+pub const Spatters = Splats(consts.MAX_SPATTERS, consts.SPATTER_FADE_SLOTS); //Where droplets landed
+
 pub const Gore = struct {
     gibs: Gibs = .{},
     droplets: Droplets = .{},
-    pools: Splats(consts.MAX_POOLS, consts.POOL_FADE_SLOTS) = .{}, //Where bodies burst and heavy parts landed
-    spatters: Splats(consts.MAX_SPATTERS, consts.SPATTER_FADE_SLOTS) = .{}, //Where droplets landed
+    pools: Pools = .{},
+    spatters: Spatters = .{},
 };
 
 pub const WavePhase = enum(u8) { lull, wave };
@@ -496,6 +494,20 @@ pub const Drops = struct {
     }
 };
 
+/// The view (see camera_system). `pos` is what the simulation sees (targeting only aims at enemies in view);
+/// `shake` is added on top when drawing only
+///
+pub const Camera = struct {
+    pos: Vec2f = @splat(0),
+    lead: Vec2f = @splat(0), //The lean towards the aim and movement, on top of where it trails the player
+    lead_vel: Vec2f = @splat(0), //...and how fast it is moving (it is on a spring)
+    shake: Vec2f = @splat(0), //Recoil kick
+
+    pub fn drawPos(self: Camera) Vec2f {
+        return self.pos + self.shake;
+    }
+};
+
 pub const GameState = struct {
     player: Player = .{},
     enemies: Enemies = .{},
@@ -506,10 +518,7 @@ pub const GameState = struct {
     trigger: Trigger = .{},
     melee: Melee = .{},
     spawner: Spawner = .{},
-    camera_pos: Vec2f = @splat(0),
-    camera_lead: Vec2f = @splat(0), //The camera's lean towards the aim and movement, on top of where it trails the player
-    camera_lead_vel: Vec2f = @splat(0), //...and how fast it is moving (it is on a spring)
-    camera_shake: Vec2f = @splat(0), //Recoil kick added to camera_pos when drawing only
+    camera: Camera = .{},
     run_time: f32 = 0, //Seconds survived this run
     rng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(consts.RNG_SEED), //Not reset between runs
     gore_rng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(consts.RNG_SEED + 1), //Gore only, so it never changes the gameplay rolls
@@ -525,33 +534,22 @@ pub const GameState = struct {
     }
 };
 
-test "[game_state] enemies removeDead compacts and keeps the living" {
+test "[game_state] enemies removeDead compacts, survivors keep their data, and all dead empties it" {
     var e = Enemies{};
-    e.add(Vec2f{ 0, 0 });
-    e.add(Vec2f{ 1, 0 });
-    e.add(Vec2f{ 2, 0 });
-    e.add(Vec2f{ 3, 0 });
+    e.addKind(Vec2f{ 0, 0 }, .runner, consts.ENEMY_RUNNER_SPEED);
+    e.addKind(Vec2f{ 1, 0 }, .brute, consts.ENEMY_BRUTE_SPEED);
+    e.addKind(Vec2f{ 2, 0 }, .walker, consts.ENEMY_SPEED);
+    e.addKind(Vec2f{ 3, 0 }, .shambler, consts.ENEMY_SLOW_SPEED);
+    try std.testing.expect(e.health[0] == EnemyKind.runner.def().health and e.health[1] == EnemyKind.brute.def().health);
     e.health[0] = 0;
-    e.health[3] = 0;
-
+    e.health[3] = 0; //The last one, which would otherwise be swapped into slot 0
     e.removeDead();
     try std.testing.expect(e.len == 2);
-    //Slot 0 was refilled from the end (which was itself dead) so both survivors remain
-    var found_1 = false;
-    var found_2 = false;
-    for (e.positions()) |p| {
-        if (p[0] == 1) found_1 = true;
-        if (p[0] == 2) found_2 = true;
+    for (e.positions(), e.kind[0..e.len], e.speed[0..e.len]) |p, k, speed| {
+        try std.testing.expect((p[0] == 1 and k == .brute and speed == consts.ENEMY_BRUTE_SPEED) or (p[0] == 2 and k == .walker and speed == consts.ENEMY_SPEED));
     }
-    try std.testing.expect(found_1 and found_2);
-}
 
-test "[game_state] enemies removeDead all" {
-    var e = Enemies{};
-    e.add(Vec2f{ 0, 0 });
-    e.add(Vec2f{ 1, 0 });
-    e.health[0] = 0;
-    e.health[1] = 0;
+    @memset(e.health[0..e.len], 0);
     e.removeDead();
     try std.testing.expect(e.len == 0);
 }
@@ -595,16 +593,6 @@ test "[game_state] popups replace the oldest when full and go once shown" {
     try std.testing.expect(p.len == 1 and p.kind[0] == .milestone); //Milestones show for longer
     p.update(consts.POPUP_BIG_TIME);
     try std.testing.expect(p.len == 0);
-}
-
-test "[game_state] enemies keep their kind through removeDead, and start with its health" {
-    var e = Enemies{};
-    e.addKind(Vec2f{ 0, 0 }, .runner, consts.ENEMY_RUNNER_SPEED);
-    e.addKind(Vec2f{ 1, 0 }, .brute, consts.ENEMY_BRUTE_SPEED);
-    try std.testing.expect(e.health[0] == EnemyKind.runner.def().health and e.health[1] == EnemyKind.brute.def().health);
-    e.health[0] = 0;
-    e.removeDead();
-    try std.testing.expect(e.len == 1 and e.kind[0] == .brute and e.pos[0][0] == 1);
 }
 
 test "[game_state] gore stores are rings: past the limit each one added starts the oldest fading, then replaces it" {

@@ -7,15 +7,14 @@ pub const GROUND_MARGIN_Y: i32 = 160;
 /// A piece's bitmap size and the pixel that sits on its anchor cell's centre, drawn as is and mirrored
 pub const Piece = struct { w: i16, h: i16, anchor_x: i16, anchor_x_flipped: i16, anchor_y: i16 };
 
-/// `phases`: 1, or PHASES when every piece (and the kit's levels' floors) come in phase variants
-pub const Kit = struct { name: [:0]const u8, phases: u8, pieces: []const Piece };
+pub const Kit = struct { name: [:0]const u8, pieces: []const Piece };
 
+/// Every piece and every level's floor comes in this many phase variants, one per screen pixel phase
 pub const PHASES = 4;
 
 pub const KITS = [_]Kit{
     .{
         .name = "woods",
-        .phases = 4,
         .pieces = &.{
             .{ .w = 53, .h = 71, .anchor_x = 22, .anchor_x_flipped = 30, .anchor_y = 54 }, //pine_tall 1x1
             .{ .w = 53, .h = 59, .anchor_x = 22, .anchor_x_flipped = 30, .anchor_y = 42 }, //pine_short 1x1
@@ -26,18 +25,17 @@ pub const KITS = [_]Kit{
             .{ .w = 43, .h = 26, .anchor_x = 18, .anchor_x_flipped = 24, .anchor_y = 12 }, //rock 1x1
             .{ .w = 39, .h = 24, .anchor_x = 14, .anchor_x_flipped = 24, .anchor_y = 10 }, //stump 1x1
             .{ .w = 113, .h = 59, .anchor_x = 26, .anchor_x_flipped = 29, .anchor_y = 46 }, //boulder 2x2
-            .{ .w = 111, .h = 32, .anchor_x = 22, .anchor_x_flipped = 31, .anchor_y = 18 }, //log 2x1
-            .{ .w = 89, .h = 57, .anchor_x = 12, .anchor_x_flipped = 19, .anchor_y = 46 }, //tent 2x1
+            .{ .w = 111, .h = 33, .anchor_x = 22, .anchor_x_flipped = 31, .anchor_y = 19 }, //log 2x1
+            .{ .w = 90, .h = 57, .anchor_x = 13, .anchor_x_flipped = 19, .anchor_y = 46 }, //tent 2x1
             .{ .w = 109, .h = 47, .anchor_x = 20, .anchor_x_flipped = 31, .anchor_y = 34 }, //car 2x1
         },
     },
     .{
         .name = "city",
-        .phases = 4,
         .pieces = &.{
             .{ .w = 57, .h = 76, .anchor_x = 28, .anchor_x_flipped = 28, .anchor_y = 62 }, //facade_a 1x1
-            .{ .w = 57, .h = 53, .anchor_x = 28, .anchor_x_flipped = 28, .anchor_y = 39 }, //facade_b 1x1
-            .{ .w = 57, .h = 76, .anchor_x = 28, .anchor_x_flipped = 28, .anchor_y = 62 }, //facade_c 1x1
+            .{ .w = 58, .h = 53, .anchor_x = 28, .anchor_x_flipped = 29, .anchor_y = 39 }, //facade_b 1x1
+            .{ .w = 58, .h = 76, .anchor_x = 28, .anchor_x_flipped = 29, .anchor_y = 62 }, //facade_c 1x1
             .{ .w = 35, .h = 50, .anchor_x = 16, .anchor_x_flipped = 18, .anchor_y = 36 }, //wall_side 1x1
             .{ .w = 59, .h = 23, .anchor_x = 26, .anchor_x_flipped = 32, .anchor_y = 6 }, //rubble_low 1x1
             .{ .w = 183, .h = 89, .anchor_x = 24, .anchor_x_flipped = 44, .anchor_y = 74 }, //ruin 3x2
@@ -52,9 +50,8 @@ pub const KITS = [_]Kit{
     },
     .{
         .name = "quarantine",
-        .phases = 4,
         .pieces = &.{
-            .{ .w = 57, .h = 64, .anchor_x = 28, .anchor_x_flipped = 28, .anchor_y = 50 }, //fence_h 1x1
+            .{ .w = 58, .h = 64, .anchor_x = 28, .anchor_x_flipped = 29, .anchor_y = 50 }, //fence_h 1x1
             .{ .w = 22, .h = 67, .anchor_x = 7, .anchor_x_flipped = 14, .anchor_y = 52 }, //fence_v 1x1
             .{ .w = 63, .h = 20, .anchor_x = 28, .anchor_x_flipped = 34, .anchor_y = 6 }, //barrier_low 1x1
             .{ .w = 107, .h = 40, .anchor_x = 24, .anchor_x_flipped = 25, .anchor_y = 26 }, //sandbags 2x1

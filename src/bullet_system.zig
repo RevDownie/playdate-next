@@ -19,20 +19,19 @@ const HIT_RADIUS_SQRD = blk: {
 /// frame at the target 50 FPS (longer frames can, which is acceptable for the odd hitch)
 const TARGET_FRAME_DT: f32 = 1.0 / 50.0;
 comptime {
-    for (consts.ENEMY_KINDS) |k| {
-        if (k.hit_radius < consts.ENEMY_MIN_HIT_RADIUS) @compileError("ENEMY_MIN_HIT_RADIUS must be the smallest hit radius");
-    }
-    if (consts.BULLET_MAX_SPEED * TARGET_FRAME_DT >= 2 * consts.ENEMY_MIN_HIT_RADIUS) @compileError("Bullets are fast enough to skip over enemies in one frame");
+    var min_hit_radius: f32 = std.math.inf(f32);
+    for (consts.ENEMY_KINDS) |k| min_hit_radius = @min(min_hit_radius, k.hit_radius);
+    if (consts.BULLET_MAX_SPEED * TARGET_FRAME_DT >= 2 * min_hit_radius) @compileError("Bullets are fast enough to skip over enemies in one frame");
 }
 
 /// Spawn a new bullet at `world_pos` (the player's feet) heading along `world_dir`, turned sideways by
 /// `stray` (-1 to 1) times BULLET_SPREAD for a little machine gun scatter. Nothing fires while an ammo drop is
-/// reloading or when out of ammo: the gun never reloads by itself, only from drops (see drop_system)
+/// reloading or when out of ammo: the gun never reloads by itself, only from drops (see drop_system).
+/// Returns whether a shot went off
 ///
-pub fn fire(bullets: *Bullets, world_pos: Vec2f, world_dir: Vec2f, stray: f32) void {
-    if (bullets.isReloading() or bullets.ammo == 0) return;
-
-    if (bullets.len >= Bullets.capacity) return; //Pool exhausted - drop the shot rather than overrun
+pub fn fire(bullets: *Bullets, world_pos: Vec2f, world_dir: Vec2f, stray: f32) bool {
+    if (bullets.isReloading() or bullets.ammo == 0) return false;
+    if (bullets.len >= Bullets.capacity) return false; //Pool exhausted - drop the shot rather than overrun
 
     const right = Vec2f{ world_dir[1], -world_dir[0] };
     const i = bullets.len;
@@ -43,6 +42,7 @@ pub fn fire(bullets: *Bullets, world_pos: Vec2f, world_dir: Vec2f, stray: f32) v
     bullets.len += 1;
     bullets.ammo -= 1;
     bullets.next_barrel = (bullets.next_barrel + 1) % consts.GUN_BARRELS;
+    return true;
 }
 
 /// Count down any reload, age the bullets and move them along their trajectories. Each move is sampled at least every half
@@ -75,9 +75,8 @@ pub fn update(bullets: *Bullets, grid: *const CollisionGrid, dt: f32) void {
 
 /// Check for collisions between the live bullets and the given entities using circle - point tests.
 /// Each bullet hits at most one entity and is then flagged dead. Writes into `hits_out` (which must hold
-/// one entry per bullet) and returns the filled part.
-///
-/// TODO: Non brute force collision
+/// one entry per bullet) and returns the filled part. Brute force: every pair is a cheap test against data that stays
+/// in the L1 cache (COLLISION_HOT_SET_BYTES)
 ///
 pub fn collide(bullets: *Bullets, enemy_positions: []const Vec2f, enemy_kinds: []const state.EnemyKind, hits_out: []Hit) []Hit {
     std.debug.assert(hits_out.len >= bullets.len and enemy_kinds.len >= enemy_positions.len);
@@ -105,32 +104,32 @@ const OPEN_GRID = CollisionGrid{ .cells = &open_cells, .width = 30, .height = 30
 test "[bullet_system] an empty gun stays empty, and a reload holds fire until it is done" {
     var b = Bullets{};
     b.ammo = 1;
-    fire(&b, @splat(0), Vec2f{ 1, 0 }, 0);
+    try std.testing.expect(fire(&b, @splat(0), Vec2f{ 1, 0 }, 0));
     try std.testing.expect(b.len == 1 and b.ammo == 0);
 
-    fire(&b, @splat(0), Vec2f{ 1, 0 }, 0); //Empty: nothing happens, and it never reloads by itself
+    try std.testing.expect(!fire(&b, @splat(0), Vec2f{ 1, 0 }, 0)); //Empty: nothing happens, and it never reloads by itself
     update(&b, &OPEN_GRID, 10);
     try std.testing.expect(b.len == 1 and b.ammo == 0 and !b.isReloading());
 
     b.ammo = 10; //As if an ammo drop was picked up
     b.reload_timer = consts.RELOAD_TIME_SMALL;
-    fire(&b, @splat(0), Vec2f{ 1, 0 }, 0);
+    try std.testing.expect(!fire(&b, @splat(0), Vec2f{ 1, 0 }, 0)); //Reloading
     try std.testing.expect(b.ammo == 10);
     update(&b, &OPEN_GRID, consts.RELOAD_TIME_SMALL + 0.01);
-    fire(&b, @splat(0), Vec2f{ 1, 0 }, 0);
+    try std.testing.expect(fire(&b, @splat(0), Vec2f{ 1, 0 }, 0));
     try std.testing.expect(b.ammo == 9);
 }
 
 test "[bullet_system] fire never overruns the pool" {
     var b = Bullets{};
     b.ammo = 255;
-    for (0..@as(usize, Bullets.capacity) + 5) |_| fire(&b, @splat(0), Vec2f{ 1, 0 }, 0);
+    for (0..@as(usize, Bullets.capacity) + 5) |_| _ = fire(&b, @splat(0), Vec2f{ 1, 0 }, 0);
     try std.testing.expect(b.len == Bullets.capacity);
 }
 
 test "[bullet_system] expired bullets are all removed in one pass" {
     var b = Bullets{};
-    for (0..4) |_| fire(&b, @splat(0), Vec2f{ 1, 0 }, 0);
+    for (0..4) |_| _ = fire(&b, @splat(0), Vec2f{ 1, 0 }, 0);
     var t: f32 = 0;
     while (t < consts.BULLET_LIFETIME - 0.05) : (t += 0.01) update(&b, &OPEN_GRID, 0.01);
     b.removeDead();
@@ -142,8 +141,8 @@ test "[bullet_system] expired bullets are all removed in one pass" {
 
 test "[bullet_system] each bullet hits one enemy once" {
     var b = Bullets{};
-    fire(&b, Vec2f{ 0, 0 }, Vec2f{ 1, 0 }, 0);
-    fire(&b, Vec2f{ 5, 0 }, Vec2f{ 1, 0 }, 0);
+    _ = fire(&b, Vec2f{ 0, 0 }, Vec2f{ 1, 0 }, 0);
+    _ = fire(&b, Vec2f{ 5, 0 }, Vec2f{ 1, 0 }, 0);
     const enemies = [_]Vec2f{ Vec2f{ 0, 0 }, Vec2f{ 0.01, 0 }, Vec2f{ 100, 0 } };
     const kinds: [3]state.EnemyKind = @splat(.walker);
     var hits: [Bullets.capacity]Hit = undefined;
@@ -160,8 +159,8 @@ test "[bullet_system] each bullet hits one enemy once" {
 test "[bullet_system] big enemies are easier to hit than small ones" {
     var b = Bullets{};
     const off = (consts.CHAR_BULLET_COLL_RADIUS + state.EnemyKind.brute.def().hit_radius) / 2; //Inside a brute, outside a walker
-    fire(&b, Vec2f{ 0, off }, Vec2f{ 1, 0 }, 0);
-    fire(&b, Vec2f{ 5, off }, Vec2f{ 1, 0 }, 0);
+    _ = fire(&b, Vec2f{ 0, off }, Vec2f{ 1, 0 }, 0);
+    _ = fire(&b, Vec2f{ 5, off }, Vec2f{ 1, 0 }, 0);
     const enemies = [_]Vec2f{ Vec2f{ 0, 0 }, Vec2f{ 5, 0 } };
     const kinds = [_]state.EnemyKind{ .walker, .brute };
     var hits: [Bullets.capacity]Hit = undefined;
@@ -177,8 +176,8 @@ test "[bullet_system] walls stop bullets, even on the longest frame" {
 
     for ([_]f32{ 1.0 / 50.0, consts.MAX_FRAME_DT }) |dt| {
         var b = Bullets{};
-        fire(&b, @splat(0), Vec2f{ 1, 0 }, 0);
-        fire(&b, @splat(0), maths.normalise(Vec2f{ 1, 0.3 }), 0);
+        _ = fire(&b, @splat(0), Vec2f{ 1, 0 }, 0);
+        _ = fire(&b, @splat(0), maths.normaliseSafe(Vec2f{ 1, 0.3 }, @splat(0)), 0);
         while (b.len > 0) {
             update(&b, &grid, dt);
             for (b.positions()) |p| try std.testing.expect(p[0] < 0.75); //The wall's near face
@@ -193,8 +192,8 @@ test "[bullet_system] a bullet fired inside a wall or off the map dies at once" 
     const grid = CollisionGrid{ .cells = &cells, .width = 30, .height = 30, .cell_width = 64, .cell_height = 64 };
 
     var b = Bullets{};
-    fire(&b, @splat(0), Vec2f{ 1, 0 }, 0);
-    fire(&b, Vec2f{ 7.2, 3 }, Vec2f{ 1, 0 }, 0); //Leaves the map this frame
+    _ = fire(&b, @splat(0), Vec2f{ 1, 0 }, 0);
+    _ = fire(&b, Vec2f{ 7.2, 3 }, Vec2f{ 1, 0 }, 0); //Leaves the map this frame
     update(&b, &grid, 1.0 / 50.0);
     b.removeDead();
     try std.testing.expect(b.len == 0);
@@ -202,7 +201,7 @@ test "[bullet_system] a bullet fired inside a wall or off the map dies at once" 
 
 test "[bullet_system] spread strays a little and the barrels turn with each shot" {
     var b = Bullets{};
-    for (0..consts.GUN_BARRELS + 1) |_| fire(&b, @splat(0), Vec2f{ 0, 1 }, 1);
+    for (0..consts.GUN_BARRELS + 1) |_| _ = fire(&b, @splat(0), Vec2f{ 0, 1 }, 1);
     const d = b.dir[0];
     try std.testing.expectApproxEqAbs(maths.magnitude(d), 1, 0.0001);
     try std.testing.expect(d[0] > 0 and d[0] < consts.BULLET_SPREAD * 1.01); //Full stray is to the right

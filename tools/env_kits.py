@@ -16,22 +16,17 @@ Conventions (shared with convert_tilemaps.py and the renderer):
   and its footprint extends right and up from there
 - Pieces are drawn in local pixel coordinates: the footprint covers x 0..fw*CELL_W-1 and y -fh*CELL_H..-1, so the
   bottom-left cell's centre (the object's world position and depth) is ANCHOR_LOCAL
-- Light from the top left. Solid shapes: lit faces white, shadow faces and cast shadows solid black, detail in black
-  or white lines. Dither (MID, through one 4x4 Bayer matrix stepped in DITHER_CELL (2) pixel clusters) only as small
-  accents: soot, mud, moss, the turn of a canopy. The reason is flicker: when the view scrolls a pixel, a single
-  pixel checker inverts completely and the LCD shows it, clusters change at their edges, and solid areas only at
-  their outline. Per kit, pieces lean one way for identity: woods black foliage with white lit edges, city white
-  concrete and black burnt vehicles, quarantine dark canvas with white markings. Never use VLIGHT
-- Or fine dither in phase variants (PHASES; the kits in DITHERED_KITS): single pixel LIGHT/MID/DARK
-  shading and dithered shadows (p.dshadow), each piece and the kit's levels' floors rendered once per screen pixel
-  phase, and the renderer draws the version whose dither lines up with the screen. The dither then stays still
-  while things move, so it doesn't flicker either. Only tones that repeat every 2 pixels work (LIGHT, MID, DARK)
+- Light from the top left. Single pixel LIGHT/MID/DARK shading (one 4x4 Bayer matrix) and dithered cast shadows
+  (p.dshadow). A single pixel dither inverts completely when the view scrolls a pixel, which the LCD shows as
+  flicker, so every piece and every level's floor is rendered once per screen pixel phase (PHASES), and the renderer
+  draws the version whose dither lines up with the screen: the dither stays still while things move. Only tones
+  that repeat every 2 pixels work (LIGHT, MID, DARK); never use VLIGHT
 - The bottom border row and anything that can overlap the playfield from below is kept low (about one row), so
   it never hides the player
 - The piece and ground lists are append only: an entry's index is its tile id in the Tiled tilesets and its id in
   every level file, so inserting or reordering one silently swaps art and footprints in every map
 
-  python env_kits.py [images dir] [--preview logs/kits.png]
+  python tools/env_kits.py [images dir] [--preview logs/kits.png]
 writes every kit's piece bitmaps, Tiled tilesets (map-tiles/kits/) and src/kit_descs.zig.
 """
 import argparse
@@ -53,29 +48,32 @@ CANVAS_W, CANVAS_H = 320, 260
 ORIGIN = (96, 200)  # Canvas pixel of local (0, 0)
 
 
-DITHER_CELL = 2  # The dither works on cells this many pixels square (see bayer_bw)
 # Phase variants: art dithered with single pixel 25/50/75% tones (patterns that repeat every 2 pixels) is drawn in 4
 # versions, one per pixel phase (screen x even/odd, y even/odd), and the renderer draws the version whose phase
 # matches where the sprite lands. The dither then stays fixed to the screen and only the shapes move, so scrolling
-# doesn't invert it (no flicker). Phase v = x phase + 2 * y phase
+# doesn't invert it (no flicker). Phase v = x phase + 2 * y phase. A 1 px diagonal or dithered line still moves against
+# that fixed dither and flickers, so the Pen draws those 2 px wide (steady_width)
 PHASES = 4
-# Kits drawn with their fine dithered art in phase variants (the others use the solid style, one bitmap per piece)
-DITHERED_KITS = {"woods", "city", "quarantine"}
 
 
-def bayer_bw(tone, cell=None, phase=(0, 0)):
+def bayer_bw(tone, phase=(0, 0)):
     """Tone image (L) -> boolean 'is white' through the Bayer matrix, aligned to the image and shifted by `phase`
-    pixels. The matrix steps every `cell` (DITHER_CELL) pixels, so patterns are clusters rather than single pixels:
-    when the view scrolls by a pixel, a single pixel checker inverts completely (the LCD shows that as flicker), while
-    clusters only change at their edges. Shape edges stay at full resolution"""
-    cell = cell or DITHER_CELL
+    pixels (see PHASES)"""
     a = np.asarray(tone, dtype=np.float32)
     h, w = a.shape
-    m = np.kron(BAYER4, np.ones((cell, cell), dtype=BAYER4.dtype))
-    p = m.shape[0]
-    m = np.roll(m, (-phase[1], -phase[0]), axis=(0, 1))
+    p = BAYER4.shape[0]
+    m = np.roll(BAYER4, (-phase[1], -phase[0]), axis=(0, 1))
     thr = (np.tile(m, (h // p + 1, w // p + 1))[:h, :w] + 0.5) * 255 / 16
     return a > thr
+
+
+def steady_width(pts, fill, width):
+    """A 1 px line that is diagonal, or in a dithered tone, lines up differently with the screen's dither in each
+    phase variant, so it fades in and out as the view scrolls: draw it 2 px wide"""
+    if width != 1:
+        return width
+    diagonal = any(a[0] != b[0] and a[1] != b[1] for a, b in zip(pts, pts[1:]))
+    return 2 if diagonal or fill not in (BLACK, WHITE) else 1
 
 
 class Pen:
@@ -103,12 +101,13 @@ class Pen:
         return (self.i, self.s) if ink else (self.s, None)
 
     def polygon(self, pts, fill, outline=None, ink=False):
+        width = steady_width(pts + pts[:1], BLACK, 1)
         pts = self.p(pts)
-        self.t.polygon(pts, fill=fill, outline=outline)
+        self.t.polygon(pts, fill=fill, outline=outline, width=width)
         m, _ = self._masks(ink)
-        m.polygon(pts, fill=255, outline=255 if outline is not None else None)
+        m.polygon(pts, fill=255, outline=255 if outline is not None else None, width=width)
         if ink and outline is not None:
-            self.s.polygon(pts, outline=255)
+            self.s.polygon(pts, outline=255, width=width)
 
     def ellipse(self, b, fill, outline=None, ink=False):
         b = self.box(b)
@@ -128,11 +127,13 @@ class Pen:
         self.s.rounded_rectangle(b, r, fill=255, outline=255 if outline is not None else None)
 
     def line(self, pts, fill, width=1, ink=False):
+        width = steady_width(pts, fill, width)
         pts = self.p(pts)
         self.t.line(pts, fill=fill, width=width)
         (self.i if ink else self.s).line(pts, fill=255, width=width)
 
     def arc(self, b, a0, a1, fill, width=1):
+        width = max(width, 2)  # Curved, so diagonal (see steady_width)
         b = self.box(b)
         self.t.arc(b, a0, a1, fill=fill, width=width)
         self.s.arc(b, a0, a1, fill=255, width=width)
@@ -147,16 +148,8 @@ class Pen:
         self.t.point(xy, fill=fill)
         (self.i if ink else self.s).point(xy, fill=255)
 
-    def shadow(self, pts):
-        """Cast shadows are solid black: big dithered areas flicker as the view scrolls"""
-        self.polygon(pts, BLACK)
-
-    def shadow_ellipse(self, b):
-        self.ellipse(b, BLACK)
-
     def dshadow(self, pts):
-        """A dithered cast shadow ("ink": only its black pixels are opaque, so it darkens what is under it). Only for
-        art drawn with phase variants, where the dither stays fixed to the screen"""
+        """A dithered cast shadow ("ink": only its black pixels are opaque, so it darkens what is under it)"""
         self.polygon(pts, DARK, ink=True)
 
     def dshadow_ellipse(self, b):
@@ -171,15 +164,14 @@ class Pen:
         ld = ImageDraw.Draw(layer)
         y0, y1 = int(min(p[1] for p in cpts)), int(max(p[1] for p in cpts))
         for y in range(y0 + spacing, y1, spacing):
-            ld.line([(0, y), (CANVAS_W, y)], fill=line)
+            ld.line([(0, y), (CANVAS_W, y)], fill=line, width=steady_width([(0, y), (1, y)], line, 1))
         self.tone.paste(layer, (0, 0), mask)
         self.s.polygon(cpts, fill=255, outline=255)
         self.t.polygon(cpts, outline=outline)
 
-    def render(self, cell=None, phases=1):
+    def render(self):
         """-> (RGBA image per phase, local x, y of the top left, tone, solid mask, ink mask), all trimmed to what was
         drawn. Phase v dithers image pixel (i, j) as screen pixel (i + v % 2, j + v // 2) would be (see PHASES)"""
-        cell = cell or DITHER_CELL
         solid = np.asarray(self.solid) > 0
         ink = np.asarray(self.ink) > 0
         ys, xs = np.nonzero(solid | ink)
@@ -189,8 +181,8 @@ class Pen:
         tone = np.asarray(self.tone)[y0:y1, x0:x1].copy()
         solid, ink = solid[y0:y1, x0:x1], ink[y0:y1, x0:x1]
         images = []
-        for v in range(phases):
-            white = bayer_bw(tone, cell, (v % 2, v // 2))
+        for v in range(PHASES):
+            white = bayer_bw(tone, (v % 2, v // 2))
             alpha = solid | (ink & ~white)
             rgba = np.zeros(tone.shape + (4,), dtype=np.uint8)
             col = np.where(white, 255, 0).astype(np.uint8)
@@ -215,12 +207,12 @@ def jag(rng, cx, cy, rx, ry, n=9, amount=0.18, phase=0.0):
 class Art:
     """A drawn piece: its bitmap, where its top left sits in local coordinates, and its footprint in cells"""
 
-    def __init__(self, name, fw, fh, draw, seed=0, keep_decals=False, cell=None, phases=1):
+    def __init__(self, name, fw, fh, draw, seed=0, keep_decals=False):
         self.name, self.fw, self.fh = name, fw, fh
         self.keep_decals = keep_decals  # Ground art the kit's decals may still be scattered over
         pen = Pen(seed)
         draw(pen)
-        self.images, self.x0, self.y0, self.tone, self.solid_mask, self.ink_mask = pen.render(cell, phases)
+        self.images, self.x0, self.y0, self.tone, self.solid_mask, self.ink_mask = pen.render()
         self.image = self.images[0]
         self.tone_mask = Image.fromarray(np.maximum(np.asarray(self.solid_mask), np.asarray(self.ink_mask)), "L")
 
@@ -261,161 +253,7 @@ class Art:
 
 
 # ================================================================ Woodland
-
-def w_pine(tall):
-    hgt = 62 if tall else 50
-    wide = 17 if tall else 15
-
-    def draw(p):
-        x, y = 28, -6
-        p.shadow([(x - 4, y - 1), (x + 28, y + 3), (x + 22, y + 6), (x - 10, y + 4)])
-        for bx in (-14, 10):  # Undergrowth around the base fills the blocked cell
-            p.ellipse([x + bx - 8, y - 7, x + bx + 8, y + 2], BLACK)
-            p.arc([x + bx - 6, y - 7, x + bx + 4, y - 1], 190, 330, WHITE)
-        p.rect([x - 2, y - 9, x + 2, y], BLACK)
-        for i, (wdt, top) in enumerate(((wide, 0.52), (wide - 4, 0.27), (wide - 8, 0.0))):
-            ty, by = y - hgt + int(hgt * top), y - 8 - int(i * hgt * 0.22)
-            p.polygon([(x, ty), (x + wdt, by), (x - wdt, by)], BLACK)
-            p.polygon([(x - 1, ty + 3), (x - wdt + 3, by - 1), (x - 3, by - 2)], WHITE, BLACK)  # Lit left flank
-            p.line([(x - wdt + 5, by - 4), (x - 5, by - 6)], BLACK)
-        p.rect([x - 4, y - 14, x - 1, y - 10], MID)  # Accent
-
-    return draw
-
-
-def w_oak(r, seed):
-    def draw(p):
-        rng = random.Random(seed)
-        x, y = 28, -6
-        p.shadow_ellipse([x - r + 8, y - 4, x + r + 12, y + 5])
-        p.ellipse([x - 16, y - 6, x + 14, y + 3], BLACK)  # Roots and leaf litter
-        p.rect([x - 3, y - 20, x + 3, y - 1], BLACK)
-        p.line([(x - 1, y - 18), (x - 1, y - 4)], WHITE)
-        cy = y - 20 - r * 0.7
-        parts = [(x - r * 0.45, cy + 3, r * 0.7), (x + r * 0.45, cy + 4, r * 0.7), (x, cy - r * 0.35, r * 0.75), (x, cy + r * 0.2, r * 0.8)]
-        for px, py, pr in parts:  # The canopy: a black mass
-            p.polygon(jag(rng, px, py, pr + 1, pr * 0.8 + 1, 11, 0.1), BLACK)
-        p.polygon(jag(rng, x - r * 0.2, cy - r * 0.35, r * 0.62, r * 0.42, 10, 0.12), WHITE, BLACK)  # Lit cap
-        p.polygon(jag(rng, x + r * 0.15, cy + r * 0.05, r * 0.42, r * 0.22, 8, 0.15), MID)  # Accent: the turn
-        for _ in range(5):
-            lx, ly = x + rng.uniform(-r * 0.7, r * 0.6), cy + rng.uniform(0, r * 0.5)
-            p.arc([lx - 3, ly - 2, lx + 3, ly + 2], 200, 340, WHITE)
-
-    return draw
-
-
-def w_dead_tree(p):
-    x, y = 28, -6
-    p.shadow([(x, y - 1), (x + 34, y + 5), (x + 30, y + 7), (x - 4, y + 3)])
-    p.ellipse([x - 12, y - 5, x + 12, y + 3], WHITE, BLACK)
-    p.polygon([(x - 4, y), (x - 3, y - 40), (x + 1, y - 52), (x + 3, y - 40), (x + 4, y)], BLACK)
-    p.line([(x - 2, y - 38), (x - 2, y - 2)], WHITE)
-    for (sx, sy), (ex, ey) in (((x - 2, y - 30), (x - 18, y - 46)), ((x + 2, y - 24), (x + 16, y - 40)), ((x - 12, y - 40), (x - 20, y - 42)), ((x + 10, y - 34), (x + 20, y - 34)), ((x, y - 44), (x - 6, y - 58))):
-        p.line([(sx, sy), (ex, ey)], BLACK, 2)
-    p.line([(x + 1, y - 46), (x + 8, y - 58)], BLACK, 1)
-
-
-def w_bush(p):
-    x, y = 28, -6
-    p.shadow_ellipse([x - 16, y - 3, x + 30, y + 5])
-    pts = []
-    for i in range(13):
-        a = math.pi + i / 12 * math.pi
-        rr = 24 if i % 2 else 20
-        pts.append((x + math.cos(a) * rr, y - 4 + math.sin(a) * rr * 0.75))
-    pts += [(x + 24, y + 1), (x - 24, y + 1)]
-    p.polygon(pts, BLACK)
-    for bx in (-14, -4, 6):  # Lit leaf clumps
-        p.arc([bx + x - 6, y - 18, bx + x + 4, y - 10], 190, 330, WHITE)
-        p.arc([bx + x - 4, y - 14, bx + x + 4, y - 8], 200, 320, WHITE)
-    p.rect([x + 8, y - 6, x + 16, y - 3], MID)  # Accent
-
-
-def w_boulder(p):
-    x, y = 56, -10
-    p.shadow([(x + 30, y - 30), (x + 56, y - 18), (x + 52, y + 7), (x - 22, y + 7), (x - 40, y)])
-    outline = [(x - 46, y), (x - 50, y - 18), (x - 34, y - 42), (x - 6, y - 50), (x + 26, y - 46), (x + 46, y - 26), (x + 48, y - 6), (x + 40, y + 2)]
-    p.polygon(outline, WHITE, BLACK)
-    p.polygon([(x + 6, y - 28), (x + 22, y - 44), (x + 44, y - 26), (x + 46, y - 6), (x + 30, y - 10)], BLACK)  # Shadow face
-    p.line([(x - 46, y - 18), (x - 18, y - 22), (x + 6, y - 28)], BLACK)
-    p.line([(x - 18, y - 22), (x - 22, y - 2)], BLACK)
-    p.line([(x + 6, y - 28), (x + 2, y - 4)], BLACK)
-    p.line([(x - 30, y - 12), (x - 24, y - 6), (x - 26, y - 1)], BLACK)  # Crack
-    p.polygon([(x - 44, y - 3), (x - 30, y - 6), (x - 8, y - 4), (x - 6, y + 1), (x - 44, y + 1)], MID)  # Accent: grime
-    p.ellipse([x - 54, y - 6, x - 40, y + 3], WHITE, BLACK)
-    p.ellipse([x + 44, y - 4, x + 54, y + 3], BLACK)
-
-
-def w_rock(p):
-    x, y = 28, -6
-    p.shadow_ellipse([x - 8, y - 3, x + 24, y + 4])
-    p.polygon([(x - 16, y), (x - 18, y - 10), (x - 6, y - 20), (x + 10, y - 18), (x + 18, y - 8), (x + 16, y)], WHITE, BLACK)
-    p.polygon([(x + 4, y - 9), (x + 17, y - 8), (x + 15, y), (x + 5, y)], BLACK)
-    p.line([(x - 16, y - 10), (x + 4, y - 9)], BLACK)
-
-
-def w_log(p):
-    x, y, length = 6, -8, 100
-    p.shadow([(x + 6, y), (x + length + 10, y), (x + length + 6, y + 6), (x + 2, y + 6)])
-    p.rrect([x, y - 13, x + length, y], 6, WHITE, BLACK)
-    p.rect([x + 3, y - 5, x + length - 6, y - 1], BLACK)  # Underside in shadow
-    for bx in range(x + 10, x + length - 10, 9):  # Bark
-        p.line([(bx, y - 9), (bx + 5, y - 9)], BLACK)
-    p.ellipse([x + length - 9, y - 13, x + length + 2, y], WHITE, BLACK)
-    p.ellipse([x + length - 6, y - 10, x + length - 1, y - 4], None, BLACK)
-    p.line([(x + 24, y - 13), (x + 20, y - 22), (x + 15, y - 24)], BLACK)
-    p.line([(x + 62, y - 13), (x + 66, y - 20)], BLACK)
-    for fx in (x + 34, x + 44):  # Fern tufts
-        p.line([(fx, y - 13), (fx - 3, y - 18)], BLACK)
-        p.line([(fx, y - 13), (fx + 3, y - 18)], BLACK)
-    p.rect([x + 50, y - 12, x + 58, y - 9], MID)  # Accent: moss
-
-
-def w_stump(p):
-    x, y = 28, -6
-    p.shadow_ellipse([x - 4, y - 3, x + 24, y + 4])
-    for rx in (-14, 12):
-        p.line([(x + rx * 0.5, y - 3), (x + rx, y + 1)], BLACK, 2)
-    p.rect([x - 10, y - 14, x + 10, y - 1], WHITE, BLACK)
-    p.rect([x + 3, y - 13, x + 10, y - 1], BLACK)
-    p.ellipse([x - 10, y - 18, x + 10, y - 10], WHITE, BLACK)
-    p.ellipse([x - 6, y - 16, x + 6, y - 12], None, BLACK)
-
-
-def w_tent(p):
-    x, y = 20, -14
-    p.shadow([(x + 60, y - 4), (x + 82, y + 3), (x + 74, y + 8), (x + 10, y + 7)])
-    p.polygon([(x, y), (x + 32, y - 40), (x + 66, y)], WHITE, BLACK)
-    p.polygon([(x + 32, y - 40), (x + 66, y), (x + 48, y)], BLACK)  # Shaded side
-    p.polygon([(x + 22, y), (x + 32, y - 20), (x + 40, y)], BLACK)  # Torn open flap
-    p.polygon([(x + 40, y), (x + 34, y - 16), (x + 46, y - 6)], WHITE, BLACK)
-    p.line([(x + 32, y - 40), (x + 32, y - 46)], BLACK)
-    p.line([(x - 4, y + 2), (x + 6, y - 4)], BLACK)  # Guy ropes
-    p.line([(x + 70, y + 2), (x + 60, y - 4)], BLACK)
-    p.rect([x + 72, y - 12, x + 84, y], WHITE, BLACK)  # Rucksack
-    p.line([(x + 74, y - 8), (x + 82, y - 8)], BLACK)
-    p.rect([x + 4, y - 3, x + 20, y - 1], MID)  # Accent: mud
-
-
-def w_car(p):
-    x, y = 8, -10
-    p.shadow([(x + 6, y), (x + 100, y), (x + 108, y + 7), (x + 12, y + 7)])
-    p.rrect([x, y - 30, x + 96, y - 8], 6, BLACK)  # Rusted body from above
-    p.rrect([x + 24, y - 38, x + 70, y - 16], 4, WHITE, BLACK)  # Roof
-    p.rect([x + 26, y - 17, x + 68, y - 11], BLACK, WHITE)  # Windscreen frame, glass gone
-    p.rect([x, y - 11, x + 96, y], BLACK)
-    for wx in (x + 10, x + 72):
-        p.ellipse([wx, y - 7, wx + 14, y + 3], BLACK, WHITE)
-    p.rect([x + 6, y - 26, x + 16, y - 21], MID)  # Accent: rust
-    p.line([(x + 30, y), (x + 34, y - 14), (x + 44, y - 24), (x + 40, y - 36)], WHITE, 2)  # Vines over it
-    for lx, ly in ((x + 34, y - 14), (x + 44, y - 24), (x + 40, y - 34)):
-        p.ellipse([lx - 4, ly - 3, lx + 4, ly + 2], WHITE, BLACK)
-    p.line([(x + 86, y), (x + 90, y - 18)], WHITE, 2)
-    p.ellipse([x + 86, y - 22, x + 94, y - 16], WHITE, BLACK)
-
-
-# Woodland, dithered: the original fine shading, drawn with 4 pixel phase variants so the dither stays fixed
-# to the screen (see PHASES). Swapped in for the solid w_* pieces while the kit is in DITHERED_KITS
+# Every piece is shaded with single pixel dither and drawn in PHASES phase variants
 
 def wd_pine(tall):
     hgt = 62 if tall else 50
@@ -642,175 +480,6 @@ def d_twig(p):
 
 
 # ================================================================ Ruined City
-
-def c_facade(floors, broken_seed, door=False):
-    """A slice of building front exactly one cell wide with no side outlines, so a row of them reads as one street
-    of buildings. For the top border"""
-    def draw(p):
-        rng = random.Random(broken_seed)
-        base, fh = -4, 22
-        top = base - floors * fh - 6
-        edge = [(0, base)]
-        for i in range(5):  # Broken skyline
-            edge.append((i * 14, top + rng.randint(0, 14 if broken_seed else 3)))
-        edge += [(56, top + rng.randint(0, 10 if broken_seed else 3)), (56, base)]
-        p.polygon(edge, WHITE)
-        p.line(edge[1:-1], BLACK)
-        for f in range(floors):
-            fy = base - (f + 1) * fh
-            p.line([(0, fy + fh - 1), (56, fy + fh - 1)], BLACK)
-            for wx in (7, 33):
-                if fy + 4 > top + 12 or f == 0:
-                    if not (door and f == 0):
-                        p.rect([wx, fy + 5, wx + 14, fy + 15], BLACK)
-            if f == floors - 1 and broken_seed:
-                p.rect([7, fy, 21, fy + 4], MID)  # Accent: soot over a window
-        if door:
-            p.rect([6, base - 20, 50, base - 1], BLACK)  # Shop shutter, half up
-            for sy in range(base - 18, base - 8, 3):
-                p.line([(7, sy), (49, sy)], WHITE)
-        p.rect([0, base, 56, base + 2], BLACK)  # Shadow at the foot
-        for _ in range(3):
-            rx = rng.randint(2, 50)
-            p.polygon(jag(rng, rx, base + 1, 4, 2, 5, 0.3), WHITE, BLACK)
-    return draw
-
-
-def c_wall_side(p):
-    """Side border: a broken wall seen end on, rows of them making one line"""
-    x, y = 28, -4
-    p.shadow([(x + 8, y - 6), (x + 18, y - 2), (x + 18, y + 2), (x - 6, y + 2)])
-    p.polygon([(x - 8, y), (x - 8, y - 40), (x - 3, y - 46), (x + 2, y - 41), (x + 8, y - 44), (x + 8, y)], WHITE, BLACK)
-    p.rect([x + 2, y - 40, x + 8, y], BLACK)
-    for by in range(y - 36, y, 9):
-        p.line([(x - 7, by), (x - 2, by)], BLACK)
-    p.polygon([(x - 16, y), (x - 12, y - 6), (x - 6, y - 4), (x - 8, y + 1)], WHITE, BLACK)
-    p.polygon([(x + 10, y + 1), (x + 12, y - 5), (x + 18, y - 3), (x + 17, y + 1)], BLACK)
-
-
-def c_rubble_low(p):
-    """Bottom border: low broken concrete, nothing taller than a row"""
-    rng = random.Random(21)
-    p.shadow_ellipse([4, -8, 60, 2])
-    for cx, cy, r, tone in ((12, -6, 8, WHITE), (28, -8, 10, WHITE), (44, -5, 8, BLACK), (20, -3, 5, BLACK), (38, -2, 6, WHITE)):
-        p.polygon(jag(rng, cx, cy, r, r * 0.7, 6, 0.3), tone, BLACK)
-    p.line([(8, -12), (24, -20)], BLACK, 2)
-
-
-def c_ruin(p):
-    """A gutted building: three cells wide, the front wall standing with its upper floors gone"""
-    rng = random.Random(5)
-    x0, x1, base, h = 4, 164, -8, 74
-    p.shadow([(x1, base - 24), (x1 + 20, base - 12), (x1 + 20, base + 7), (x0 + 10, base + 7), (x0, base)])
-    edge = [(x0, base)]
-    for i in range(11):
-        tx = x0 + (x1 - x0) * i / 10
-        edge.append((tx, base - h + (0 if i in (0, 10) else rng.randint(-2, 30))))
-    edge.append((x1, base))
-    p.polygon(edge, WHITE, BLACK)
-    for wy in range(base - h + 16, base - 18, 18):
-        for wx in range(x0 + 10, x1 - 16, 22):
-            if rng.random() < 0.85:
-                p.rect([wx, wy, wx + 12, wy + 10], BLACK)
-                if rng.random() < 0.35:  # Accent: soot over a few windows
-                    p.rect([wx, wy - 6, wx + 12, wy - 1], MID)
-    p.rect([x0 + 70, base - 24, x0 + 92, base], BLACK)  # Doorway
-    for fy in range(base - h + 33, base - 4, 18):  # Floor lines, broken
-        p.line([(x0 + 2, fy), (x0 + 40, fy)], BLACK)
-        p.line([(x0 + 100, fy), (x0 + 150, fy)], BLACK)
-    for _ in range(5):
-        rx = rng.randint(x0 + 10, x1 - 10)
-        p.line([(rx, base - h + 26), (rx + rng.randint(-5, 5), base - h + 8)], BLACK)
-    for cx in (x0 + 20, x0 + 120, x1 - 6):
-        p.polygon(jag(rng, cx, base, 9, 5, 6, 0.3), WHITE, BLACK)
-
-
-def c_rubble_pile(p):
-    rng = random.Random(9)
-    x, y = 57, -10
-    p.shadow_ellipse([x - 40, y - 6, x + 58, y + 7])
-    for i in range(16):
-        cx, cy = x + rng.randint(-40, 40), y - rng.randint(0, 16)
-        r = rng.randint(4, 9)
-        p.polygon(jag(rng, cx, cy, r + 1, r * 0.75, 5, 0.3), BLACK if i % 4 == 3 else WHITE, BLACK)
-    p.line([(x - 22, y - 16), (x + 4, y - 30)], BLACK, 3)  # Girder
-    p.line([(x + 18, y - 10), (x + 26, y - 26)], BLACK)
-    p.rect([x - 10, y - 4, x + 2, y - 1], MID)  # Accent: dust
-
-
-def c_rubble_small(p):
-    rng = random.Random(13)
-    x, y = 28, -8
-    p.shadow_ellipse([x - 18, y - 4, x + 28, y + 5])
-    for i in range(8):
-        cx, cy = x + rng.randint(-16, 16), y - rng.randint(0, 9)
-        r = rng.randint(3, 6)
-        p.polygon(jag(rng, cx, cy, r + 1, r * 0.75, 5, 0.3), BLACK if i % 3 == 2 else WHITE, BLACK)
-
-
-def c_bus(p):
-    x, y, ln = 10, -6, 150
-    p.shadow([(x + 6, y), (x + ln + 2, y), (x + ln + 12, y + 7), (x + 12, y + 7)])
-    p.rect([x, y - 42, x + ln, y - 26], WHITE, BLACK)  # Roof
-    for bx, bw in ((44, 30), (104, 16)):
-        p.polygon([(x + bx, y - 42), (x + bx + bw, y - 40), (x + bx + bw - 6, y - 28), (x + bx + 4, y - 30)], BLACK)  # Burnt through
-    p.polygon([(x + 30, y - 41), (x + 44, y - 41), (x + 46, y - 30), (x + 34, y - 32)], MID)  # Accent: scorch
-    p.rect([x, y - 26, x + ln, y], BLACK)  # Side, burnt black
-    for wx in range(x + 6, x + ln - 8, 16):
-        p.rect([wx, y - 23, wx + 11, y - 13], BLACK, WHITE)  # Empty window frames
-    p.line([(x + 2, y - 9), (x + ln - 2, y - 9)], WHITE)
-    for wx in (x + 14, x + ln - 30):
-        p.ellipse([wx, y - 6, wx + 15, y + 3], BLACK, WHITE)
-        p.rect([wx + 6, y - 2, wx + 9, y - 1], WHITE)
-    p.rect([x + ln - 4, y - 24, x + ln, y - 6], WHITE, BLACK)
-
-
-def c_car(p):
-    x, y = 8, -8
-    p.shadow([(x + 6, y), (x + 98, y), (x + 106, y + 7), (x + 12, y + 7)])
-    p.rrect([x, y - 28, x + 94, y - 8], 6, BLACK)  # Burnt body
-    p.rrect([x + 24, y - 36, x + 68, y - 16], 4, BLACK, WHITE)  # Roof edge catching the light
-    p.rect([x + 26, y - 17, x + 66, y - 11], BLACK, WHITE)
-    p.rect([x, y - 11, x + 94, y], BLACK)
-    for wx in (x + 10, x + 70):
-        p.ellipse([wx, y - 6, wx + 14, y + 3], BLACK, WHITE)
-    p.line([(x + 30, y - 30), (x + 40, y - 22), (x + 52, y - 32)], WHITE)  # Scorch cracks
-    p.polygon([(x + 76, y - 26), (x + 90, y - 22), (x + 88, y - 14), (x + 78, y - 16)], WHITE, BLACK)  # Bonnet gone
-    p.rect([x + 4, y - 24, x + 14, y - 20], MID)  # Accent
-
-
-def c_lamp(p):
-    x, y = 28, -8
-    p.line([(x + 1, y), (x + 16, y + 4)], BLACK, 2)
-    p.ellipse([x - 6, y - 3, x + 6, y + 3], WHITE, BLACK)
-    p.line([(x, y), (x, y - 44), (x + 16, y - 58)], BLACK, 3)
-    p.rect([x + 14, y - 62, x + 26, y - 56], WHITE, BLACK)
-    p.polygon([(x - 18, y + 1), (x - 14, y - 6), (x - 8, y - 4), (x - 10, y + 2)], WHITE, BLACK)
-
-
-def c_dumpster(p):
-    x, y = 6, -6
-    p.shadow([(x + 46, y - 14), (x + 56, y - 8), (x + 56, y + 4), (x + 4, y + 4), (x, y)])
-    p.rect([x, y - 20, x + 46, y], BLACK)
-    for vx in range(x + 6, x + 44, 8):
-        p.line([(vx, y - 18), (vx, y - 2)], WHITE)
-    p.polygon([(x - 2, y - 20), (x + 4, y - 34), (x + 50, y - 34), (x + 48, y - 20)], WHITE, BLACK)  # Lid flung up
-    p.rect([x + 10, y - 13, x + 34, y - 9], WHITE, BLACK)
-    for i, (bx, by) in enumerate(((x + 48, y), (x + 52, y - 3))):
-        p.rrect([bx, by - 7, bx + 9, by], 3, BLACK if i else WHITE, BLACK)  # Bin bags
-
-
-def c_tyres(p):
-    x, y = 28, -6
-    p.shadow_ellipse([x - 8, y - 3, x + 26, y + 5])
-    for ty in (0, -7, -14):
-        p.ellipse([x - 13, y + ty - 6, x + 13, y + ty + 3], BLACK)
-        p.ellipse([x - 6, y + ty - 4, x + 6, y + ty], None, WHITE)
-    p.line([(x - 10, y - 18), (x - 2, y - 20)], WHITE)
-
-
-# City, dithered: the original shading, drawn in phase variants (see PHASES). Swapped in for the solid
-# pieces while the kit is in DITHERED_KITS
 
 def cd_facade(floors, broken_seed, door=False):
     """A slice of building front exactly one cell wide with no side outlines, so a row of them reads as one street
@@ -1066,22 +735,20 @@ def city_outside(kit):
 
 
 def build_city():
-    d = "city" in DITHERED_KITS
-    kw = {"cell": 1, "phases": PHASES} if d else {}
     pieces = [
-        Art("facade_a", 1, 1, (cd_facade if d else c_facade)(3, 0), **kw),
-        Art("facade_b", 1, 1, (cd_facade if d else c_facade)(2, 4), **kw),
-        Art("facade_c", 1, 1, (cd_facade if d else c_facade)(3, 7, door=True), **kw),
-        Art("wall_side", 1, 1, cd_wall_side if d else c_wall_side, **kw),
-        Art("rubble_low", 1, 1, cd_rubble_low if d else c_rubble_low, **kw),
-        Art("ruin", 3, 2, cd_ruin if d else c_ruin, **kw),
-        Art("rubble_pile", 2, 1, cd_rubble_pile if d else c_rubble_pile, **kw),
-        Art("rubble_small", 1, 1, cd_rubble_small if d else c_rubble_small, **kw),
-        Art("bus", 3, 1, cd_bus if d else c_bus, **kw),
-        Art("car", 2, 1, cd_car if d else c_car, **kw),
-        Art("lamp", 1, 1, cd_lamp if d else c_lamp, **kw),
-        Art("dumpster", 1, 1, cd_dumpster if d else c_dumpster, **kw),
-        Art("tyres", 1, 1, cd_tyres if d else c_tyres, **kw),
+        Art("facade_a", 1, 1, cd_facade(3, 0)),
+        Art("facade_b", 1, 1, cd_facade(2, 4)),
+        Art("facade_c", 1, 1, cd_facade(3, 7, door=True)),
+        Art("wall_side", 1, 1, cd_wall_side),
+        Art("rubble_low", 1, 1, cd_rubble_low),
+        Art("ruin", 3, 2, cd_ruin),
+        Art("rubble_pile", 2, 1, cd_rubble_pile),
+        Art("rubble_small", 1, 1, cd_rubble_small),
+        Art("bus", 3, 1, cd_bus),
+        Art("car", 2, 1, cd_car),
+        Art("lamp", 1, 1, cd_lamp),
+        Art("dumpster", 1, 1, cd_dumpster),
+        Art("tyres", 1, 1, cd_tyres),
     ]
     ground = [
         Art("road", 1, 1, cg_road(0), keep_decals=True),
@@ -1094,179 +761,12 @@ def build_city():
         Art("scorch", 1, 1, cg_scorch),
     ]
     decals = [Art("crack", 1, 1, d_crack), Art("crack2", 1, 1, d_crack), Art("litter", 1, 1, d_litter), Art("brick", 1, 1, d_brick), Art("bottle", 1, 1, d_bottle), Art("pebbles", 1, 1, d_pebbles)]
-    kit = Kit("city", "Ruined City", pieces, ground, decals, 0.3, None, cell=1 if d else None, phases=PHASES if d else 1)
+    kit = Kit("city", "Ruined City", pieces, ground, decals, 0.3, None)
     kit.outside = city_outside(kit)
     return kit
 
 
 # ================================================================ Quarantine Zone
-
-def q_fence_h(p):
-    """Top border: chain link panel with razor wire, exactly a cell wide (its post on the left), so a row joins up"""
-    base, top = -4, -50
-    p.rect([0, base, 56, base + 2], BLACK)  # Shadow at its foot
-    p.rect([1, top, 56, base], WHITE)
-    for x in range(-24, 60, 9):  # Wire mesh, sparse thin lines clipped to the panel
-        for (ax, ay), (bx, by) in (((x, top), (x + 24, base)), ((x + 24, top), (x, base))):
-            pts = []
-            for t in range(0, 25):
-                px, py = ax + (bx - ax) * t / 24, ay + (by - ay) * t / 24
-                if 1 <= px <= 56:
-                    pts.append((px, py))
-            if len(pts) > 1:
-                p.line(pts, BLACK)
-    p.line([(0, top), (56, top)], BLACK)
-    p.line([(0, base), (56, base)], BLACK)
-    p.rect([0, top - 14, 3, base], BLACK)  # Post
-    for x in range(-4, 56, 9):  # Razor wire coil
-        p.ellipse([max(x, 0), top - 14, min(x + 13, 56), top], None, BLACK)
-
-
-def q_fence_v(p):
-    """Side border: the fence seen end on, a post per row and the mesh between them"""
-    x, base = 28, -4
-    p.shadow([(x + 2, base - 2), (x + 14, base + 2), (x + 12, base + 3), (x - 2, base + 2)])
-    p.rect([x - 3, base - 50, x + 3, base], WHITE)
-    for y in range(base - 50, base, 6):
-        p.line([(x - 3, y), (x + 3, y + 6)], BLACK)
-    p.rect([x - 2, base - 58, x + 1, base], BLACK)
-    for y in (base - 62, base - 54):
-        p.ellipse([x - 7, y, x + 7, y + 8], None, BLACK)
-
-
-def q_barrier_low(p):
-    """Bottom border: a low concrete kerb barrier"""
-    x, y = 0, -6
-    p.shadow([(x + 2, y), (x + 60, y), (x + 62, y + 4), (x + 4, y + 4)])
-    p.polygon([(x, y), (x + 3, y - 10), (x + 53, y - 10), (x + 56, y)], BLACK)
-    p.rect([x + 3, y - 14, x + 53, y - 10], WHITE, BLACK)
-    for k in range(0, 50, 12):
-        p.polygon([(x + 6 + k, y - 1), (x + 10 + k, y - 1), (x + 14 + k, y - 9), (x + 10 + k, y - 9)], WHITE)
-
-
-def q_sandbags(cols):
-    def draw(p):
-        rows = 3
-        x, y = 4, -6
-        w = cols * 16
-        p.shadow([(x + w, y - 18), (x + w + 9, y - 12), (x + w + 9, y + 4), (x + 6, y + 4), (x, y)])
-        p.rect([x, y - rows * 8 - 10, x + w, y - rows * 8], WHITE, BLACK)
-        for i in range(1, cols):
-            p.line([(x + i * 16, y - rows * 8 - 10), (x + i * 16, y - rows * 8)], BLACK)
-        for r in range(rows):
-            off = 8 if r % 2 else 0
-            for i in range(-1, cols):
-                bx = x + i * 16 + off
-                if bx < x - 4 or bx + 16 > x + w + 4:
-                    continue
-                by = y - (r + 1) * 8
-                shaded = r == 0
-                p.rrect([bx, by, bx + 16, by + 8], 3, BLACK if shaded else WHITE, BLACK)
-                p.line([(bx + 3, by + 2), (bx + 8, by + 2)], WHITE if shaded else BLACK)
-        p.rect([x + w // 2 - 6, y - 15, x + w // 2 + 6, y - 10], MID)  # Accent: a damp patch
-    return draw
-
-
-def q_jersey(p):
-    x, y = 12, -6
-    p.shadow([(x + 30, y - 4), (x + 40, y + 2), (x + 38, y + 5), (x + 6, y + 5), (x, y)])
-    p.polygon([(x, y), (x + 4, y - 8), (x + 8, y - 22), (x + 24, y - 22), (x + 28, y - 8), (x + 32, y)], BLACK)
-    p.rect([x + 8, y - 26, x + 24, y - 22], WHITE, BLACK)
-    for k in range(3):
-        p.polygon([(x + 6 + k * 8, y - 2), (x + 10 + k * 8, y - 2), (x + 14 + k * 8, y - 12), (x + 10 + k * 8, y - 12)], WHITE)
-
-
-def q_med_tent(p):
-    x, y, w = 8, -12, 150
-    p.shadow([(x + w, y - 20), (x + w + 16, y - 10), (x + w + 16, y + 7), (x + 8, y + 7), (x, y)])
-    p.polygon([(x, y), (x + 8, y - 30), (x + w - 8, y - 30), (x + w, y)], BLACK)  # Drab canvas walls
-    p.polygon([(x + 8, y - 30), (x + 20, y - 46), (x + w - 20, y - 46), (x + w - 8, y - 30)], BLACK)  # Roof
-    p.line([(x + 20, y - 46), (x + w - 20, y - 46)], WHITE)  # Ridge catching the light
-    p.line([(x + 8, y - 30), (x + w - 8, y - 30)], WHITE)  # Eave
-    for sx in range(x + 30, x + w - 30, 26):  # Seams
-        p.line([(sx, y - 45), (sx - 4, y - 31)], WHITE)
-    cx = x + w // 2
-    p.rect([cx - 12, y - 30, cx + 12, y - 6], WHITE, BLACK)  # Cross panel
-    p.rect([cx - 3, y - 26, cx + 3, y - 10], BLACK)
-    p.rect([cx - 9, y - 21, cx + 9, y - 15], BLACK)
-    p.polygon([(x + 16, y), (x + 28, y - 24), (x + 36, y)], WHITE, BLACK)  # Open flap
-    p.polygon([(x + 22, y), (x + 28, y - 14), (x + 32, y)], BLACK)
-    p.rect([x + w - 34, y - 8, x + w - 20, y], WHITE, BLACK)  # Stretcher end
-    p.rect([x + 40, y - 4, x + 60, y - 1], MID)  # Accent: mud on the skirt
-    for gx, dx in ((x - 2, -8), (x + w + 2, 8)):
-        p.line([(gx, y), (gx + dx, y + 4)], BLACK)
-
-
-def q_tower(p):
-    x, y = 12, -6
-    p.shadow([(x + 30, y - 4), (x + 60, y + 5), (x + 56, y + 8), (x + 4, y + 5)])
-    for lx in (x, x + 30):
-        p.rect([lx, y - 62, lx + 3, y], BLACK)
-    p.line([(x + 2, y - 52), (x + 31, y - 12)], BLACK)
-    p.line([(x + 31, y - 52), (x + 2, y - 12)], BLACK)
-    p.rect([x - 6, y - 82, x + 39, y - 60], BLACK)  # Cabin
-    p.rect([x - 2, y - 78, x + 35, y - 70], BLACK, WHITE)  # Window slot
-    p.polygon([(x - 10, y - 82), (x + 16, y - 94), (x + 43, y - 82)], WHITE, BLACK)  # Roof
-    p.line([(x + 36, y - 74), (x + 46, y - 80)], WHITE, 2)
-
-
-def q_crates(p):
-    x, y = 6, -6
-    for i, (bx, by, s) in enumerate(((x, y, 22), (x + 24, y + 1, 20), (x + 8, y - 22, 20))):
-        p.shadow([(bx + s, by - 6), (bx + s + 6, by - 2), (bx + s + 6, by + 2), (bx + 3, by + 2), (bx, by)])
-        p.rect([bx, by - s - 6, bx + s, by - s], WHITE, BLACK)
-        p.rect([bx, by - s, bx + s, by], WHITE, BLACK)
-        p.line([(bx, by - s), (bx + s, by)], BLACK)
-        p.line([(bx + s, by - s), (bx, by)], BLACK)
-        if i == 1:
-            p.rect([bx + 2, by - 4, bx + s - 2, by - 1], MID)  # Accent
-
-
-def q_drums(p):
-    x, y = 28, -4
-    for dx, dy in ((-10, -6), (8, -7), (-1, 0)):
-        cx, cy, r, h = x + dx, y + dy, 8, 20
-        p.shadow([(cx + r - 2, cy - 2), (cx + r + 10, cy), (cx + r + 8, cy + 3), (cx - 4, cy + 3)])
-        p.rect([cx - r, cy - h, cx + r, cy], BLACK)
-        p.line([(cx - r + 2, cy - h + 2), (cx - r + 2, cy - 2)], WHITE)  # Lit edge
-        p.arc([cx - r, cy - 11, cx + r, cy - 5], 0, 180, WHITE)  # Hoop
-        p.ellipse([cx - r, cy - h - 4, cx + r, cy - h + 4], WHITE, BLACK)
-        p.ellipse([cx - r + 3, cy - h - 2, cx - r + 7, cy - h + 1], None, BLACK)
-
-
-def q_truck(p):
-    x, y = 8, -6
-    p.shadow([(x + 6, y), (x + 152, y), (x + 160, y + 7), (x + 12, y + 7)])
-    p.polygon([(x, y - 8), (x + 2, y - 44), (x + 104, y - 44), (x + 106, y - 8)], BLACK)  # Drab canvas back
-    p.line([(x + 2, y - 44), (x + 104, y - 44)], WHITE)
-    for rx in (x + 34, x + 70):
-        p.line([(rx, y - 43), (rx, y - 9)], WHITE)
-    p.rect([x + 48, y - 32, x + 60, y - 22], WHITE, BLACK)  # Stencilled star panel
-    p.point((x + 54, y - 27), BLACK)
-    p.rect([x + 6, y - 14, x + 28, y - 10], MID)  # Accent: mud
-    p.rect([x + 108, y - 34, x + 146, y - 8], BLACK)  # Cab
-    p.rect([x + 114, y - 30, x + 132, y - 20], BLACK, WHITE)
-    p.rect([x + 140, y - 30, x + 150, y - 10], WHITE, BLACK)  # Bonnet
-    p.rect([x, y - 10, x + 150, y - 4], BLACK)
-    for wx in (x + 10, x + 34, x + 120):
-        p.ellipse([wx, y - 9, wx + 16, y + 4], BLACK, WHITE)
-        p.ellipse([wx + 6, y - 4, wx + 10, y - 1], WHITE)
-
-
-def q_floodlight(p):
-    x, y = 28, -6
-    p.shadow([(x, y), (x + 30, y + 5), (x + 28, y + 7), (x - 2, y + 2)])
-    p.polygon([(x - 10, y), (x, y - 8), (x + 10, y)], BLACK)  # Tripod feet
-    p.rect([x - 1, y - 66, x + 1, y - 6], BLACK)
-    p.rect([x - 12, y - 74, x + 12, y - 64], BLACK)
-    for lx in (-9, -2, 5):
-        p.rect([x + lx, y - 72, x + lx + 4, y - 67], WHITE)
-    p.rect([x + 6, y - 20, x + 16, y - 8], WHITE, BLACK)  # Generator box
-    p.line([(x + 8, y - 16), (x + 14, y - 16)], BLACK)
-
-
-# Quarantine, dithered: the original shading, drawn in phase variants (see PHASES). Swapped in for the solid
-# pieces while the kit is in DITHERED_KITS
 
 def qd_fence_h(p):
     """Top border: chain link panel with razor wire, exactly a cell wide (its post on the left), so a row joins up"""
@@ -1502,21 +1002,19 @@ def quarantine_outside(kit):
 
 
 def build_quarantine():
-    d = "quarantine" in DITHERED_KITS
-    kw = {"cell": 1, "phases": PHASES} if d else {}
     pieces = [
-        Art("fence_h", 1, 1, qd_fence_h if d else q_fence_h, **kw),
-        Art("fence_v", 1, 1, qd_fence_v if d else q_fence_v, **kw),
-        Art("barrier_low", 1, 1, qd_barrier_low if d else q_barrier_low, **kw),
-        Art("sandbags", 2, 1, (qd_sandbags if d else q_sandbags)(6), **kw),
-        Art("sandbags_short", 1, 1, (qd_sandbags if d else q_sandbags)(3), **kw),
-        Art("jersey", 1, 1, qd_jersey if d else q_jersey, **kw),
-        Art("med_tent", 3, 2, qd_med_tent if d else q_med_tent, **kw),
-        Art("tower", 1, 1, qd_tower if d else q_tower, **kw),
-        Art("crates", 1, 1, qd_crates if d else q_crates, **kw),
-        Art("drums", 1, 1, qd_drums if d else q_drums, **kw),
-        Art("truck", 3, 1, qd_truck if d else q_truck, **kw),
-        Art("floodlight", 1, 1, qd_floodlight if d else q_floodlight, **kw),
+        Art("fence_h", 1, 1, qd_fence_h),
+        Art("fence_v", 1, 1, qd_fence_v),
+        Art("barrier_low", 1, 1, qd_barrier_low),
+        Art("sandbags", 2, 1, qd_sandbags(6)),
+        Art("sandbags_short", 1, 1, qd_sandbags(3)),
+        Art("jersey", 1, 1, qd_jersey),
+        Art("med_tent", 3, 2, qd_med_tent),
+        Art("tower", 1, 1, qd_tower),
+        Art("crates", 1, 1, qd_crates),
+        Art("drums", 1, 1, qd_drums),
+        Art("truck", 3, 1, qd_truck),
+        Art("floodlight", 1, 1, qd_floodlight),
     ]
     ground = [
         Art("concrete", 1, 1, qg_concrete),
@@ -1526,7 +1024,7 @@ def build_quarantine():
         Art("mud", 1, 1, qg_mud),
     ]
     decals = [Art("sand", 1, 1, d_sand), Art("sand2", 1, 1, d_sand), Art("casing", 1, 1, d_casing), Art("footprints", 1, 1, d_footprints), Art("pebbles", 1, 1, d_pebbles)]
-    kit = Kit("quarantine", "Quarantine Zone", pieces, ground, decals, 0.35, None, cell=1 if d else None, phases=PHASES if d else 1)
+    kit = Kit("quarantine", "Quarantine Zone", pieces, ground, decals, 0.35, None)
     kit.outside = quarantine_outside(kit)
     return kit
 
@@ -1534,10 +1032,8 @@ def build_quarantine():
 # ================================================================ kit definitions
 
 class Kit:
-    def __init__(self, name, title, pieces, ground, decals, decal_chance, outside, cell=None, phases=1):
+    def __init__(self, name, title, pieces, ground, decals, decal_chance, outside):
         self.name, self.title = name, title
-        self.cell = cell or DITHER_CELL  # Dither cell size for its baked floor
-        self.phases = phases  # 1, or PHASES: pieces and the floor drawn in phase variants
         self.pieces = pieces  # [Art]
         self.ground = ground  # [Art], flat
         self.decals = decals  # [Art], tiny
@@ -1565,21 +1061,19 @@ def woods_outside(kit):
 
 
 def build_woods():
-    d = "woods" in DITHERED_KITS
-    kw = {"cell": 1, "phases": PHASES} if d else {}
     pieces = [
-        Art("pine_tall", 1, 1, (wd_pine if d else w_pine)(True), **kw),
-        Art("pine_short", 1, 1, (wd_pine if d else w_pine)(False), **kw),
-        Art("oak_a", 1, 1, (wd_oak if d else w_oak)(24, 11), **kw),
-        Art("oak_b", 1, 1, (wd_oak if d else w_oak)(20, 12), **kw),
-        Art("dead_tree", 1, 1, wd_dead_tree if d else w_dead_tree, **kw),
-        Art("bush", 1, 1, wd_bush if d else w_bush, **kw),
-        Art("rock", 1, 1, wd_rock if d else w_rock, **kw),
-        Art("stump", 1, 1, wd_stump if d else w_stump, **kw),
-        Art("boulder", 2, 2, wd_boulder if d else w_boulder, **kw),
-        Art("log", 2, 1, wd_log if d else w_log, **kw),
-        Art("tent", 2, 1, wd_tent if d else w_tent, **kw),
-        Art("car", 2, 1, wd_car if d else w_car, **kw),
+        Art("pine_tall", 1, 1, wd_pine(True)),
+        Art("pine_short", 1, 1, wd_pine(False)),
+        Art("oak_a", 1, 1, wd_oak(24, 11)),
+        Art("oak_b", 1, 1, wd_oak(20, 12)),
+        Art("dead_tree", 1, 1, wd_dead_tree),
+        Art("bush", 1, 1, wd_bush),
+        Art("rock", 1, 1, wd_rock),
+        Art("stump", 1, 1, wd_stump),
+        Art("boulder", 2, 2, wd_boulder),
+        Art("log", 2, 1, wd_log),
+        Art("tent", 2, 1, wd_tent),
+        Art("car", 2, 1, wd_car),
     ]
     ground = [
         Art("path_a", 1, 1, wg_path(1)),
@@ -1589,7 +1083,7 @@ def build_woods():
         Art("puddle", 1, 1, wg_puddle),
     ]
     decals = [Art(f"tuft{s}", 1, 1, d_tuft(s)) for s in (2, 3, 3, 4)] + [Art("flower", 1, 1, d_flower), Art("pebbles", 1, 1, d_pebbles), Art("twig", 1, 1, d_twig)]
-    kit = Kit("woods", "Overgrown Woodland", pieces, ground, decals, 0.45, None, cell=1 if d else None, phases=PHASES if d else 1)
+    kit = Kit("woods", "Overgrown Woodland", pieces, ground, decals, 0.45, None)
     kit.outside = woods_outside(kit)
     return kit
 
@@ -1641,11 +1135,8 @@ def write_images(kits, images_dir):
             if f.startswith(f"{kit.name}-piece-"):
                 os.remove(os.path.join(images_dir, f))
         for i, a in enumerate(kit.pieces):
-            if kit.phases == 1:
-                a.image.save(os.path.join(images_dir, f"{kit.name}-piece-{i}.png"))
-            else:
-                for v, im in enumerate(a.images):
-                    im.save(os.path.join(images_dir, f"{kit.name}-piece-{i}-p{v}.png"))
+            for v, im in enumerate(a.images):
+                im.save(os.path.join(images_dir, f"{kit.name}-piece-{i}-p{v}.png"))
 
 
 def write_descs(kits, path="src/kit_descs.zig"):
@@ -1659,15 +1150,15 @@ def write_descs(kits, path="src/kit_descs.zig"):
         "/// A piece's bitmap size and the pixel that sits on its anchor cell's centre, drawn as is and mirrored",
         "pub const Piece = struct { w: i16, h: i16, anchor_x: i16, anchor_x_flipped: i16, anchor_y: i16 };",
         "",
-        "/// `phases`: 1, or PHASES when every piece (and the kit's levels' floors) come in phase variants",
-        "pub const Kit = struct { name: [:0]const u8, phases: u8, pieces: []const Piece };",
+        "pub const Kit = struct { name: [:0]const u8, pieces: []const Piece };",
         "",
+        "/// Every piece and every level's floor comes in this many phase variants, one per screen pixel phase",
         f"pub const PHASES = {PHASES};",
         "",
         "pub const KITS = [_]Kit{",
     ]
     for kit in kits:
-        lines.append(f'    .{{ .name = "{kit.name}", .phases = {kit.phases}, .pieces = &.{{')
+        lines.append(f'    .{{ .name = "{kit.name}", .pieces = &.{{')
         for a in kit.pieces:
             ax, ay = a.anchor
             lines.append(f"        .{{ .w = {a.image.width}, .h = {a.image.height}, .anchor_x = {ax}, .anchor_x_flipped = {a.anchor_flipped_x}, .anchor_y = {ay} }}, //{a.name} {a.fw}x{a.fh}")

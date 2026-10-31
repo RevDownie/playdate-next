@@ -69,14 +69,14 @@
    <property name="name" value="log"/>
    <property name="footprint" value="2x1"/>
   </properties>
-  <image width="111" height="32" source="woods/pieces/log.png"/>
+  <image width="111" height="33" source="woods/pieces/log.png"/>
  </tile>
  <tile id="10">
   <properties>
    <property name="name" value="tent"/>
    <property name="footprint" value="2x1"/>
   </properties>
-  <image width="89" height="57" source="woods/pieces/tent.png"/>
+  <image width="90" height="57" source="woods/pieces/tent.png"/>
  </tile>
  <tile id="11">
   <properties>

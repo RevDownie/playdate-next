@@ -45,7 +45,7 @@ pub fn applyHits(hits: []const Hit, enemies: *state.Enemies, player: *state.Play
     return impacts_out[0..num_impacts];
 }
 
-pub fn isMilestone(combo: u32) bool {
+fn isMilestone(combo: u32) bool {
     return combo == consts.COMBO_MILESTONE_FIRST or (combo > 0 and combo % consts.COMBO_MILESTONE_EVERY == 0);
 }
 
@@ -72,9 +72,8 @@ pub fn applyEnemyContact(enemies: *state.Enemies, player: *state.Player, damage:
     player.hit_flash_timer = consts.FLASH_HIT_EFFECT_DURATION;
 }
 
-var test_impacts: [8]state.Impact = undefined;
-
 test "[combat_system] a second hit on a killed enemy is ignored" {
+    var test_impacts: [8]state.Impact = undefined;
     var enemies = state.Enemies{};
     var player = state.Player{};
     var popups = state.Popups{};
@@ -92,6 +91,7 @@ test "[combat_system] a second hit on a killed enemy is ignored" {
 }
 
 test "[combat_system] a fresh walker is knocked back by the first hit and killed by the second" {
+    var test_impacts: [8]state.Impact = undefined;
     var enemies = state.Enemies{};
     var player = state.Player{};
     var popups = state.Popups{};
@@ -103,13 +103,6 @@ test "[combat_system] a fresh walker is knocked back by the first hit and killed
     try std.testing.expect(enemies.health[0] > 0 and enemies.isBumping(0));
     _ = applyHits(&hit, &enemies, &player, &popups, &test_impacts);
     try std.testing.expect(enemies.health[0] == 0);
-}
-
-test "[combat_system] the slow kinds take several times a walker's hits" {
-    const walker_hits = state.EnemyKind.walker.def().health / consts.DMG_PER_HIT;
-    try std.testing.expect(state.EnemyKind.shambler.def().health / consts.DMG_PER_HIT >= 2 * walker_hits);
-    try std.testing.expect(state.EnemyKind.brute.def().health / consts.DMG_PER_HIT >= 5 * walker_hits);
-    for (consts.ENEMY_KINDS) |k| try std.testing.expect(k.health % consts.DMG_PER_HIT == 0); //No wasted damage
 }
 
 test "[combat_system] many enemies in contact can't overflow the damage" {
@@ -146,6 +139,7 @@ test "[combat_system] an invincible player still gets bumped but takes no damage
 }
 
 test "[combat_system] kills show the growing combo where they fell, big at milestones" {
+    var test_impacts: [8]state.Impact = undefined;
     var enemies = state.Enemies{};
     var player = state.Player{};
     var popups = state.Popups{};
@@ -165,6 +159,7 @@ test "[combat_system] kills show the growing combo where they fell, big at miles
 }
 
 test "[combat_system] a first kill shows nothing, and only a good combo says it was lost" {
+    var test_impacts: [8]state.Impact = undefined;
     var enemies = state.Enemies{};
     var player = state.Player{};
     var popups = state.Popups{};

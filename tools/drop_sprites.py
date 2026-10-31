@@ -6,7 +6,7 @@ from PIL import Image
 Ammo and health drop sprites, hand authored as 1-bit pixel grids (no dithering pass, so no mud).
 Written as a bitmap table `images/drops-table-N.png`: per `DropKind` (src/game_state.zig, in order) a still
 frame then SHEEN_FRAMES frames of a light sweep across it, so `index = kind * FRAMES_PER_KIND + frame`.
-Called by convert_raw.py, or run directly: python drop_sprites.py [out_dir]
+Called by convert_raw.py, or run directly: python tools/drop_sprites.py [out_dir]
 
 Reading rules: type reads by tone (ammo is dark with white brass on top, health is a white kit with a black
 cross) and size by footprint. Light from the top left, so the right side and front face are shaded.

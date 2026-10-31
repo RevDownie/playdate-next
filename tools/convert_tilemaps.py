@@ -25,8 +25,8 @@ Outputs per level:
   u16 player start cell; per drop point u16 cell, u8 size; the blocked cells as a bitmask (bit i % 8 of byte i / 8, row major);
   then per object u16 cell, u8 piece index (bit 7 set = mirrored) to the end of the file
 - images/ground-<level>.png: the floor (ground layer, decals scattered over free floor by a hash of the cell) and
-  the view beyond the map (the kit's outside), GROUND_MARGIN_X/Y pixels past each edge. 1-bit with no mask. For a
-  kit drawn in phase variants, ground-<level>-p0..3.png: the floor dithered once per pixel phase
+  the view beyond the map (the kit's outside), GROUND_MARGIN_X/Y pixels past each edge. 1-bit with no mask, one per
+  pixel phase (-p0..3, see env_kits.PHASES)
 """
 
 LEVEL_NAMES = ["woods", "city", "quarantine"]
@@ -203,41 +203,25 @@ def bake_ground(name, kit, w, h, blocked, ground, images_dir):
         if f == f"ground-{name}.png" or f.startswith(f"ground-{name}-p"):
             os.remove(os.path.join(images_dir, f))
 
-    if kit.phases > 1:
-        # Composite every layer's tones, then dither the whole floor once per phase (it is drawn with the phase that
-        # matches where it lands on screen, like the pieces)
-        tone = np.full(size, 255, dtype=np.uint8)
-        for art, col, row, flipped, dx, dy, _ in placed:
-            t_img, s_img, i_img, anchor = art.placed_layers(flipped)
-            x, y = spot(anchor, col, row, dx, dy)
-            tt, ss, ii = np.asarray(t_img), np.asarray(s_img) > 0, np.asarray(i_img) > 0
-            y0, y1, x0, x1 = max(y, 0), min(y + tt.shape[0], size[0]), max(x, 0), min(x + tt.shape[1], size[1])
-            if y1 <= y0 or x1 <= x0:
-                continue  # Entirely outside the floor
-            part = (slice(y0 - y, y1 - y), slice(x0 - x, x1 - x))
-            region = tone[y0:y1, x0:x1]
-            region[:] = np.where(ss[part], tt[part], np.where(ii[part], np.minimum(region, tt[part]), region))
-        first = None
-        for v in range(kit.phases):
-            img = Image.fromarray(np.where(env_kits.bayer_bw(tone, kit.cell, (v % 2, v // 2)), 255, 0).astype(np.uint8), "L").convert("1")
-            img.save(os.path.join(images_dir, f"ground-{name}-p{v}.png"))
-            first = first or img
-        return first
-
-    img = Image.new("L", (size[1], size[0]), 255)
-    # Ground art as tones, dithered once across the whole level so neighbouring cells' patterns line up
-    for art, col, row, flipped, dx, dy, is_ground in placed:
-        if is_ground:
-            t_img, mask, anchor = art.placed_tone(flipped)
-            img.paste(t_img, spot(anchor, col, row, dx, dy), mask)
-    img = Image.fromarray(np.where(env_kits.bayer_bw(img), 255, 0).astype(np.uint8), "L")
-    for art, col, row, flipped, dx, dy, is_ground in placed:
-        if not is_ground:
-            im, anchor = art.placed(flipped)
-            img.paste(im.convert("L"), spot(anchor, col, row, dx, dy), im.split()[3])
-    img = img.point(lambda v: 255 if v >= 128 else 0).convert("1")
-    img.save(os.path.join(images_dir, f"ground-{name}.png"))
-    return img
+    # Composite every layer's tones, then dither the whole floor once per phase (it is drawn with the phase that
+    # matches where it lands on screen, like the pieces)
+    tone = np.full(size, 255, dtype=np.uint8)
+    for art, col, row, flipped, dx, dy, _ in placed:
+        t_img, s_img, i_img, anchor = art.placed_layers(flipped)
+        x, y = spot(anchor, col, row, dx, dy)
+        tt, ss, ii = np.asarray(t_img), np.asarray(s_img) > 0, np.asarray(i_img) > 0
+        y0, y1, x0, x1 = max(y, 0), min(y + tt.shape[0], size[0]), max(x, 0), min(x + tt.shape[1], size[1])
+        if y1 <= y0 or x1 <= x0:
+            continue  # Entirely outside the floor
+        part = (slice(y0 - y, y1 - y), slice(x0 - x, x1 - x))
+        region = tone[y0:y1, x0:x1]
+        region[:] = np.where(ss[part], tt[part], np.where(ii[part], np.minimum(region, tt[part]), region))
+    first = None
+    for v in range(env_kits.PHASES):
+        img = Image.fromarray(np.where(env_kits.bayer_bw(tone, (v % 2, v // 2)), 255, 0).astype(np.uint8), "L").convert("1")
+        img.save(os.path.join(images_dir, f"ground-{name}-p{v}.png"))
+        first = first or img
+    return first
 
 
 def convert_all(images_dir='images', kits=None, preview_dir=None):

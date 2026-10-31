@@ -8,7 +8,7 @@ from sdf_sprites import ellipsoid, sphere, capsule, box, clip, pose, render, cle
 """
 The hero and zombie sprite sheets, modelled from primitives and rendered to 1-bit by sdf_sprites.py (raw-images/ is
 git-ignored, so the source lives in this script). Called by convert_raw.py, or run directly:
-    python character_sprites.py [out_dir] [--preview logs/characters.png]
+    python tools/character_sprites.py [out_dir] [--preview logs/characters.png]
 
 Only facings 0 (towards the screen) to 180 (away) are drawn; the renderer mirrors them for the other half, so every
 model is left/right symmetric and weapons are held two-handed in the middle of the body (no hand swap at the seam).

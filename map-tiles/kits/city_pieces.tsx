@@ -13,14 +13,14 @@
    <property name="name" value="facade_b"/>
    <property name="footprint" value="1x1"/>
   </properties>
-  <image width="57" height="53" source="city/pieces/facade_b.png"/>
+  <image width="58" height="53" source="city/pieces/facade_b.png"/>
  </tile>
  <tile id="2">
   <properties>
    <property name="name" value="facade_c"/>
    <property name="footprint" value="1x1"/>
   </properties>
-  <image width="57" height="76" source="city/pieces/facade_c.png"/>
+  <image width="58" height="76" source="city/pieces/facade_c.png"/>
  </tile>
  <tile id="3">
   <properties>

@@ -1,12 +1,10 @@
 const std = @import("std");
-const pd = @import("playdate.zig").api;
 const consts = @import("tweak_constants.zig");
 const CollisionGrid = @import("collision_grid.zig").CollisionGrid;
 const Arena = @import("memory.zig").Arena;
 const kit_descs = @import("kit_descs.zig");
 
 const Vec2f = @Vector(2, f32);
-const Vec2i = @Vector(2, i32);
 
 /// Size of drop a level drop point gives (the reward, and the risk of where it is placed)
 ///
@@ -41,8 +39,6 @@ pub const Level = struct {
 };
 
 pub const Error = error{
-    FileOpenFailed,
-    FileReadFailed,
     TruncatedHeader,
     TruncatedObject,
     TruncatedDrops,
@@ -60,30 +56,8 @@ const HEADER_SIZE = 8;
 const DROP_SIZE = 3;
 const OBJ_SIZE = 3;
 
-/// Read the level file into the level arena and parse it
-///
-pub fn load(playdate_api: *pd.PlaydateAPI, level_file_name: [*:0]const u8, arena: *Arena) Error!Level {
-    const file = playdate_api.file.*;
-
-    var stat: pd.FileStat = undefined;
-    if (file.stat.?(level_file_name, &stat) != 0) return Error.FileOpenFailed;
-
-    const lvl_file = file.open.?(level_file_name, pd.kFileRead) orelse return Error.FileOpenFailed;
-    defer _ = file.close.?(lvl_file);
-
-    const bytes = arena.alloc(u8, stat.size);
-    var read_len: usize = 0;
-    while (read_len < bytes.len) {
-        const n = file.read.?(lvl_file, bytes[read_len..].ptr, @intCast(bytes.len - read_len));
-        if (n <= 0) return Error.FileReadFailed;
-        read_len += @intCast(n);
-    }
-
-    return parse(bytes, arena);
-}
-
-/// Parse the level binary (see convert_tilemaps.py) converting the cell co-ords into world positions and building
-/// the collision grid.
+/// Parse the level binary (see convert_tilemaps.py; main reads the file) into `arena`, converting the cell
+/// co-ords into world positions and building the collision grid. Nothing keeps hold of `bytes`.
 /// Format: u8 grid width, u8 grid height, u8 cell width px, u8 cell height px, u8 kit, u8 drop point count,
 /// u16 LE player start cell, then per drop point: u16 LE cell index, u8 size (`DropSize`),
 /// then the blocked cells as a bitmask (bit i % 8 of byte i / 8: the objects' footprints),

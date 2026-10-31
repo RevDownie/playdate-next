@@ -7,4 +7,4 @@ Inspired by shooters like Minigore. This is a simple horde survival game where t
 ## Toolchain
 - Built with Zig 0.17.0
 - Built with Arm toolchain 11.3.1
-- Built with Playdate SDK 1.13.2
+- Built with Playdate SDK 3.1.2

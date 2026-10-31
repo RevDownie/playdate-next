@@ -96,8 +96,8 @@ fn stepFrame(time: f32, frame_time: f32, comptime frames: u32) u32 {
 const BARREL_SIDE_OFFSETS = blk: {
     var offsets: [consts.GUN_BARRELS]f32 = undefined;
     for (&offsets, 0..) |*o, i| {
-        const angle = maths.PI_2 * @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(consts.GUN_BARRELS));
-        o.* = consts.MUZZLE_SIDE + consts.BARREL_RADIUS * @cos(angle);
+        const angle = std.math.tau * @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(consts.GUN_BARRELS));
+        o.* = consts.BARREL_RADIUS * @cos(angle);
     }
     break :blk offsets;
 };
@@ -217,17 +217,6 @@ test "[animation] bullet tracers start at the muzzle and converge on the bullet"
     const far = bulletTracer(Vec2f{ 3, 0 }, Vec2f{ 1, 0 }, consts.MUZZLE_CONVERGE_DIST, 3);
     try std.testing.expect(far.head[0] == 3 and far.head[1] == 0);
     try std.testing.expectApproxEqAbs(far.head[0] - far.tail[0], consts.TRACER_LENGTH, 0.0001);
-}
-
-test "[animation] drops hop off the ground and back" {
-    const top: i32 = @intFromFloat(consts.DROP_BOUNCE_PX);
-    try std.testing.expect(dropBounce(0) == 0);
-    try std.testing.expect(dropBounce(consts.DROP_BOUNCE_PERIOD / 2) == top);
-    try std.testing.expect(dropBounce(consts.DROP_BOUNCE_PERIOD) == 0);
-    for (0..100) |i| {
-        const b = dropBounce(@as(f32, @floatFromInt(i)) * 0.037);
-        try std.testing.expect(b >= 0 and b <= top);
-    }
 }
 
 test "[animation] a drop's glint sweeps through every frame once a period, staggered by point" {

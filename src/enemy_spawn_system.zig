@@ -49,14 +49,14 @@ pub fn update(spawner: *state.Spawner, enemies: *state.Enemies, rand: std.Random
 
 /// Enemies the wave keeps alive `progress` (0..1) of the way through holding out
 ///
-pub fn targetAlive(peak: u8, progress: f32) u8 {
+fn targetAlive(peak: u8, progress: f32) u8 {
     const fraction = consts.WAVE_START_FRACTION + (1 - consts.WAVE_START_FRACTION) * std.math.clamp(progress, 0, 1);
     return @intFromFloat(@round(@as(f32, @floatFromInt(peak)) * fraction));
 }
 
 /// The tuning for wave `n` (1 based): from the WAVES table, then its last four repeated, bigger each time
 ///
-pub fn waveDef(n: u16) consts.WaveDef {
+fn waveDef(n: u16) consts.WaveDef {
     std.debug.assert(n >= 1);
     const table_len: u16 = consts.WAVES.len;
     const def = if (n <= table_len) consts.WAVES[n - 1] else blk: {
@@ -77,7 +77,7 @@ pub fn waveDef(n: u16) consts.WaveDef {
 /// A new enemy in wave `wave`: a runner (more of them each wave from wave 2), a brute (from wave 3, a few more each
 /// wave), a shambler, or a walker
 ///
-pub fn enemyKind(rand: std.Random, wave: u16) state.EnemyKind {
+fn enemyKind(rand: std.Random, wave: u16) state.EnemyKind {
     const runner_chance = @min(consts.ENEMY_RUNNER_CHANCE_MAX, consts.ENEMY_RUNNER_CHANCE_PER_WAVE * @as(f32, @floatFromInt(wave -| 1)));
     const brute_chance = @min(consts.ENEMY_BRUTE_CHANCE_MAX, consts.ENEMY_BRUTE_CHANCE_PER_WAVE * @as(f32, @floatFromInt(wave -| 2)));
     const roll = rand.float(f32);
@@ -89,7 +89,7 @@ pub fn enemyKind(rand: std.Random, wave: u16) state.EnemyKind {
 
 /// How fast a new enemy of `kind` seeks the player: walkers a little faster or slower than ENEMY_SPEED each
 ///
-pub fn enemySpeed(rand: std.Random, kind: state.EnemyKind) f32 {
+fn enemySpeed(rand: std.Random, kind: state.EnemyKind) f32 {
     return switch (kind) {
         .runner => consts.ENEMY_RUNNER_SPEED,
         .walker => consts.ENEMY_SPEED * (1 + consts.ENEMY_SPEED_JITTER * (rand.float(f32) * 2 - 1)),
@@ -100,7 +100,7 @@ pub fn enemySpeed(rand: std.Random, kind: state.EnemyKind) f32 {
 
 /// How many sides of the map wave `n` comes from
 ///
-pub fn numSides(n: u16) u8 {
+fn numSides(n: u16) u8 {
     return @intCast(@min(level_loader.NUM_SIDES, 1 + (n - 1) / consts.WAVES_PER_EXTRA_SIDE));
 }
 
@@ -275,7 +275,7 @@ test "[enemy_spawn_system] a wave holds out, refilling as enemies die, then is c
         const d = @sqrt(ringDistSqrd(p - player));
         //Half a 0.5m cell of slack: picks snap to cell centres, which the squash stretches vertically
         try std.testing.expect(d >= consts.SPAWN_MIN_PLAYER_DIST - 0.5 and d <= consts.SPAWN_RING_MAX_DIST + 0.5);
-        try std.testing.expect(@reduce(.Add, maths.normalise((p - player) / RING_SQUASH) * dir) > 0.6); //Within ~50 degrees
+        try std.testing.expect(@reduce(.Add, maths.normaliseSafe((p - player) / RING_SQUASH, @splat(0)) * dir) > 0.6); //Within ~50 degrees
     }
 
     //Clearing: nothing more spawns; survived once down to WAVE_CLEAR_LEFT

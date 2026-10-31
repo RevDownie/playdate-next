@@ -13,11 +13,6 @@ pub fn next(rand: std.Random, count: usize, previous: ?usize, forced: ?usize) us
     return if (pick >= prev) pick + 1 else pick;
 }
 
-test "[level_select] a forced level always wins" {
-    var prng = std.Random.DefaultPrng.init(1);
-    for (0..20) |_| try std.testing.expect(next(prng.random(), 3, 2, 2) == 2);
-}
-
 test "[level_select] never the same level twice in a row, and every level comes up" {
     var prng = std.Random.DefaultPrng.init(2);
     var seen: [4]u32 = @splat(0);
@@ -32,8 +27,9 @@ test "[level_select] never the same level twice in a row, and every level comes 
     for (seen) |s| try std.testing.expect(s > 50);
 }
 
-test "[level_select] a single level repeats" {
+test "[level_select] a forced level always wins, and a single level repeats" {
     var prng = std.Random.DefaultPrng.init(3);
+    try std.testing.expect(next(prng.random(), 3, 2, 2) == 2);
     try std.testing.expect(next(prng.random(), 1, null, null) == 0);
     try std.testing.expect(next(prng.random(), 1, 0, null) == 0);
 }

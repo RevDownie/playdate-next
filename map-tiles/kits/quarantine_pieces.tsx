@@ -6,7 +6,7 @@
    <property name="name" value="fence_h"/>
    <property name="footprint" value="1x1"/>
   </properties>
-  <image width="57" height="64" source="quarantine/pieces/fence_h.png"/>
+  <image width="58" height="64" source="quarantine/pieces/fence_h.png"/>
  </tile>
  <tile id="1">
   <properties>

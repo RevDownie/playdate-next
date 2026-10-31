@@ -33,7 +33,6 @@ pub fn build(b: *std.Build) void {
         .name = game_name,
         .root_module = createGameModule(b, device_target, optimize, c_sdk_path, arm_toolchain_path, .device, is_release, build_options),
     });
-    configureDevice(b, device_game.root_module, c_sdk_path, arm_toolchain_path);
 
     const game_elf = b.addExecutable(.{
         .name = "pdex.elf",
@@ -51,7 +50,8 @@ pub fn build(b: *std.Build) void {
         .file = .{ .cwd_relative = b.pathJoin(&.{ c_sdk_path, "buildsupport", "setup.c" }) },
         .flags = &.{ "-DTARGET_PLAYDATE=1", "-DTARGET_EXTENSION=1" },
     });
-    configureDevice(b, game_elf.root_module, c_sdk_path, arm_toolchain_path);
+    game_elf.root_module.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ arm_toolchain_path, "arm-none-eabi", "include" }) });
+    game_elf.root_module.addIncludePath(.{ .cwd_relative = c_sdk_path });
     // Our link_map.ld is the SDK's with the sections padded so they have no gaps (see its header). The SDK's
     // GROUP(libgcc.a libc.a libm.a) is replaced by passing the archives themselves, because library paths never
     // reach lld for a freestanding target (and lld needs no GROUP to resolve archives in any order)
@@ -67,10 +67,10 @@ pub fn build(b: *std.Build) void {
     // runtime fails with "CAPI handler function wasn't located in loaded data")
     game_elf.link_emit_relocs = true;
     game_elf.image_base = 0;
-    game_elf.link_z_notext = true; // needed for @cos func
+    game_elf.link_z_notext = true; // libm's cos (behind @cos) doesn't link without it
     game_elf.stack_size = 61800;
     game_elf.entry = .{ .symbol_name = "eventHandlerShim" };
-    game_elf.lto = .none; // otherwise release build does not work
+    game_elf.lto = .none; // the release device build fails with LTO
     b.installArtifact(game_elf);
 
     //Everything that pdc packages lives in zig-out/lib
@@ -169,9 +169,7 @@ fn createGameModule(
         translate_c.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ arm_toolchain_path, "arm-none-eabi", "include" }) });
     }
     translate_c.defineCMacro("TARGET_EXTENSION", null);
-    // The device build has always defined TARGET_SIMULATOR for its game code, so keep doing so
-    translate_c.defineCMacro("TARGET_SIMULATOR", null);
-    if (game_target == .simulator) translate_c.defineCMacro("_WINDLL", null);
+    if (game_target == .simulator) translate_c.defineCMacro("_WINDLL", null); //pd_api.h: export eventHandler from the DLL
 
     const module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -185,12 +183,4 @@ fn createGameModule(
     module.addImport("playdate_c", translate_c.createModule());
     module.addOptions("build_options", build_options);
     return module;
-}
-
-fn configureDevice(b: *std.Build, module: *std.Build.Module, c_sdk_path: []const u8, arm_toolchain_path: []const u8) void {
-    module.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ arm_toolchain_path, "arm-none-eabi", "include" }) });
-    module.addIncludePath(.{ .cwd_relative = c_sdk_path });
-    module.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ arm_toolchain_path, "lib", "gcc", "arm-none-eabi", arm_toolchain_version, "thumb", "v7e-m+fp", "hard" }) });
-    module.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ arm_toolchain_path, "arm-none-eabi", "lib", "thumb", "v7e-m+fp", "hard" }) });
-    module.addCMacro("TARGET_EXTENSION", "1");
 }

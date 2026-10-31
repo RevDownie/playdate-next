@@ -11,8 +11,8 @@ const level_loader = @import("level_loader.zig");
 const level_select = @import("level_select.zig");
 const save_data = @import("save_data.zig");
 const FlowField = @import("flow_field.zig").FlowField;
-const enemy_separation_sys = @import("enemy_separation_system.zig");
 const memory = @import("memory.zig");
+const enemy_move_sys = @import("enemy_movement_system.zig");
 const Arena = memory.Arena;
 
 // Platform layer: owns all memory and state, talks to the Playdate API, and each frame turns its input into
@@ -20,9 +20,9 @@ const Arena = memory.Arena;
 
 /// Memory. Everything is carved from one static buffer up front; nothing is allocated from the heap.
 /// app (whole run) -> level (reset when a level loads) and frame (reset at the start of every frame)
-const APP_MEMORY_SIZE = 256 * 1024;
 const LEVEL_ARENA_SIZE = 64 * 1024;
 const FRAME_ARENA_SIZE = 64 * 1024;
+const APP_MEMORY_SIZE = LEVEL_ARENA_SIZE + FRAME_ARENA_SIZE;
 var app_memory: [APP_MEMORY_SIZE]u8 = undefined;
 var app_arena: Arena = undefined;
 var level_arena: Arena = undefined;
@@ -122,7 +122,7 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     save = readSave();
     startRun();
     resetFrameTimer();
-    debugLog("init complete: level arena {d}/{d} bytes, L1 hot set budget {d} bytes (collision {d}, separation {d}, flow field {d}, bullet walls {d}, {d} per sprite drawn), {d} spawn cells", .{ level_arena.used(), level_arena.capacity(), memory.HOT_SET_BUDGET, state.COLLISION_HOT_SET_BYTES, enemy_separation_sys.SEPARATION_HOT_SET_BYTES, flow_field.hotSetBytes(), level.collision_grid.cells.len, renderer.BYTES_PER_DRAW_ITEM, level.spawn_cells.all.len });
+    debugLog("init complete: level arena {d}/{d} bytes, L1 hot set budget {d} bytes (collision {d}, separation {d}, flow field {d}, bullet walls {d}, {d} per sprite drawn), {d} spawn cells", .{ level_arena.used(), level_arena.capacity(), memory.HOT_SET_BUDGET, state.COLLISION_HOT_SET_BYTES, enemy_move_sys.SEPARATION_HOT_SET_BYTES, flow_field.hotSetBytes(), level.collision_grid.cells.len, renderer.BYTES_PER_DRAW_ITEM, level.spawn_cells.all.len });
     if (flow_field.hotSetBytes() > memory.HOT_SET_BUDGET) debugLog("WARNING: flow field ({d} bytes) is larger than the L1 hot set budget, enemy movement will miss the cache", .{flow_field.hotSetBytes()});
     if (level.collision_grid.cells.len > memory.HOT_SET_BUDGET) debugLog("WARNING: collision grid ({d} bytes) is larger than the L1 hot set budget, bullet wall tests will miss the cache", .{level.collision_grid.cells.len});
 }
@@ -134,7 +134,9 @@ fn loadLevel(index: usize) void {
     var name_buf: [64]u8 = undefined;
     const file_name = std.fmt.bufPrintSentinel(&name_buf, "{s}.bin", .{LEVEL_NAMES[index]}, 0) catch unreachable;
     level_arena.reset();
-    level = level_loader.load(playdate_api, file_name, &level_arena) catch |err| std.debug.panic("loadLevel {s}: {s}", .{ file_name, @errorName(err) });
+    //The file's bytes are only needed while parsing, so they go in the frame arena
+    const bytes = readFile(file_name, &frame_arena) orelse std.debug.panic("loadLevel: couldn't read {s}", .{file_name});
+    level = level_loader.parse(bytes, &level_arena) catch |err| std.debug.panic("loadLevel {s}: {s}", .{ file_name, @errorName(err) });
     flow_field = FlowField.init(&level_arena, &level.collision_grid, level.collision_grid.cellIndex(level.start_pos));
     current_level = index;
     debugLog("level {s}: {d} objects, {d} drop points, {d} spawn cells", .{ LEVEL_NAMES[index], level.obj_world_positions.len, level.drop_cells.len, level.spawn_cells.all.len });
@@ -147,7 +149,7 @@ fn startRun() void {
     const next = level_select.next(level_rng.random(), LEVEL_NAMES.len, current_level, forced_level);
     if (next != current_level) loadLevel(next);
     game_state.player.pos = level.start_pos;
-    game_state.camera_pos = level.start_pos;
+    game_state.camera.pos = level.start_pos;
     game_state.trigger.button_cooldown = consts.FIRE_BUTTON_DELAY; //The A/B press that starts the run doesn't also fire
     phase = .playing;
     new_best = false;
@@ -167,6 +169,25 @@ fn endRun() void {
         writeSave(save);
     }
     debugLog("run over: wave={d} score={d} best={d} new_best={} time={d:.1}s kills={d} best_streak={d}", .{ game_state.spawner.wave, p.score, save.best_score, new_best, game_state.run_time, p.kills, p.best_streak });
+}
+
+/// The whole of a file in the game's folder, read into `arena`, or null if it can't be read
+///
+fn readFile(name: [*:0]const u8, arena: *Arena) ?[]const u8 {
+    const file = playdate_api.file.*;
+    var stat: pd.FileStat = undefined;
+    if (file.stat.?(name, &stat) != 0) return null;
+    const handle = file.open.?(name, pd.kFileRead) orelse return null;
+    defer _ = file.close.?(handle);
+
+    const bytes = arena.alloc(u8, stat.size);
+    var read_len: usize = 0;
+    while (read_len < bytes.len) {
+        const n = file.read.?(handle, bytes[read_len..].ptr, @intCast(bytes.len - read_len));
+        if (n <= 0) return null;
+        read_len += @intCast(n);
+    }
+    return bytes;
 }
 
 /// The saved best, or a fresh save if there is none yet (or it can't be read)
@@ -291,7 +312,7 @@ fn logStatus(now_ms: u32) void {
     //Enemies in view: what the player actually sees of a wave
     var on_screen: u32 = 0;
     for (game_state.enemies.positions()) |e| {
-        const d = e - game_state.camera_pos;
+        const d = e - game_state.camera.pos;
         if (@abs(d[0]) < consts.VIEW_HALF_WIDTH and @abs(d[1]) < consts.VIEW_HALF_HEIGHT) on_screen += 1;
     }
     debugLog("t={d}ms level={s} wave={d}:{s} enemies={d} on_screen={d} health={d} score={d} combo={d} pos=({d:.2},{d:.2}) bullets={d} reload={d:.1} drops={d} invincible={} near={s}({d:.2},{d:.2}) aim=({d:.2},{d:.2}) target={s} crank={d:.1} frame_mem={d} drawn={d} gibs={d} droplets={d} splats={d} sim_ms_max={d:.2}", .{ now_ms, LEVEL_NAMES[current_level.?], game_state.spawner.wave, @tagName(game_state.spawner.phase), game_state.enemies.len, on_screen, p.health, p.score, p.kill_streak, p.pos[0], p.pos[1], game_state.bullets.ammo, @max(game_state.bullets.reload_timer, 0), drops.len, game_state.invincible, if (drops.len > 0) @tagName(drops.kind[near]) else "none", near_pos[0], near_pos[1], p.facing_dir[0], p.facing_dir[1], if (p.target_pos != null) "yes" else "no", playdate_api.system.*.getCrankAngle.?(), frame_arena.high_water, last_render_stats.drawn, game_state.gore.gibs.liveCount(), game_state.gore.droplets.liveCount(), game_state.gore.pools.liveCount() + game_state.gore.spatters.liveCount(), sim_ms_max });

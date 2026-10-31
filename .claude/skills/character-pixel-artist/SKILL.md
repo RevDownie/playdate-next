@@ -48,7 +48,7 @@ A 48x48 1-bit sprite with a mask is about 0.5 KB. 19 facings x 4 walk frames = 7
 
 ## Workflow in this repo
 1. Author at the final cell size (`CHAR_W` x `CHAR_H`) in `raw-images/<Name>/<name>-table-N.png`; the transparent key colour is red (`-transparent red`), so do not use red in the art.
-2. Run `python convert_raw.py <imagemagick path>` (wipes `images/` and rewrites `src/bitmap_descs.zig`), then `zig fmt src`.
+2. Run `python tools/convert_raw.py <imagemagick path>` (wipes `images/` and rewrites `src/bitmap_descs.zig`), then `zig fmt src`.
 3. If you add a character, a sheet or frame layout: add the `Sheet` enum value and the `loadBitmapTable` line in `src/renderer.zig`, extend `animation.zig` with the lookup (plus a `test` block named `"[animation] ..."`), and check the frame count against the `u8` frame index.
 4. Verify in the simulator with `tools/sim.ps1` and `tools/sim-input.ps1`: screenshot while the character turns through every facing and stands in a crowd; check for jitter, a flipped weapon on the wrong side, a missing facing, and frame pops at the loop point. Look at it at 1:1, and on device if possible.
 5. Report frame counts, cell size, estimated bytes per table, and what was saved by mirroring or procedural animation.

@@ -9,7 +9,8 @@ import env_kits
 import convert_tilemaps
 
 """
-Simple script for running Imagemagick on source images to convert them to 1 bit images for Playdate
+Regenerates everything in images/ (characters, gore, environment kits and baked levels, drops, and the card through
+ImageMagick) and src/bitmap_descs.zig. Usage: python tools/convert_raw.py <imagemagick path>
 """
 CHAR_W = character_sprites.HERO_W  # The player's cell: gameplay sizes (collision radii, melee range) derive from it
 CHAR_H = character_sprites.HERO_H

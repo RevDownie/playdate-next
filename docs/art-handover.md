@@ -20,8 +20,8 @@ are** is a code change with knock-on effects. Each section below says which is w
 | Camera | Top-down 3/4 view (seen from above and slightly in front). Never mix in side or true top-down views |
 | Light | From the **top left**, everywhere. Top faces lightest, front faces mid, cast shadows fall down and to the right |
 | Tones | Five, through one ordered **4x4 Bayer** dither: white, light (25% black), mid (50%), dark (75%), black. No error diffusion (it crawls when things move) |
-| Flicker | The view scrolls 1 px at a time, and on this LCD any pixel that flips reads as flicker. A single pixel checker flips *every* pixel on a 1 px move; a solid area only flips along its outline. So every kit is drawn in **phase variants** (next row), which keeps its fine shading still on screen. A kit left out of `DITHERED_KITS` falls back to the **solid** style: lit faces white, shadow faces and cast shadows solid black, detail in black or white lines, and dither (50%, in 2 x 2 pixel clusters, `DITHER_CELL`) only as small accents. Never use 12.5% fills, and keep the ground quiet line work either way. Measure: shift a level preview (`convert_tilemaps.py --preview logs`) by 1 px and count the flipped pixels: 3-7% of the screen now (single pixel dither was 11-17%) |
-| Phase variants | The other way to keep fine dithering: draw the art in **phase variants** (`PHASES` in `env_kits.py`; every kit in `DITHERED_KITS`, currently all three). Each piece and the kit's levels' floors are rendered four times, once per screen pixel phase (x even/odd, y even/odd), and the renderer draws the version whose dither lines up with the screen, so the pattern stays still while the shapes move (3-4% flips, like the solid style). Rules: single pixel dither (`cell=1`), only the 25/50/75% tones (`LIGHT`, `MID`, `DARK`: they repeat every 2 px; anything finer needs 16 versions), dithered shadows with `p.dshadow`. Costs 4x the bitmaps per kit (each level's floors are about 600 KB in memory, 1.8 MB for the three) and nothing per frame |
+| Flicker | The view scrolls 1 px at a time, and on this LCD any pixel that flips reads as flicker. A single pixel checker flips *every* pixel on a 1 px move; a solid area only flips along its outline. So all environment art is drawn in **phase variants** (next row), which keeps its fine shading still on screen. Never use 12.5% fills, and keep the ground quiet line work. Measure: shift a level preview (`convert_tilemaps.py --preview logs`) by 1 px and count the flipped pixels: 3-7% of the screen now (single pixel dither was 11-17%) |
+| Phase variants | `PHASES` in `env_kits.py`. Each piece and every level's floor is rendered four times, once per screen pixel phase (x even/odd, y even/odd), and the renderer draws the version whose dither lines up with the screen, so the pattern stays still while the shapes move (3-4% flips). Rules: single pixel dither, only the 25/50/75% tones (`LIGHT`, `MID`, `DARK`: they repeat every 2 px; anything finer needs 16 versions), dithered shadows with `p.dshadow`, and no 1 px detail that is diagonal or in a dithered tone (it lines up with the screen's dither differently in each variant and fades in and out as the view scrolls; the `Pen` draws such lines, arcs and polygon outlines 2 px wide by itself). Costs 4x the bitmaps per kit (each level's floors are about 600 KB in memory, 1.8 MB for the three) and nothing per frame |
 | Contrast order | Characters (highest) > obstacles > ground (quietest). Ground is white with sparse detail. Each kit leans one way for identity: woods black foliage with white lit edges, city white concrete with black burnt vehicles, quarantine dark canvas with white markings |
 | Grid | Level cells are **57 x 27 px** (0.445 x 0.211 m). Levels are 16 x 20 cells |
 | Characters | Hero cell 48 x 48 (about 41 px tall on screen), zombies 32 to 64 px cells |
@@ -56,13 +56,15 @@ that needs processing at runtime.
 
 ## 3. Pipeline map
 
+The scripts are in `tools/`; run them from the repo root (`python tools/<script>.py`).
+
 | Script | Draws | Writes | Read by |
 |---|---|---|---|
 | `character_sprites.py` (uses `sdf_sprites.py`) | Hero body, hero gun and melee layers, 4 zombie kinds | `images/hero-table-*.png`, `hero_gun-*`, `hero_melee-*`, `zombie_<kind>-table-*` | `renderer.zig` (sheets), `animation.zig` (frame maths) |
 | `gore_sprites.py` | Gibs (cut from the zombie models), blood pools and spatters | `images/gibs_<kind>-table-*`, `splats-*`, `spatters-*` | `renderer.zig`, `gore_system.zig`, `animation.zig` |
 | `drop_sprites.py` | Ammo/health pickups (hand-authored pixel grids) | `images/drops-table-*` | `renderer.zig`, `animation.zig` |
 | `env_kits.py` | Environment kits: pieces, ground art, decals, outside | `images/<kit>-piece-<n>.png`, `map-tiles/kits/*.tsx` + previews, `src/kit_descs.zig` | `renderer.zig`, `level_loader.zig`, `convert_tilemaps.py` |
-| `convert_tilemaps.py` | Bakes each level's floor | `levels/<level>.bin`, `images/ground-<level>.png` | `level_loader.zig`, `renderer.zig` |
+| `convert_tilemaps.py` | Bakes each level's floor | `levels/<level>.bin`, `images/ground-<level>-p<0..3>.png` | `level_loader.zig`, `renderer.zig` |
 | `convert_raw.py <imagemagick>` | Runs all of the above, plus the launcher card | wipes `images/`, writes `src/bitmap_descs.zig` | everything |
 
 Important: running `character_sprites.py`, `gore_sprites.py` or `drop_sprites.py` on their own rewrites their images
@@ -126,7 +128,7 @@ left, 180 = away.
   sheet lists in `renderer.zig` (`Sheet`, `SHEET_FILES`), gibs in `gore_sprites.py`. That is a gameplay change, not an
   art change.
 
-Check: `python character_sprites.py images --preview logs/characters.png` (a few minutes) writes the tables and a
+Check: `python tools/character_sprites.py images --preview logs/characters.png` (a few minutes) writes the tables and a
 contact sheet.
 
 ---
@@ -142,7 +144,7 @@ contact sheet.
   or restructure a zombie's parts, update `GIB_TAGS`.
 - Blood is black. Fades are dither thinning, so keep fade frames as true subsets of the solid frame.
 
-Check: `python gore_sprites.py images --preview logs/gore.png` (seconds).
+Check: `python tools/gore_sprites.py images --preview logs/gore.png` (seconds).
 
 ---
 
@@ -157,7 +159,7 @@ Check: `python gore_sprites.py images --preview logs/gore.png` (seconds).
 - The renderer draws a ground shadow under each drop (`DROP_SHADOW_W`/`_LARGE` in `renderer.zig`) and the pickup
   radii are in `tweak_constants.zig` (`DROP_PICKUP_RADIUS*`); keep them in step with the drawn size.
 
-Check: `python drop_sprites.py` (instant).
+Check: `python tools/drop_sprites.py` (instant).
 
 ---
 
@@ -181,7 +183,7 @@ Three kits: `woods`, `city`, `quarantine`. Each kit has:
 - Draw the object's base inside the footprint, near the bottom of it. Overhangs (canopies, roofs, shadows) may extend
   outside it; they will overlap characters correctly through depth sorting.
 - Footprints extend **right and up** from the cell the piece is placed on (like a Tiled tile).
-- Use `p.shadow(...)` / `p.shadow_ellipse(...)` for cast shadows: solid black, down and to the right. `ink=True` on
+- Use `p.dshadow(...)` / `p.dshadow_ellipse(...)` for cast shadows: dithered dark, down and to the right. `ink=True` on
   a shape makes only its black pixels opaque (for a dithered accent laid over the ground without white specks).
 - **Border pieces** (the ring round each level: `facade_*` and `wall_side` in city, `fence_h`/`fence_v` in quarantine,
   trees and bushes in woods) must be exactly one cell wide with no side outline where they join, so a row reads as one
@@ -194,18 +196,16 @@ Three kits: `woods`, `city`, `quarantine`. Each kit has:
 
 ### Phase variants
 
-- A kit built with `Kit(..., cell=1, phases=PHASES)` and its pieces with `Art(..., cell=1, phases=PHASES)` gets four
-  bitmaps per piece (`<kit>-piece-<n>-p<v>.png`) and four floors per level (`ground-<level>-p<v>.png`); `kit_descs.zig`
-  records `phases` and the renderer loads and picks them itself. Nothing else changes.
-- `DITHERED_KITS` picks which kits use their fine dithered art in phase variants (`wd_*`, `cd_*`, `qd_*` pieces);
-  the rest use the solid style (`w_*`, `c_*`, `q_*`, one bitmap per piece). Re-run `env_kits.py` and
-  `convert_tilemaps.py` after changing it. Edit the style in use (both sets keep the same names, footprints and order).
+- Every kit gets four bitmaps per piece (`<kit>-piece-<n>-p<v>.png`) and four floors per level
+  (`ground-<level>-p<v>.png`); the renderer loads them all and picks one per draw. Nothing else changes.
+- The pieces are the `wd_*`, `cd_*` and `qd_*` functions in `env_kits.py`. Re-run `env_kits.py` and
+  `convert_tilemaps.py` after changing them.
 - Characters, gore and drops are not in phase variants (yet), so their dither still moves with them.
 
 ### Safe to change (no code change)
 
 - The drawing of any existing piece, ground art, decal or outside, keeping its footprint. Re-run
-  `python env_kits.py images --preview logs/kits.png` then `python convert_tilemaps.py --preview logs` and look at
+  `python tools/env_kits.py images --preview logs/kits.png` then `python tools/convert_tilemaps.py --preview logs` and look at
   `logs/level-<name>.png`.
 - New pieces, ground art or decals **appended** to a kit's lists. To use them, place them in the `.tmx` maps (Tiled
   reads the regenerated tilesets in `map-tiles/kits/`).
@@ -215,7 +215,7 @@ Three kits: `woods`, `city`, `quarantine`. Each kit has:
 ### Needs care
 
 - **Changing a footprint** changes collision in every level using the piece. Re-check the maps: run
-  `python convert_tilemaps.py --preview logs` (it errors if a footprint now overlaps another piece or leaves the map)
+  `python tools/convert_tilemaps.py --preview logs` (it errors if a footprint now overlaps another piece or leaves the map)
   and make sure no path or drop point got sealed off.
 - Limits: at most 127 pieces per kit (bit 7 of the level file's piece byte is the flip), at most 8 levels
   (`MAX_LEVELS` in `renderer.zig`).
@@ -256,11 +256,11 @@ Three kits: `woods`, `city`, `quarantine`. Each kit has:
 Run from the repo root (Windows; see `AGENTS.md` for the toolchain):
 
 1. Regenerate what you changed:
-   - characters: `python character_sprites.py images --preview logs/characters.png`
-   - gore: `python gore_sprites.py images --preview logs/gore.png`
-   - drops: `python drop_sprites.py`
-   - environment: `python env_kits.py images --preview logs/kits.png` then `python convert_tilemaps.py --preview logs`
-   - any layout constant changed: `python convert_raw.py <imagemagick path>` (everything, minutes)
+   - characters: `python tools/character_sprites.py images --preview logs/characters.png`
+   - gore: `python tools/gore_sprites.py images --preview logs/gore.png`
+   - drops: `python tools/drop_sprites.py`
+   - environment: `python tools/env_kits.py images --preview logs/kits.png` then `python tools/convert_tilemaps.py --preview logs`
+   - any layout constant changed: `python tools/convert_raw.py <imagemagick path>` (everything, minutes)
 2. `zig fmt src build.zig`
 3. `zig build test --summary all` (frame maths tests catch index overruns) and `zig build` plus
    `zig build -Doptimize=ReleaseSmall` (the device build).

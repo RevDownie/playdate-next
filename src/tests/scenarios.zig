@@ -160,11 +160,8 @@ test "[scenario] the player dies if left alone" {
 test "[scenario] balance: a steadily cranked gun holds the horde off for a while, but is overrun in the end" {
     //A player standing still in the open turning the crank once a second, at the device's 50 FPS, with ammo
     //kept topped up (this measures the gun against the waves; ammo comes from drops, see the drop scenarios).
-    //Measured at the time of tuning: the first waves are mown down as they walk on screen, the wave 4 climax
-    //crowds the screen (~12 enemies in view) and hurts, and with shamblers taking four bullets the player is overrun
-    //in wave 6 after 200-220s and ~540 kills (over a few RNG seeds). Since the spawn ring moved in to fit the
-    //smaller 16x20 levels (screen shaped, 2.3m to the sides) the horde arrives sooner: overrun in wave 4 after ~100s and
-    //~350 kills
+    //With the current tuning they are overrun in wave 4 after ~100s and ~350 kills. The bounds are wide so tuning
+    //can move, but a change that makes the gun hopeless or the player unbeatable fails here
     const dt: f32 = 1.0 / 50.0;
     var t: TestLevel = .{};
     t.init(true);
@@ -198,7 +195,7 @@ test "[scenario] an enemy right up against the player can be shot" {
     _ = t.tick(&game, .{ .crank_delta = consts.FIRE_ANGLE_DELTA });
     _ = t.tick(&game, .{});
     try std.testing.expect(game.enemies.len == 1);
-    try std.testing.expect(game.enemies.health[0] < consts.ENEMY_MAX_HEALTH);
+    try std.testing.expect(game.enemies.health[0] < state.EnemyKind.walker.def().health);
 }
 
 test "[scenario] bullets can't go through walls" {
@@ -221,7 +218,7 @@ test "[scenario] bullets can't go through walls" {
         for (game.bullets.dir[0..game.bullets.len]) |d| try std.testing.expect(d[0] > 0.99); //At the wall
         const p = game.enemies.pos[0];
         if (p[0] < 2.3 or @abs(p[1]) > 4) break;
-        try std.testing.expect(game.enemies.health[0] == consts.ENEMY_MAX_HEALTH);
+        try std.testing.expect(game.enemies.health[0] == state.EnemyKind.walker.def().health);
     }
     try std.testing.expect(shots > 30);
 }
@@ -241,7 +238,7 @@ test "[scenario] the gun shoots the enemy it can see, not a closer one behind a 
         _ = t.tick(&game, .{ .crank_delta = consts.FIRE_ANGLE_DELTA });
         for (game.bullets.dir[0..game.bullets.len]) |d| try std.testing.expect(d[0] < 0); //Never a shot at the wall
         for (game.enemies.positions(), game.enemies.health[0..game.enemies.len]) |p, h| {
-            if (p[0] > 1.75) try std.testing.expect(h == consts.ENEMY_MAX_HEALTH);
+            if (p[0] > 1.75) try std.testing.expect(h == state.EnemyKind.walker.def().health);
         }
     }
     //The one in the open is dead and the gun has stopped aiming at anything
@@ -310,15 +307,12 @@ fn shotsFiredWithDrops(walk_to_drops: bool, secs: f32) !u32 {
     return shots;
 }
 
-test "[scenario] the gun never reloads by itself: standing still it runs dry" {
-    const shots = try shotsFiredWithDrops(false, 60);
-    try std.testing.expect(shots == consts.START_AMMO);
-}
-
-test "[scenario] a player who goes out for ammo drops keeps firing" {
+test "[scenario] the gun never reloads by itself, and a player who goes out for ammo drops keeps firing" {
+    //Standing still it runs dry
     const standing = try shotsFiredWithDrops(false, 60);
+    try std.testing.expect(standing == consts.START_AMMO);
+    //A steady crank wants 12 shots a second; walking to drops keeps the gun going much longer
     const walking = try shotsFiredWithDrops(true, 60);
-    //A steady crank wants 12 shots a second; walking to drops should keep the gun going much longer
     try std.testing.expect(walking > standing * 3);
 }
 
@@ -362,9 +356,8 @@ fn secondsSurvivedWithDrops(walk_to_drops: bool) f32 {
 test "[scenario] under the horde, a player who goes out for drops outlives one who stands still" {
     const standing = secondsSurvivedWithDrops(false);
     const walking = secondsSurvivedWithDrops(true);
-    //Measured at the time of tuning: ~21s standing still (the melee holds a few off once the ammo is gone); walking
-    //to drops reaches the 600s cap even with runners in the waves (the player is faster than most enemies, so one
-    //who keeps moving can outrun most of a wave)
+    //Standing still lasts ~21s (the melee holds a few off once the ammo is gone); walking to drops reaches the 600s
+    //cap (the player is faster than most enemies, so one who keeps moving can outrun most of a wave)
     try std.testing.expect(walking > standing * 1.5);
 }
 

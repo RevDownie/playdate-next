@@ -24,8 +24,8 @@ pub const Target = struct {
 /// The score is the distance, shrunk for enemies ahead of `move_dir` (the way the player is heading, zero
 /// while standing still), for damaged ones (so the gun finishes an enemy off even after its hits knock it
 /// back, rather than spreading damage around the horde) and a little for those along `aim_dir` (last frame's
-/// aim, so the gun doesn't flick between two similar targets). Line of sight is only tested on the best TARGET_MAX_LOS_TESTS candidates,
-/// best first. `scores` is per frame scratch with an entry per enemy. Returns null if nothing can be seen
+/// aim, so the gun doesn't flick between two similar targets). Line of sight is only tested on the best
+/// TARGET_MAX_LOS_TESTS candidates, best first. `scores` is per frame scratch with an entry per enemy. Returns null if nothing can be seen
 ///
 pub fn findTarget(player_pos: Vec2f, move_dir: Vec2f, aim_dir: Vec2f, view_centre: Vec2f, enemy_positions: []const Vec2f, enemy_health: []const u8, enemy_kinds: []const state.EnemyKind, grid: *const CollisionGrid, scores: []f32) ?Target {
     std.debug.assert(scores.len >= enemy_positions.len and enemy_health.len >= enemy_positions.len);
@@ -35,7 +35,7 @@ pub fn findTarget(player_pos: Vec2f, move_dir: Vec2f, aim_dir: Vec2f, view_centr
 
     //Score every enemy in view in one streamed pass
     for (enemy_positions, enemy_health[0..enemy_positions.len], enemy_kinds[0..enemy_positions.len], enemy_scores) |p, health, kind, *score| {
-        if (@reduce(.Or, maths.abs(p - view_centre) > view_half)) {
+        if (@reduce(.Or, @abs(p - view_centre) > view_half)) {
             score.* = unseen;
             continue;
         }
@@ -78,16 +78,18 @@ fn testGrid(cells: *[30 * 30]bool, wall: bool) CollisionGrid {
     return .{ .cells = cells, .width = 30, .height = 30, .cell_width = 57, .cell_height = 27 };
 }
 
-/// Every enemy at full health
+const WALKER_HEALTH = state.EnemyKind.walker.def().health;
+
+/// Every enemy a walker at full health
 fn testFind(player_pos: Vec2f, move_dir: Vec2f, aim_dir: Vec2f, enemies: []const Vec2f, grid: *const CollisionGrid) ?Target {
-    const health: [consts.MAX_ENEMIES]u8 = @splat(consts.ENEMY_MAX_HEALTH);
-    return testFindHurt(player_pos, move_dir, aim_dir, enemies, health[0..enemies.len], grid);
+    const health: [consts.MAX_ENEMIES]u8 = @splat(WALKER_HEALTH);
+    const kinds: [consts.MAX_ENEMIES]state.EnemyKind = @splat(.walker);
+    return testFindHurt(player_pos, move_dir, aim_dir, enemies, health[0..enemies.len], kinds[0..enemies.len], grid);
 }
 
-fn testFindHurt(player_pos: Vec2f, move_dir: Vec2f, aim_dir: Vec2f, enemies: []const Vec2f, health: []const u8, grid: *const CollisionGrid) ?Target {
+fn testFindHurt(player_pos: Vec2f, move_dir: Vec2f, aim_dir: Vec2f, enemies: []const Vec2f, health: []const u8, kinds: []const state.EnemyKind, grid: *const CollisionGrid) ?Target {
     var scores: [consts.MAX_ENEMIES]f32 = undefined;
-    const kinds: [consts.MAX_ENEMIES]state.EnemyKind = @splat(.walker);
-    return findTarget(player_pos, move_dir, aim_dir, player_pos, enemies, health, kinds[0..enemies.len], grid, &scores);
+    return findTarget(player_pos, move_dir, aim_dir, player_pos, enemies, health, kinds, grid, &scores);
 }
 
 test "[auto_targetting] nearest visible enemy, or nothing" {
@@ -155,20 +157,23 @@ test "[auto_targetting] keeps aiming at a target that is about as close as anoth
 test "[auto_targetting] finishes off a damaged enemy knocked back out of the ring" {
     var cells: [30 * 30]bool = undefined;
     const grid = testGrid(&cells, false);
-    //The last target took two hits and was knocked back a little out of the ring (~0.19m), off the aim
+    //The last target, a shambler with one hit left, was knocked back a little out of the ring (~0.19m), off the aim
     const enemies = [_]Vec2f{ .{ 0.29, 0.06 }, .{ 0, 0.19 }, .{ -0.19, 0 } };
-    const one_hit_left = consts.ENEMY_MAX_HEALTH - 2 * consts.DMG_PER_HIT;
-    const health = [_]u8{ one_hit_left, consts.ENEMY_MAX_HEALTH, consts.ENEMY_MAX_HEALTH };
-    try std.testing.expect(testFindHurt(@splat(0), @splat(0), .{ 1, 0 }, &enemies, &health, &grid).?.pos[0] == 0.29);
+    const kinds = [_]state.EnemyKind{ .shambler, .walker, .walker };
+    const health = [_]u8{ consts.DMG_PER_HIT, WALKER_HEALTH, WALKER_HEALTH };
+    try std.testing.expect(testFindHurt(@splat(0), @splat(0), .{ 1, 0 }, &enemies, &health, &kinds, &grid).?.pos[0] == 0.29);
     //At full health the nearer ones win
-    try std.testing.expect(testFind(@splat(0), @splat(0), .{ 1, 0 }, &enemies, &grid).?.pos[0] != 0.29);
+    const full = [_]u8{ state.EnemyKind.shambler.def().health, WALKER_HEALTH, WALKER_HEALTH };
+    try std.testing.expect(testFindHurt(@splat(0), @splat(0), .{ 1, 0 }, &enemies, &full, &kinds, &grid).?.pos[0] != 0.29);
 }
 
 test "[auto_targetting] a damaged enemy behind doesn't beat a fresh one in the player's way" {
     var cells: [30 * 30]bool = undefined;
     const grid = testGrid(&cells, false);
-    //Ringed and moving right, aiming at the nearly dead enemy behind
+    //Ringed and moving right, aiming at the nearly dead enemy behind: a brute with one hit left, the most a finish
+    //can count for
     const ring = [_]Vec2f{ .{ -0.19, 0 }, .{ 0.2, 0 } };
-    const health = [_]u8{ consts.ENEMY_MAX_HEALTH - 2 * consts.DMG_PER_HIT, consts.ENEMY_MAX_HEALTH };
-    try std.testing.expect(testFindHurt(@splat(0), .{ 1, 0 }, .{ -1, 0 }, &ring, &health, &grid).?.pos[0] == 0.2);
+    const kinds = [_]state.EnemyKind{ .brute, .walker };
+    const health = [_]u8{ consts.DMG_PER_HIT, WALKER_HEALTH };
+    try std.testing.expect(testFindHurt(@splat(0), .{ 1, 0 }, .{ -1, 0 }, &ring, &health, &kinds, &grid).?.pos[0] == 0.2);
 }

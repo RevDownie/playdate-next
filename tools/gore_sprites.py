@@ -8,7 +8,7 @@ import character_sprites as cs
 
 """
 Gore sprites: the body parts a zombie bursts into when killed and the blood splats left on the ground. Called by
-convert_raw.py, or run directly: python gore_sprites.py [out_dir] [--preview logs/gore.png]
+convert_raw.py, or run directly: python tools/gore_sprites.py [out_dir] [--preview logs/gore.png]
 
 Gibs are cut from the zombie models in character_sprites.py (same SDF renderer, same pale dotted skin and black
 outline) so the pieces match the zombie that burst, each with a black wet end where it was torn off. Splats are

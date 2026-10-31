@@ -39,16 +39,15 @@ fn gibSheet(kind: state.EnemyKind) Sheet {
 ///
 pub const Assets = struct {
     tables: [std.enums.values(Sheet).len]*pd.LCDBitmapTable, //Indexed by Sheet (not env)
-    //Every kit's pieces, by kit, piece and pixel phase, and each level's baked floor by level index and phase. Art in
-    //phase variants (kit_descs.PHASES) is dithered once per screen pixel phase (x even/odd, y even/odd) and drawn with
-    //the version matching where it lands, so its dither stays fixed to the screen and doesn't flicker as it scrolls.
-    //Everything else has one bitmap in every phase slot
+    //Every kit's pieces, by kit, piece and pixel phase, and each level's baked floor by level index and phase. The
+    //environment art is dithered once per screen pixel phase (x even/odd, y even/odd, kit_descs.PHASES) and drawn with
+    //the version matching where it lands, so its dither stays fixed to the screen and doesn't flicker as it scrolls
     kit_pieces: [kit_descs.KITS.len][kit_descs.MAX_KIT_PIECES][kit_descs.PHASES]*pd.LCDBitmap,
     grounds: [MAX_LEVELS][kit_descs.PHASES]*pd.LCDBitmap,
     fonts: hud_mod.Fonts,
 };
 
-pub const MAX_LEVELS = 8;
+const MAX_LEVELS = 8;
 
 /// One entry in the per frame draw list, already in screen space with the sprite's anchor applied.
 /// Kept to 8 bytes (no pointers, sizes or offsets - those come from the Sheet) so the whole list plus its
@@ -97,16 +96,16 @@ const TARGET_RING_H = 12;
 
 pub const BYTES_PER_DRAW_ITEM = @sizeOf(DrawItem) + @sizeOf(SortKey);
 comptime {
-    std.debug.assert(@sizeOf(DrawItem) == 8);
+    if (@sizeOf(DrawItem) != 8) @compileError("DrawItem must stay 8 bytes");
     //Every character and drop on screen at once must fit, leaving room for the environment objects in view
     //(The player is two sprites: the body and the arms holding the weapon. Gore is drawn outside the list: on the
     //ground first, and anything in the air over the sprites)
     if ((2 + @as(usize, consts.MAX_ENEMIES) + consts.MAX_DROPS) * BYTES_PER_DRAW_ITEM > memory.HOT_SET_BUDGET * 3 / 4) @compileError("Character draw list no longer fits the L1 hot set budget");
     for (std.enums.values(state.EnemyKind)) |k| {
-        std.debug.assert(std.mem.eql(u8, @tagName(enemySheet(k)), @tagName(k)));
-        std.debug.assert(std.mem.eql(u8, @tagName(gibSheet(k)), "gibs_" ++ @tagName(k)));
+        if (!std.mem.eql(u8, @tagName(enemySheet(k)), @tagName(k))) @compileError("Sheet's zombie sheets must be in EnemyKind order");
+        if (!std.mem.eql(u8, @tagName(gibSheet(k)), "gibs_" ++ @tagName(k))) @compileError("Sheet's gib sheets must be in EnemyKind order");
     }
-    std.debug.assert(@backingInt(Sheet.gibs_runner) + GORE_SHEET_FILES.len == std.enums.values(Sheet).len);
+    if (@backingInt(Sheet.gibs_runner) + GORE_SHEET_FILES.len != std.enums.values(Sheet).len) @compileError("GORE_SHEET_FILES must cover the last Sheets");
 }
 
 pub const RenderStats = struct {
@@ -125,11 +124,6 @@ pub fn loadAssets(playdate_api: *pd.PlaydateAPI, level_names: []const [:0]const 
     var name_buf: [64]u8 = undefined;
     for (kit_descs.KITS, 0..) |kit, k| {
         for (0..kit.pieces.len) |i| {
-            if (kit.phases == 1) {
-                const name = std.fmt.bufPrintSentinel(&name_buf, "{s}-piece-{d}", .{ kit.name, i }, 0) catch unreachable;
-                assets.kit_pieces[k][i] = @splat(graphics.loadBitmap.?(name, null) orelse @panic("loadAssets: Failed to load a kit piece"));
-                continue;
-            }
             for (0..kit_descs.PHASES) |v| {
                 const name = std.fmt.bufPrintSentinel(&name_buf, "{s}-piece-{d}-p{d}", .{ kit.name, i, v }, 0) catch unreachable;
                 assets.kit_pieces[k][i][v] = graphics.loadBitmap.?(name, null) orelse @panic("loadAssets: Failed to load a kit piece");
@@ -138,18 +132,9 @@ pub fn loadAssets(playdate_api: *pd.PlaydateAPI, level_names: []const [:0]const 
     }
     std.debug.assert(level_names.len <= MAX_LEVELS);
     for (level_names, 0..) |level_name, i| {
-        //A level of a phased kit has ground-<name>-p0..3, any other ground-<name>
-        var err: [*c]const u8 = null;
-        const p0 = std.fmt.bufPrintSentinel(&name_buf, "ground-{s}-p0", .{level_name}, 0) catch unreachable;
-        if (graphics.loadBitmap.?(p0, &err)) |first| {
-            assets.grounds[i][0] = first;
-            for (1..kit_descs.PHASES) |v| {
-                const name = std.fmt.bufPrintSentinel(&name_buf, "ground-{s}-p{d}", .{ level_name, v }, 0) catch unreachable;
-                assets.grounds[i][v] = graphics.loadBitmap.?(name, null) orelse @panic("loadAssets: Failed to load a level's ground");
-            }
-        } else {
-            const name = std.fmt.bufPrintSentinel(&name_buf, "ground-{s}", .{level_name}, 0) catch unreachable;
-            assets.grounds[i] = @splat(graphics.loadBitmap.?(name, null) orelse @panic("loadAssets: Failed to load a level's ground"));
+        for (0..kit_descs.PHASES) |v| {
+            const name = std.fmt.bufPrintSentinel(&name_buf, "ground-{s}-p{d}", .{ level_name, v }, 0) catch unreachable;
+            assets.grounds[i][v] = graphics.loadBitmap.?(name, null) orelse @panic("loadAssets: Failed to load a level's ground");
         }
     }
     assets.tables[@backingInt(Sheet.drop)] = graphics.loadBitmapTable.?("drops", null) orelse @panic("loadAssets: Failed to load drops");
@@ -168,7 +153,7 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     const disp = playdate_api.display.*;
     const graphics = playdate_api.graphics.*;
 
-    const screen = Screen{ .width = disp.getWidth.?(), .height = disp.getHeight.?(), .camera_pos = game.camera_pos + game.camera_shake }; //Shaken for drawing only
+    const screen = Screen{ .width = disp.getWidth.?(), .height = disp.getHeight.?(), .camera_pos = game.camera.drawPos() };
 
     //Inverting the whole screen is the hit flash
     _ = graphics.setDrawMode.?(if (game.player.hit_flash_timer > 0) pd.kDrawModeInverted else pd.kDrawModeCopy);
@@ -281,7 +266,7 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
         graphics.fillRect.?(at[0], at[1], size, size, pd.kColorBlack);
     }
 
-    //---Bullets are comet tracers on top, at gun height. TODO: Interleave bullets
+    //---Bullets are comet tracers on top, at gun height
     const bullets = &game.bullets;
     const gun_height = Vec2i{ 0, consts.GUN_HEIGHT_PX };
     for (bullets.pos[0..bullets.len], bullets.dir[0..bullets.len], bullets.lifetime[0..bullets.len], bullets.barrel[0..bullets.len]) |p, d, l, b| {
@@ -327,8 +312,9 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     }
 
     //The run end screen covers the middle, so it waits for the player to finish falling down
-    if (hud.game_over != null and hud.game_over.?.time >= consts.GAME_OVER_PANEL_DELAY) {
-        hud_mod.drawGameOver(graphics, assets.fonts, game, hud, hud.game_over.?, screen.width, screen.height);
+    const panel: ?Hud.GameOver = if (hud.game_over) |over| (if (over.time >= consts.GAME_OVER_PANEL_DELAY) over else null) else null;
+    if (panel) |over| {
+        hud_mod.drawGameOver(graphics, assets.fonts, game, hud, over, screen.width, screen.height);
     } else {
         hud_mod.drawHud(graphics, assets.fonts, game, hud, screen.width, screen.height);
     }

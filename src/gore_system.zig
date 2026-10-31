@@ -13,8 +13,8 @@ const VARIANTS: u8 = bitmap_descs.SPLAT_VARIANTS;
 const BODY_PARTS = [_]state.GibPart{ .head, .arm, .arm, .leg, .leg, .torso };
 
 comptime {
-    std.debug.assert(std.enums.values(state.GibPart).len == bitmap_descs.GIB_PARTS);
-    std.debug.assert(bitmap_descs.GIB_CELLS.len == std.enums.values(state.EnemyKind).len);
+    if (std.enums.values(state.GibPart).len != bitmap_descs.GIB_PARTS) @compileError("GibPart must match the gib sheets' parts");
+    if (bitmap_descs.GIB_CELLS.len != std.enums.values(state.EnemyKind).len) @compileError("GIB_CELLS needs an entry per EnemyKind");
 }
 
 /// The gore for the hits that landed this frame (see combat_system.applyHits). A wound sprays a few droplets out of the
@@ -86,7 +86,7 @@ fn fadeOut(fade: []f32, dt: f32) void {
 /// fall speed and slows them, until the bounce is too small and they lie still. Heads and torsos leave a medium pool
 /// where they first land
 ///
-fn updateGibs(gibs: *state.Gibs, pools: anytype, grid: *const CollisionGrid, dt: f32) void {
+fn updateGibs(gibs: *state.Gibs, pools: *state.Pools, grid: *const CollisionGrid, dt: f32) void {
     for (0..gibs.len) |i| {
         if (gibs.resting[i] or gibs.fade[i] >= consts.GIB_FADE_TIME) continue;
 
@@ -125,7 +125,7 @@ fn updateGibs(gibs: *state.Gibs, pools: anytype, grid: *const CollisionGrid, dt:
 
 /// Droplets fly under gravity and leave a spatter where they come down (or hit a wall)
 ///
-fn updateDroplets(droplets: *state.Droplets, spatters: anytype, grid: *const CollisionGrid, dt: f32) void {
+fn updateDroplets(droplets: *state.Droplets, spatters: *state.Spatters, grid: *const CollisionGrid, dt: f32) void {
     for (0..droplets.len) |i| {
         if (!droplets.live[i]) continue;
         const to = droplets.pos[i] + droplets.vel[i] * @as(Vec2f, @splat(dt));

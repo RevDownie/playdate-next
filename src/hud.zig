@@ -38,17 +38,17 @@ pub fn loadFonts(playdate_api: *pd.PlaydateAPI) Fonts {
     };
 }
 
-pub const Anchor = enum { left, centre, right };
+const Anchor = enum { left, centre, right };
 
 /// `normal` is black text on white, `loud` is white on black for things the player must notice
-pub const Style = enum { normal, loud };
+const Style = enum { normal, loud };
 
 const BOX_PAD_X = 3;
 const BOX_PAD_Y = 1;
 
 /// Draw `text` on a solid box. `x` is the box's left edge, centre or right edge per `anchor`; `y` its top
 ///
-pub fn drawBoxed(graphics: pd.playdate_graphics, font: *pd.LCDFont, text: []const u8, x: c_int, y: c_int, anchor: Anchor, style: Style) void {
+fn drawBoxed(graphics: pd.playdate_graphics, font: *pd.LCDFont, text: []const u8, x: c_int, y: c_int, anchor: Anchor, style: Style) void {
     graphics.setFont.?(font);
     const w = graphics.getTextWidth.?(font, text.ptr, text.len, pd.kASCIIEncoding, 0);
     const h: c_int = graphics.getFontHeight.?(font);
@@ -65,7 +65,7 @@ pub fn drawBoxed(graphics: pd.playdate_graphics, font: *pd.LCDFont, text: []cons
 
 /// Format into `buffer`, truncating rather than failing if it doesn't fit
 ///
-pub fn format(buffer: []u8, comptime fmt: []const u8, args: anytype) []const u8 {
+fn format(buffer: []u8, comptime fmt: []const u8, args: anytype) []const u8 {
     return std.fmt.bufPrint(buffer, fmt, args) catch buffer;
 }
 

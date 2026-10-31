@@ -27,13 +27,17 @@ pub const ENEMY_MAX_SPEED: f32 = ENEMY_RUNNER_SPEED; //The fastest any enemy mov
 /// pool, from `burst_height` metres above its feet. Health is in bullets of DMG_PER_HIT: the slow kinds take several
 /// times a walker's, so they feel like a wall of meat rather than one more bullet
 pub const EnemyKindDef = struct { health: u8, hit_radius: f32, bump: f32, chunks: u8, droplets: u8, burst_height: f32 };
+comptime {
+    for (ENEMY_KINDS) |k| {
+        if (k.health % DMG_PER_HIT != 0) @compileError("Enemy health must be whole hits of DMG_PER_HIT, or the last hit's damage is wasted");
+    }
+}
 pub const ENEMY_KINDS = [_]EnemyKindDef{
     .{ .health = 25, .hit_radius = CHAR_BULLET_COLL_RADIUS * 0.8, .bump = BUMP_DISTANCE, .chunks = 1, .droplets = 14, .burst_height = 0.1 }, //Runner: one hit
     .{ .health = 50, .hit_radius = CHAR_BULLET_COLL_RADIUS, .bump = BUMP_DISTANCE, .chunks = 2, .droplets = 20, .burst_height = 0.15 }, //Walker: two
     .{ .health = 100, .hit_radius = CHAR_BULLET_COLL_RADIUS, .bump = BUMP_DISTANCE_SMALL, .chunks = 3, .droplets = 22, .burst_height = 0.15 }, //Shambler: four
     .{ .health = 250, .hit_radius = CHAR_BULLET_COLL_RADIUS * 1.5, .bump = 0, .chunks = 6, .droplets = 36, .burst_height = 0.22 }, //Brute: ten
 };
-pub const ENEMY_MIN_HIT_RADIUS: f32 = CHAR_BULLET_COLL_RADIUS * 0.8;
 
 /// Gore. A killed enemy bursts: its gibs (body parts) are thrown along the killing blow, spinning, bounce and skid, then
 /// lie on the ground. Blood droplets spray out with them and leave a spatter where they land; the body leaves a pool
@@ -78,11 +82,10 @@ pub const PLAYER_RING_RADIUS: f32 = CHAR_ENEMY_COLL_RADIUS * 0.8; //Enemies are 
 pub const ENEMY_TURN_RATE: f32 = 6.0; //How quickly enemies steer onto a new heading (fraction of the change per second)
 
 /// Flow field cells settled per frame while it is being rebuilt. Bounds the pathfinding cost of any one frame;
-/// a 30x30 level takes about 3 frames to rebuild
+/// a 16x20 level (320 cells) takes 2 frames to rebuild
 pub const FLOW_FIELD_CELLS_PER_FRAME: u32 = 300;
 
 pub const PLAYER_MAX_HEALTH: u8 = 100;
-pub const ENEMY_MAX_HEALTH: u8 = 50; //A walker's (see ENEMY_KINDS)
 pub const CONTACT_DMG: u8 = 5; //Damage an enemy does to the player when it walks into them
 pub const SCORE_PER_KILL: u64 = 10; //Multiplied by the kill streak (the combo), which resets when the player is hurt
 
@@ -143,8 +146,8 @@ pub const SPAWN_EDGE_BAND: f32 = 1.0; //Enemies drop in on free cells within thi
 /// 2.3m to the sides is 1.38m above and below), which keeps the screen's corners inside it
 pub const SPAWN_MIN_PLAYER_DIST: f32 = 2.3;
 /// Waves drop their packs in a ring just off screen in the wave's direction(s), this far from the player at most,
-/// so they arrive within a few seconds as a crowd the player can see (spawning only at the map's edge, the gun
-/// picked each enemy off as it walked into view and the screen never filled). The map's edge band is the fallback
+/// so they arrive within a few seconds as a crowd the player can see, rather than one at a time for the gun to
+/// pick off as they walk into view. The map's edge band is the fallback
 pub const SPAWN_RING_MAX_DIST: f32 = 3.0; //1.8m above and below, inside the levels' height
 pub const SPAWN_ATTEMPTS: u8 = 6; //Random spawn cells tried per enemy before giving up (they must be reachable and far enough away)
 pub const RNG_SEED: u64 = 42;
@@ -200,9 +203,8 @@ comptime {
 pub const START_AMMO: u8 = 80; //About 7s of a steady crank
 pub const MAX_AMMO: u8 = 200; //Most the player can carry: a large drop tops it up rather than doubling it. Drops are left lying while full
 
-/// Drops appear one at a time on the level's drop points (an object layer in the Tiled map). Small points sit in
-/// the middle of the map, outside the enemies' spawn band; large ones in the rooms at the top and bottom, where
-/// the horde arrives, behind the gaps in the walls. Big rewards mean going where the enemies come from
+/// Drops appear one at a time on the level's drop points (an object layer in the Tiled map), each marked small or
+/// large by the level designer. Large points go somewhere risky to reach, so big rewards mean going out into the horde
 pub const MAX_DROPS: u8 = 5; //Live at once. The timer waits while this many are lying around
 pub const FIRST_DROP_TIME: f32 = 3.0;
 pub const DROP_INTERVAL: f32 = 3.0; //Seconds between drops while there is room for one
@@ -235,8 +237,7 @@ pub const HEALTH_DROP_LARGE: u8 = 35;
 /// right up against the player can still be hit
 pub const GUN_BARRELS: u8 = 6; //One shot per FIRE_ANGLE_DELTA of crank, so the barrels turn twice per crank revolution
 pub const GUN_HEIGHT_PX: i32 = 12; //Height of the barrels above the player's feet (GUN_Z in character_sprites.py, on screen)
-pub const MUZZLE_FORWARD: f32 = 0.14; //Metres ahead of the player the barrels end
-pub const MUZZLE_SIDE: f32 = 0; //Held two-handed in the middle of the body, so mirrored facings need no side swap
+pub const MUZZLE_FORWARD: f32 = 0.14; //Metres ahead of the player the barrels end (held in the middle of the body, so mirrored facings need no side swap)
 pub const BARREL_RADIUS: f32 = 0.013; //Metres from the gun's axis to each barrel
 pub const MUZZLE_CONVERGE_DIST: f32 = 1.5; //The drawn muzzle offset fades out over this many metres so tracers meet the aim line
 pub const TRACER_LENGTH: f32 = 0.3; //Metres of trail drawn behind each bullet (longer than a 50 FPS step so the stream looks unbroken)

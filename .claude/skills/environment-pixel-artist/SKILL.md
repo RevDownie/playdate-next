@@ -49,8 +49,8 @@ Think in bytes. A 1-bit image is 1 bit per pixel plus, if it has transparency, a
 - **Cache.** Per-frame draw data stays tiny (see the renderer's 8-byte `DrawItem`: position, frame index, sheet enum, flip). Art decisions that add sheets or frames should not grow that record.
 
 ## Workflow in this repo
-1. Environment art is code: add or change pieces, ground art, decals or the outside in `env_kits.py`, drawing in local coordinates (the footprint covers x 0..fw*57-1, y -fh*27..-1; the anchor is the bottom-left cell's centre). Check them with `python env_kits.py images --preview logs/kits.png`.
-2. Run `python convert_tilemaps.py --preview logs` to rebake the levels' ground and check `logs/level-<name>.png` (a full `convert_raw.py <imagemagick path>` also does both, but re-renders the characters for minutes), then `zig fmt src`.
+1. Environment art is code: add or change pieces, ground art, decals or the outside in `env_kits.py`, drawing in local coordinates (the footprint covers x 0..fw*57-1, y -fh*27..-1; the anchor is the bottom-left cell's centre). Check them with `python tools/env_kits.py images --preview logs/kits.png`.
+2. Run `python tools/convert_tilemaps.py --preview logs` to rebake the levels' ground and check `logs/level-<name>.png` (a full `convert_raw.py <imagemagick path>` also does both, but re-renders the characters for minutes), then `zig fmt src`.
 3. Piece sizes and anchors are generated into `src/kit_descs.zig`; the renderer reads them, so nothing there changes by hand. Keep tall pieces off the bottom border row and out of the bottom margin.
 4. Verify in the simulator with `tools/sim.ps1` and read `logs/screenshot.png`: check readability at 1:1 (the device screen is small; zoomed-in previews lie), that obstacles read against the ground, depth sorting with the player behind and in front, and no dither seams at tile joins. Contrast and flicker must still be checked on device (the LCD is reflective and has ghosting).
 5. Report: sprite count, cell size, estimated bytes per table, and what was reused through flips.

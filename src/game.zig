@@ -8,7 +8,6 @@ const flow_field = @import("flow_field.zig");
 const player_move_sys = @import("player_movement_system.zig");
 const enemy_spawn_sys = @import("enemy_spawn_system.zig");
 const enemy_move_sys = @import("enemy_movement_system.zig");
-const enemy_separation_sys = @import("enemy_separation_system.zig");
 const bullet_sys = @import("bullet_system.zig");
 const combat_sys = @import("combat_system.zig");
 const auto_target_sys = @import("auto_targetting_system.zig");
@@ -31,7 +30,7 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     const grid = &level.collision_grid;
     game.run_time += dt;
 
-    //1. Waves of enemies spawn in from the edges of the map
+    //1. Waves of enemies drop in just off screen
     enemy_spawn_sys.update(&game.spawner, &game.enemies, game.rng.random(), game.player.pos, &level.spawn_cells, field, grid, dt);
 
     //Ammo and health drops on the level's drop points, faster and bigger between waves
@@ -47,7 +46,7 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     game.drops.removeDead();
     flow_field.update(field, grid, grid.cellIndex(game.player.pos), consts.FLOW_FIELD_CELLS_PER_FRAME);
     enemy_move_sys.update(&game.enemies, field, grid, game.player.pos, dt);
-    enemy_separation_sys.update(&game.enemies, game.player.pos, field, grid, frame_arena.alloc(Vec2f, game.enemies.len));
+    enemy_move_sys.separate(&game.enemies, game.player.pos, field, grid, frame_arena.alloc(Vec2f, game.enemies.len));
 
     //3. Move projectiles (walls stop them) and resolve bullet and melee hits on enemies (kills are flagged then compacted
     //out). Wounds spray blood and kills burst into gore
@@ -71,19 +70,19 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
 
     //5. Camera, trailing the player and leaning towards last frame's aim. Before targeting, as the gun only aims at
     //what is on screen
-    camera_sys.update(&game.camera_pos, &game.camera_lead, &game.camera_lead_vel, game.player.pos, game.player.vel, game.player.facing_dir, dt);
+    camera_sys.update(&game.camera, game.player.pos, game.player.vel, game.player.facing_dir, dt);
 
     //6. Now that the enemy positions are final, aim at the best target the player can see and fire.
     //With nothing in sight aim the way the player is moving, or keep the last aim while standing still
     const move_dir = maths.normaliseSafe(game.player.vel, @splat(0));
-    const target = auto_target_sys.findTarget(game.player.pos, move_dir, game.player.facing_dir, game.camera_pos, game.enemies.positions(), game.enemies.health[0..game.enemies.len], game.enemies.kind[0..game.enemies.len], grid, frame_arena.alloc(f32, game.enemies.len));
+    const target = auto_target_sys.findTarget(game.player.pos, move_dir, game.player.facing_dir, game.camera.pos, game.enemies.positions(), game.enemies.health[0..game.enemies.len], game.enemies.kind[0..game.enemies.len], grid, frame_arena.alloc(f32, game.enemies.len));
     const aim_dir = if (target) |t| t.dir else maths.normaliseSafe(move_dir, game.player.facing_dir);
-    camera_sys.settleShake(&game.camera_shake, dt);
+    camera_sys.settleShake(&game.camera, dt);
     if (firing_sys.update(&game.trigger, input, dt)) {
-        const ammo = game.bullets.ammo;
-        bullet_sys.fire(&game.bullets, game.player.pos, aim_dir, game.rng.random().float(f32) * 2 - 1);
         //A shot that went off kicks the view (from the gore rng: visual only)
-        if (game.bullets.ammo < ammo) camera_sys.kick(&game.camera_shake, aim_dir, game.gore_rng.random().float(f32) * 2 - 1);
+        if (bullet_sys.fire(&game.bullets, game.player.pos, aim_dir, game.rng.random().float(f32) * 2 - 1)) {
+            camera_sys.kick(&game.camera, aim_dir, game.gore_rng.random().float(f32) * 2 - 1);
+        }
     }
     game.player.facing_dir = aim_dir; //Player faces the way they are firing
     game.player.target_pos = if (target) |t| t.pos else null;
