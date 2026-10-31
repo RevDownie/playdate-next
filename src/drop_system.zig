@@ -1,3 +1,5 @@
+/// Module responsible for calculating health and ammo drop rates and locations, as well as detecting pick-ups
+///
 const std = @import("std");
 const maths = @import("maths.zig");
 const consts = @import("tweak_constants.zig");
@@ -73,9 +75,8 @@ fn ammoChance(health: u8, ammo: u8) f32 {
     return std.math.clamp(0.5 + 0.5 * (ammo_short - health_short), consts.DROP_AMMO_CHANCE_MIN, consts.DROP_AMMO_CHANCE_MAX);
 }
 
-/// The player walks over drops to pick them up. Ammo tops up the gun and reloads (the gun can't fire until the
-/// reload is done; a large drop takes longer), health heals at once. A drop the player has no room for (full
-/// ammo or health) is left lying. Collected drops are flagged for `Drops.removeDead`
+/// The player walks over drops to pick them up. Ammo tops up the gun and health heals, both at once. A drop the
+/// player has no room for (full ammo or health) is left lying. Collected drops are flagged for `Drops.removeDead`
 ///
 pub fn collect(drops: *Drops, player: *state.Player, bullets: *state.Bullets) void {
     for (drops.pos[0..drops.len], drops.kind[0..drops.len], drops.lifetime[0..drops.len]) |p, kind, *l| {
@@ -86,9 +87,7 @@ pub fn collect(drops: *Drops, player: *state.Player, bullets: *state.Bullets) vo
             .ammo_small, .ammo_large => {
                 if (bullets.ammo >= consts.MAX_AMMO) continue;
                 const amount = if (kind == .ammo_large) consts.AMMO_DROP_LARGE else consts.AMMO_DROP_SMALL;
-                const reload_time: f32 = if (kind == .ammo_large) consts.RELOAD_TIME_LARGE else consts.RELOAD_TIME_SMALL;
                 bullets.ammo = @min(@as(u16, bullets.ammo) + amount, consts.MAX_AMMO);
-                bullets.reload_timer = @max(bullets.reload_timer, reload_time);
             },
             .health_small, .health_large => {
                 if (player.health >= consts.PLAYER_MAX_HEALTH) continue;
@@ -144,7 +143,7 @@ test "[drop_system] the kind leans towards what the player is short of" {
     try std.testing.expect(ammoChance(consts.PLAYER_MAX_HEALTH, consts.START_AMMO) == 0.5);
 }
 
-test "[drop_system] picking up ammo reloads before firing, health heals, and full drops are left" {
+test "[drop_system] picking up ammo tops up the gun, health heals, and full drops are left" {
     var drops = Drops{};
     var player = state.Player{};
     var bullets = state.Bullets{};
@@ -156,7 +155,6 @@ test "[drop_system] picking up ammo reloads before firing, health heals, and ful
 
     collect(&drops, &player, &bullets);
     try std.testing.expect(bullets.ammo == consts.AMMO_DROP_LARGE);
-    try std.testing.expect(bullets.reload_timer == consts.RELOAD_TIME_LARGE);
     try std.testing.expect(drops.lifetime[0] <= 0);
     try std.testing.expect(drops.lifetime[1] > 0); //Health was full: left for later
     try std.testing.expect(drops.lifetime[2] > 0);

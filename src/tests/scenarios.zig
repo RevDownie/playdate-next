@@ -49,6 +49,13 @@ const TestLevel = struct {
         self.field = FlowField.init(&self.level_arena, &self.level.collision_grid, self.level.collision_grid.cellIndex(@splat(0)));
     }
 
+    /// A fresh run on this level, started the way the game starts one
+    fn newRun(self: *const TestLevel) state.GameState {
+        var game = state.GameState{};
+        game_mod.beginRun(&game, self.level.start_pos);
+        return game;
+    }
+
     /// Stop the waves and drop enemies on random reachable spawn cells until the pool is full. The waves only
     /// reach a full horde late in a run, which is too slow (and too random) for a test that needs one now
     fn fillHorde(self: *TestLevel, game: *state.GameState, rand: std.Random) void {
@@ -71,7 +78,7 @@ test "[scenario] worst case: max enemies and bullets fit the frame arena and poo
     var t: TestLevel = .{};
     t.init(true);
     const grid = &t.level.collision_grid;
-    var game = state.GameState{};
+    var game = t.newRun();
 
     //Keep the horde topped up to the max and spin the crank flat out with endless ammo. The player walks a
     //loop the whole time so the flow field keeps rebuilding
@@ -96,7 +103,7 @@ test "[scenario] worst case: max enemies and bullets fit the frame arena and poo
 test "[scenario] a full horde surrounds the player without stacking" {
     var t: TestLevel = .{};
     t.init(true);
-    var game = state.GameState{};
+    var game = t.newRun();
 
     //No firing and no dying: a full horde piles in on the player for a while
     var prng = std.Random.DefaultPrng.init(7);
@@ -130,7 +137,7 @@ test "[scenario] a full horde surrounds the player without stacking" {
 test "[scenario] an enemy behind a wall paths around it and reaches the player" {
     var t: TestLevel = .{};
     t.init(true);
-    var game = state.GameState{};
+    var game = t.newRun();
     game.spawner.timer = std.math.inf(f32); //Just the one enemy
     game.enemies.add(.{ 4, 0 }); //Behind the vertical wall at x = 2m
 
@@ -147,7 +154,7 @@ test "[scenario] an enemy behind a wall paths around it and reaches the player" 
 test "[scenario] the player dies if left alone" {
     var t: TestLevel = .{};
     t.init(false);
-    var game = state.GameState{};
+    var game = t.newRun();
 
     var result = game_mod.TickResult.playing;
     var frames: usize = 0;
@@ -158,19 +165,19 @@ test "[scenario] the player dies if left alone" {
 }
 
 test "[scenario] balance: a steadily cranked gun holds the horde off for a while, but is overrun in the end" {
-    //A player standing still in the open turning the crank once a second, at the device's 50 FPS, with ammo
+    //A player standing still in the open turning the crank once a second, at TARGET_FPS, with ammo
     //kept topped up (this measures the gun against the waves; ammo comes from drops, see the drop scenarios).
     //With the current tuning they are overrun in wave 4 after ~100s and ~350 kills. The bounds are wide so tuning
     //can move, but a change that makes the gun hopeless or the player unbeatable fails here
-    const dt: f32 = 1.0 / 50.0;
+    const dt: f32 = consts.TARGET_FRAME_DT;
     var t: TestLevel = .{};
     t.init(true);
-    var game = state.GameState{};
+    var game = t.newRun();
 
     var result = game_mod.TickResult.playing;
     var frames: usize = 0;
     var kills: u32 = 0;
-    while (result == .playing and frames < 50 * 300) : (frames += 1) {
+    while (result == .playing and frames < consts.TARGET_FPS * 300) : (frames += 1) {
         const streak = game.player.kill_streak;
         game.bullets.ammo = consts.MAX_AMMO;
         t.frame_arena.reset();
@@ -187,7 +194,7 @@ test "[scenario] balance: a steadily cranked gun holds the horde off for a while
 test "[scenario] an enemy right up against the player can be shot" {
     var t: TestLevel = .{};
     t.init(false);
-    var game = state.GameState{};
+    var game = t.newRun();
     game.spawner.timer = std.math.inf(f32);
     game.enemies.add(.{ consts.PLAYER_RING_RADIUS, 0 });
 
@@ -201,7 +208,7 @@ test "[scenario] an enemy right up against the player can be shot" {
 test "[scenario] bullets can't go through walls" {
     var t: TestLevel = .{};
     t.init(true);
-    var game = state.GameState{};
+    var game = t.newRun();
     game.spawner.timer = std.math.inf(f32);
     game.enemies.add(.{ 4, 0 }); //Behind the vertical wall at x = 2m
     //It is off screen and behind the wall so the gun keeps its aim: point that at the wall
@@ -226,7 +233,7 @@ test "[scenario] bullets can't go through walls" {
 test "[scenario] the gun shoots the enemy it can see, not a closer one behind a wall" {
     var t: TestLevel = .{};
     t.init(true);
-    var game = state.GameState{};
+    var game = t.newRun();
     game.spawner.timer = std.math.inf(f32);
     game.player.pos = .{ 1, 0 };
     game.enemies.add(.{ 2.5, 0 }); //1.5m away, on screen but behind the vertical wall at x = 2m
@@ -249,7 +256,7 @@ test "[scenario] the gun shoots the enemy it can see, not a closer one behind a 
 test "[scenario] with nothing in sight the gun aims the way the player moves, or keeps its aim" {
     var t: TestLevel = .{};
     t.init(false);
-    var game = state.GameState{};
+    var game = t.newRun();
     game.spawner.timer = std.math.inf(f32);
     game.player.facing_dir = .{ 0, 1 };
 
@@ -270,14 +277,14 @@ const TEST_DROP_SIZES = [_]level_loader.DropSize{ .small, .small, .small, .small
 /// Crank steadily for `secs` with no enemies, either standing still or walking to the nearest ammo drop.
 /// Returns the shots fired
 fn shotsFiredWithDrops(walk_to_drops: bool, secs: f32) !u32 {
-    const dt: f32 = 1.0 / 50.0;
+    const dt: f32 = consts.TARGET_FRAME_DT;
     var t: TestLevel = .{};
     t.init(false);
     var drop_cells: [TEST_DROP_POSITIONS.len]u16 = undefined;
     for (TEST_DROP_POSITIONS, &drop_cells) |p, *c| c.* = t.level.collision_grid.cellIndex(p).?;
     t.level.drop_cells = &drop_cells;
     t.level.drop_sizes = &TEST_DROP_SIZES;
-    var game = state.GameState{};
+    var game = t.newRun();
     game.spawner.timer = std.math.inf(f32);
 
     var shots: u32 = 0;
@@ -307,7 +314,7 @@ fn shotsFiredWithDrops(walk_to_drops: bool, secs: f32) !u32 {
     return shots;
 }
 
-test "[scenario] the gun never reloads by itself, and a player who goes out for ammo drops keeps firing" {
+test "[scenario] the gun never refills by itself, and a player who goes out for ammo drops keeps firing" {
     //Standing still it runs dry
     const standing = try shotsFiredWithDrops(false, 60);
     try std.testing.expect(standing == consts.START_AMMO);
@@ -319,18 +326,18 @@ test "[scenario] the gun never reloads by itself, and a player who goes out for 
 /// Survive the horde in the open test level, cranking steadily the whole time, either standing still or
 /// walking to the nearest useful drop (ammo, or health once hurt). Returns the seconds survived
 fn secondsSurvivedWithDrops(walk_to_drops: bool) f32 {
-    const dt: f32 = 1.0 / 50.0;
+    const dt: f32 = consts.TARGET_FRAME_DT;
     var t: TestLevel = .{};
     t.init(false);
     var drop_cells: [TEST_DROP_POSITIONS.len]u16 = undefined;
     for (TEST_DROP_POSITIONS, &drop_cells) |p, *c| c.* = t.level.collision_grid.cellIndex(p).?;
     t.level.drop_cells = &drop_cells;
     t.level.drop_sizes = &TEST_DROP_SIZES;
-    var game = state.GameState{};
+    var game = t.newRun();
 
     var frames: usize = 0;
     var result = game_mod.TickResult.playing;
-    while (result == .playing and frames < 50 * 600) : (frames += 1) {
+    while (result == .playing and frames < consts.TARGET_FPS * 600) : (frames += 1) {
         var input = state.Input{ .crank_delta = 360.0 * dt };
         if (walk_to_drops) {
             const hurt = game.player.health < consts.PLAYER_MAX_HEALTH - consts.HEALTH_DROP_SMALL;
@@ -364,7 +371,7 @@ test "[scenario] under the horde, a player who goes out for drops outlives one w
 test "[scenario] out of ammo, the player's melee fights off a few enemies" {
     var t: TestLevel = .{};
     t.init(false);
-    var game = state.GameState{};
+    var game = t.newRun();
     game.spawner.timer = std.math.inf(f32);
     game.bullets.ammo = 0;
     game.enemies.add(.{ 0.6, 0 });

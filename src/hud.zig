@@ -1,5 +1,8 @@
+/// Responsible for drawing the overlay UI
+///
 const std = @import("std");
 const pd = @import("playdate.zig").api;
+const build_options = @import("build_options");
 const consts = @import("tweak_constants.zig");
 const state = @import("game_state.zig");
 const GameState = state.GameState;
@@ -12,13 +15,7 @@ const MapSide = @import("level_loader.zig").MapSide;
 ///
 pub const Hud = struct {
     best_score: u64,
-    game_over: ?GameOver = null, //Set while the run end screen is up
-
-    pub const GameOver = struct {
-        new_best: bool, //The run that ended beat the saved best
-        can_restart: bool, //Past GAME_OVER_INPUT_DELAY, so A/B starts the next run
-        time: f32 = 0, //Seconds since the run ended (the player falls down)
-    };
+    game_over: ?state.RunEnd = null, //Set while the run end screen is up
 };
 
 /// System fonts, loaded once up front
@@ -78,7 +75,7 @@ pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameSt
     const font = fonts.hud;
     const row_h: c_int = graphics.getFontHeight.?(font) + BOX_PAD_Y * 2 + 1;
 
-    //Top left (after the FPS counter): the wave, or the countdown to the next one
+    //Top left: the wave, or the countdown to the next one
     const spawner = &game.spawner;
     const wave_text = switch (spawner.phase) {
         .wave => if (spawner.isHolding())
@@ -87,7 +84,7 @@ pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameSt
             format(&buf, "Wave {d}  Clear!", .{spawner.wave}),
         .lull => format(&buf, "Wave {d} in {d}", .{ spawner.wave + 1, secondsLeft(spawner.timer) }),
     };
-    drawBoxed(graphics, font, wave_text, WAVE_LABEL_X, BOX_PAD_Y, .left, .normal);
+    drawBoxed(graphics, font, wave_text, BOX_PAD_X, BOX_PAD_Y, .left, .normal);
     drawWaveBanner(graphics, fonts, spawner, width);
 
     //Bottom left: health, next to the ammo so the two resources read together
@@ -108,9 +105,7 @@ pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameSt
     }
 
     //Bottom right: ammo (health is bottom left). Full says so, as ammo drops are then left lying
-    if (game.bullets.isReloading()) {
-        drawBoxed(graphics, font, format(&buf, "Reloading {d}", .{game.bullets.ammo}), right, bottom_y, .right, .normal);
-    } else if (game.bullets.ammo == 0) {
+    if (game.bullets.ammo == 0) {
         drawBoxed(graphics, font, "OUT OF AMMO", right, bottom_y, .right, .loud);
     } else if (game.bullets.ammo >= consts.MAX_AMMO) {
         drawBoxed(graphics, font, format(&buf, "Ammo {d} MAX", .{game.bullets.ammo}), right, bottom_y, .right, .normal);
@@ -118,7 +113,18 @@ pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameSt
         drawBoxed(graphics, font, format(&buf, "Ammo {d}", .{game.bullets.ammo}), right, bottom_y, .right, .normal);
     }
 
-    if (game.invincible) drawBoxed(graphics, font, "INVINCIBLE", WAVE_LABEL_X, BOX_PAD_Y + row_h, .left, .loud); //Debug, so screenshots don't mislead
+    if (game.invincible) drawBoxed(graphics, font, "INVINCIBLE", BOX_PAD_X, BOX_PAD_Y + row_h, .left, .loud); //Debug, so screenshots don't mislead
+}
+
+const FPS_W = 15; //The SDK's counter at two digits
+const FPS_H = 12;
+
+/// The SDK's FPS counter, if the build has it (`zig build -Dfps=false` leaves it out). Bottom centre, between health
+/// and ammo, where nothing else in the HUD goes, so leaving it out moves nothing. Drawn over the run end screen too
+///
+pub fn drawFps(sys: pd.playdate_sys, width: c_int, height: c_int) void {
+    if (!build_options.fps) return;
+    sys.drawFPS.?(@divTrunc(width - FPS_W, 2), height - FPS_H);
 }
 
 /// A combo message in the world, centred on `x` with its bottom at `y`
@@ -163,7 +169,6 @@ pub fn drawDropMarker(graphics: pd.playdate_graphics, kind: state.DropKind, x: c
     graphics.fillTriangle.?(p1[0], p1[1], p2[0], p2[1], p3[0], p3[1], pd.kColorBlack);
 }
 
-const WAVE_LABEL_X = 34; //Clear of the FPS counter
 const BANNER_Y = 140; //Below the player (in the middle of the screen), clear of the HUD at the top and bottom
 
 /// Whole seconds left on a countdown, rounded up so it never shows 0 while still counting
@@ -220,7 +225,7 @@ const PANEL_LINES = 6; //Below the title, including the "go again" prompt
 
 /// The run end screen over the frozen last frame: how the run went, the best, and how to go again
 ///
-pub fn drawGameOver(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameState, hud: Hud, over: Hud.GameOver, width: c_int, height: c_int) void {
+pub fn drawGameOver(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameState, hud: Hud, over: state.RunEnd, width: c_int, height: c_int) void {
     var buf: [48]u8 = undefined;
     graphics.fillRect.?(0, 0, width, height, @intFromPtr(&PATTERN_DIM));
 
@@ -254,5 +259,5 @@ pub fn drawGameOver(graphics: pd.playdate_graphics, fonts: Fonts, game: *const G
         drawBoxed(graphics, fonts.small, format(&buf, "Best {d}", .{hud.best_score}), cx, y, .centre, .normal);
     }
     y += small_h + 4;
-    if (over.can_restart) drawBoxed(graphics, fonts.small, "Press A to go again", cx, y, .centre, .loud);
+    if (over.canRestart()) drawBoxed(graphics, fonts.small, "Press A to go again", cx, y, .centre, .loud);
 }

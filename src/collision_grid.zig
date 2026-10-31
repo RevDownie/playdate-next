@@ -1,6 +1,9 @@
+/// Holds the collision tile locations for the level
+///
 const std = @import("std");
 const consts = @import("tweak_constants.zig");
 const maths = @import("maths.zig");
+const kit_descs = @import("kit_descs.zig");
 
 const Vec2f = @Vector(2, f32);
 
@@ -84,7 +87,8 @@ test "[collision_grid] occupied cells and out of bounds" {
 
 test "[collision_grid] cell index and centre round trip with non-square cells and odd width" {
     var cells: [5 * 4]bool = @splat(false);
-    const grid = CollisionGrid{ .cells = &cells, .width = 5, .height = 4, .cell_width = 57, .cell_height = 27 };
+    const grid = CollisionGrid{ .cells = &cells, .width = 5, .height = 4, .cell_width = kit_descs.CELL_W, .cell_height = kit_descs.CELL_H };
+    const cell_m = Vec2f{ @floatFromInt(kit_descs.CELL_W), @floatFromInt(kit_descs.CELL_H) } / @as(Vec2f, @splat(consts.METRES_TO_PIXELS));
 
     for (0..cells.len) |i| {
         const idx: u16 = @intCast(i);
@@ -92,16 +96,17 @@ test "[collision_grid] cell index and centre round trip with non-square cells an
     }
     //Row 0 is the top of the map, so moving one cell up in the world is one row back
     const centre = grid.cellIndex(Vec2f{ 0, 0 }).?;
-    try std.testing.expect(grid.cellIndex(Vec2f{ 0, 27.0 / 128.0 }).? == centre - 5);
-    try std.testing.expect(grid.cellIndex(Vec2f{ 57.0 / 128.0, 0 }).? == centre + 1);
+    try std.testing.expect(grid.cellIndex(Vec2f{ 0, cell_m[1] }).? == centre - 5);
+    try std.testing.expect(grid.cellIndex(Vec2f{ cell_m[0], 0 }).? == centre + 1);
     try std.testing.expect(grid.cellIndex(Vec2f{ 100, 0 }) == null);
 }
 
 test "[collision_grid] line of sight is blocked by walls, with the levels' cell size" {
-    //30x30 grid of the levels' 57x27px cells with a wall down column 17 (x = 0.67m to 1.11m)
+    //30x30 grid with a wall down the column two right of the centre (x = 0.67m to 1.11m with the levels' cells)
     var cells: [30 * 30]bool = @splat(false);
-    for (0..30) |row| cells[row * 30 + 17] = true;
-    const grid = CollisionGrid{ .cells = &cells, .width = 30, .height = 30, .cell_width = 57, .cell_height = 27 };
+    for (0..30) |row| cells[row * 30 + 30 / 2 + 2] = true;
+    const grid = CollisionGrid{ .cells = &cells, .width = 30, .height = 30, .cell_width = kit_descs.CELL_W, .cell_height = kit_descs.CELL_H };
+    try std.testing.expect(grid.isOccupied(Vec2f{ 0.9, 0 }) and !grid.isOccupied(Vec2f{ 0.6, 0 }) and !grid.isOccupied(Vec2f{ 1.3, 0 }));
 
     try std.testing.expect(!grid.isSegmentClear(Vec2f{ 0, 0 }, Vec2f{ 1.3, 0 })); //Through the wall
     try std.testing.expect(!grid.isSegmentClear(Vec2f{ 0, 0 }, Vec2f{ 1.3, 0.9 })); //Diagonally through it

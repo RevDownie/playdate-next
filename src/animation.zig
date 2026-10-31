@@ -1,3 +1,5 @@
+/// This module maps the current game state to the sprite frames for heroes, enemies, drops, etc.
+///
 const std = @import("std");
 const maths = @import("maths.zig");
 const consts = @import("tweak_constants.zig");
@@ -5,7 +7,6 @@ const bitmap_descs = @import("bitmap_descs.zig");
 
 const Vec2f = @Vector(2, f32);
 
-/// Two bytes so the per frame draw lists stay small
 pub const BitmapFrame = struct { index: u8, flipped: bool };
 
 // Character sheets (see character_sprites.py) are drawn every `step` degrees from 0 (facing the screen, world -y)

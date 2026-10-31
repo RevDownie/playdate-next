@@ -1,8 +1,11 @@
+/// Responsible for spawning and managing the lifespans of the gibs and blood
+///
 const std = @import("std");
 const consts = @import("tweak_constants.zig");
 const bitmap_descs = @import("bitmap_descs.zig");
 const state = @import("game_state.zig");
 const CollisionGrid = @import("collision_grid.zig").CollisionGrid;
+const kit_descs = @import("kit_descs.zig");
 
 const Vec2f = @Vector(2, f32);
 
@@ -176,7 +179,7 @@ test "[gore_system] gibs bounce and come to rest, droplets land as spatters, and
     var prng = std.Random.DefaultPrng.init(3);
     var gore = state.Gore{};
     spawn(&gore, &.{kill(.brute)}, prng.random());
-    const dt: f32 = 1.0 / 50.0;
+    const dt: f32 = consts.TARGET_FRAME_DT;
     var t: f32 = 0;
     while (t < 1.5) : (t += dt) {
         update(&gore, &OPEN_GRID, dt);
@@ -198,25 +201,41 @@ test "[gore_system] past a ring's limit the oldest gibs fade out and go" {
     var gore = state.Gore{};
     const kept = state.Gibs.capacity - consts.GIB_FADE_SLOTS;
     for (0..kept + 2) |_| gore.gibs.add(@splat(0), 0, @splat(0), 0, 0, .walker, .arm);
-    const dt: f32 = 1.0 / 50.0;
+    const dt: f32 = consts.TARGET_FRAME_DT;
     var t: f32 = 0;
     while (t < consts.GIB_FADE_TIME + dt) : (t += dt) update(&gore, &OPEN_GRID, dt);
     try std.testing.expect(gore.gibs.liveCount() == kept); //Gibs 0 and 1 have gone
     try std.testing.expect(gore.gibs.fade[0] >= consts.GIB_FADE_TIME and gore.gibs.fade[2] == state.SOLID);
 }
 
-test "[gore_system] walls stop gibs and droplets, even on the longest frame" {
-    //A one cell thick wall in column 16 (x = 0.5m)
-    var cells: [30 * 30]bool = @splat(false);
-    for (0..30) |row| cells[row * 30 + 16] = true;
-    const grid = CollisionGrid{ .cells = &cells, .width = 30, .height = 30, .cell_width = 64, .cell_height = 64 };
-    var gore = state.Gore{};
-    gore.gibs.add(Vec2f{ 0.4, 0 }, 0.2, Vec2f{ consts.GIB_SPEED_MAX, 0 }, 2, 0, .walker, .head);
-    gore.droplets.add(Vec2f{ 0.4, 0 }, 0.2, Vec2f{ consts.DROPLET_SPEED_MAX, 0 }, 2);
-    var t: f32 = 0;
-    while (t < 2) : (t += consts.MAX_FRAME_DT) {
-        update(&gore, &grid, consts.MAX_FRAME_DT);
-        try std.testing.expect(gore.gibs.pos[0][0] < 0.5);
+test "[gore_system] walls one level cell thick stop gibs and droplets, even on the longest frame" {
+    //The levels' cells, with a wall down the column two right of the origin and along the row two above it. Each
+    //is thrown at full speed from just short of a wall: across a row (CELL_H, the thin way through) a MAX_FRAME_DT
+    //step would land beyond the wall
+    const n = 30;
+    const centre: u16 = (n / 2) * n + n / 2;
+    var cells: [n * n]bool = @splat(false);
+    for (0..n) |i| {
+        cells[i * n + n / 2 + 2] = true;
+        cells[(n / 2 - 2) * n + i] = true;
     }
-    try std.testing.expect(gore.spatters.len == 1 and gore.spatters.pos[0][0] < 0.5);
+    const grid = CollisionGrid{ .cells = &cells, .width = n, .height = n, .cell_width = kit_descs.CELL_W, .cell_height = kit_descs.CELL_H };
+    const right_face = (grid.cellCentre(centre + 1)[0] + grid.cellCentre(centre + 2)[0]) / 2;
+    const top_face = (grid.cellCentre(centre - n)[1] + grid.cellCentre(centre - 2 * n)[1]) / 2;
+
+    for ([_]Vec2f{ .{ 1, 0 }, .{ 0, 1 } }, [_]f32{ right_face, top_face }) |dir, face| {
+        const start = dir * @as(Vec2f, @splat(face - 0.02));
+        var gore = state.Gore{};
+        gore.gibs.add(start, 0.2, dir * @as(Vec2f, @splat(consts.GIB_SPEED_MAX)), 2, 0, .walker, .head);
+        gore.droplets.add(start, 0.2, dir * @as(Vec2f, @splat(consts.DROPLET_SPEED_MAX)), 2);
+        var t: f32 = 0;
+        while (t < 2) : (t += consts.MAX_FRAME_DT) {
+            update(&gore, &grid, consts.MAX_FRAME_DT);
+            const p = gore.gibs.pos[0];
+            try std.testing.expect(p[0] < right_face and p[1] < top_face);
+        }
+        try std.testing.expect(gore.gibs.vel[0][0] * dir[0] + gore.gibs.vel[0][1] * dir[1] <= 0); //Knocked back by the wall
+        const s = gore.spatters.pos[0];
+        try std.testing.expect(gore.spatters.len == 1 and s[0] < right_face and s[1] < top_face);
+    }
 }

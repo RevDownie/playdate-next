@@ -50,6 +50,7 @@ pub const Error = error{
     InvalidKit,
     TruncatedCells,
     StartOnBlockedCell,
+    WrongCellSize,
 };
 
 const HEADER_SIZE = 8;
@@ -72,6 +73,8 @@ pub fn parse(bytes: []const u8, arena: *Arena) Error!Level {
     const kit = bytes[4];
     if (grid_width == 0 or grid_height == 0 or cell_width == 0 or cell_height == 0) return Error.EmptyGrid;
     if (kit >= kit_descs.KITS.len) return Error.InvalidKit;
+    //The pieces and the baked floor are drawn for this cell size only
+    if (cell_width != kit_descs.CELL_W or cell_height != kit_descs.CELL_H) return Error.WrongCellSize;
 
     const num_drops: usize = bytes[5];
     const start_cell = std.mem.readInt(u16, bytes[6..8], .little);
@@ -221,27 +224,29 @@ test "[level_loader] spawn cells are the free cells around the edge" {
 test "[level_loader] parse objects, footprints and collision" {
     var buffer: [1024]u8 = undefined;
     var arena = Arena.init("level", &buffer);
-    //4x4 grid of 128px cells, kit 0, the player starting in cell 6, a large drop point in cell 5. A mirrored 2x2
+    //4x4 grid of the levels' cells, kit 0, the player starting in cell 6, a large drop point in cell 5. A mirrored 2x2
     //piece placed on cell 12 (column 0 of the bottom row: its footprint's bottom-left) whose footprint, extending
     //right and up, blocks 8, 9, 12 and 13
-    const bytes = [_]u8{ 4, 4, 128, 128, 0, 1, 6, 0, 5, 0, 1, 0b0000_0000, 0b0011_0011, 12, 0, 1 | PIECE_FLIPPED };
+    const bytes = [_]u8{ 4, 4, kit_descs.CELL_W, kit_descs.CELL_H, 0, 1, 6, 0, 5, 0, 1, 0b0000_0000, 0b0011_0011, 12, 0, 1 | PIECE_FLIPPED };
     const level = try parse(&bytes, &arena);
+    const cell_m = Vec2f{ @floatFromInt(kit_descs.CELL_W), @floatFromInt(kit_descs.CELL_H) } / @as(Vec2f, @splat(consts.METRES_TO_PIXELS));
 
     try std.testing.expect(level.kit == 0);
-    try std.testing.expect(level.start_pos[0] == 0 and level.start_pos[1] == 1); //Cell 6: column 2, row 1
+    try std.testing.expect(level.start_pos[0] == 0 and level.start_pos[1] == cell_m[1]); //Cell 6: column 2, row 1
     try std.testing.expect(level.obj_world_positions.len == 1);
     try std.testing.expect(level.obj_pieces[0] == 1 | PIECE_FLIPPED);
     //Its position is its anchor cell's centre: column 0, row 3 of a 4x4 grid centred on the origin
-    try std.testing.expect(level.obj_world_positions[0][0] == -2 and level.obj_world_positions[0][1] == -1);
+    try std.testing.expect(level.obj_world_positions[0][0] == -2 * cell_m[0] and level.obj_world_positions[0][1] == -cell_m[1]);
     const grid = &level.collision_grid;
     for ([_]u16{ 8, 9, 12, 13 }) |c| try std.testing.expect(grid.cells[c]);
     var blocked: usize = 0;
     for (grid.cells) |c| blocked += @intFromBool(c);
     try std.testing.expect(blocked == 4);
     try std.testing.expect(grid.isOccupied(level.obj_world_positions[0]));
-    try std.testing.expect(grid.isOccupied(level.obj_world_positions[0] + Vec2f{ 1, 1 })); //Up and right: cell 9
+    try std.testing.expect(grid.isOccupied(level.obj_world_positions[0] + cell_m)); //Up and right: cell 9
     try std.testing.expect(!grid.isOccupied(Vec2f{ 0, 0 }));
-    try std.testing.expect(level.spawn_cells.all.len == 12 - 3); //The edge of a 4x4 grid, minus cells 8, 12 and 13
+    //The edge band (SPAWN_EDGE_BAND) is wider than this grid in level cells, so every free cell is a spawn cell
+    try std.testing.expect(level.spawn_cells.all.len == 16 - 4);
     try std.testing.expect(level.drop_cells.len == 1 and level.drop_cells[0] == 5 and level.drop_sizes[0] == .large);
 }
 
@@ -249,17 +254,18 @@ test "[level_loader] parse rejects bad input" {
     var buffer: [1024]u8 = undefined;
     var arena = Arena.init("level", &buffer);
     try std.testing.expectError(Error.TruncatedHeader, parse(&[_]u8{ 4, 4 }, &arena));
-    try std.testing.expectError(Error.TruncatedHeader, parse(&[_]u8{ 4, 4, 128, 128, 0, 0, 0 }, &arena));
-    try std.testing.expectError(Error.EmptyGrid, parse(&[_]u8{ 0, 4, 128, 128, 0, 0, 0, 0 }, &arena));
-    try std.testing.expectError(Error.InvalidKit, parse(&[_]u8{ 4, 4, 128, 128, kit_descs.KITS.len, 0, 0, 0, 0, 0 }, &arena));
-    try std.testing.expectError(Error.TruncatedCells, parse(&[_]u8{ 4, 4, 128, 128, 0, 0, 0, 0, 0 }, &arena));
-    try std.testing.expectError(Error.TruncatedObject, parse(&[_]u8{ 4, 4, 128, 128, 0, 0, 0, 0, 0, 0, 0 }, &arena));
-    try std.testing.expectError(Error.CellOutOfRange, parse(&[_]u8{ 4, 4, 128, 128, 0, 0, 16, 0, 0, 0 }, &arena));
-    try std.testing.expectError(Error.StartOnBlockedCell, parse(&[_]u8{ 4, 4, 128, 128, 0, 0, 0, 0, 1, 0 }, &arena));
-    try std.testing.expectError(Error.CellOutOfRange, parse(&[_]u8{ 4, 4, 128, 128, 0, 0, 0, 0, 0, 0, 16, 0, 1 }, &arena));
-    try std.testing.expectError(Error.InvalidSpriteId, parse(&[_]u8{ 4, 4, 128, 128, 0, 0, 0, 0, 0, 0, 1, 0, 127 }, &arena));
-    try std.testing.expectError(Error.TruncatedDrops, parse(&[_]u8{ 4, 4, 128, 128, 0, 2, 0, 0, 5, 0, 0 }, &arena));
-    try std.testing.expectError(Error.CellOutOfRange, parse(&[_]u8{ 4, 4, 128, 128, 0, 1, 0, 0, 16, 0, 0, 0, 0 }, &arena));
-    try std.testing.expectError(Error.InvalidDropSize, parse(&[_]u8{ 4, 4, 128, 128, 0, 1, 0, 0, 5, 0, 2, 0, 0 }, &arena));
-    try std.testing.expectError(Error.DropOnBlockedCell, parse(&[_]u8{ 4, 4, 128, 128, 0, 1, 2, 0, 0, 0, 0, 1, 0 }, &arena));
+    try std.testing.expectError(Error.TruncatedHeader, parse(&[_]u8{ 4, 4, kit_descs.CELL_W, kit_descs.CELL_H, 0, 0, 0 }, &arena));
+    try std.testing.expectError(Error.EmptyGrid, parse(&[_]u8{ 0, 4, kit_descs.CELL_W, kit_descs.CELL_H, 0, 0, 0, 0 }, &arena));
+    try std.testing.expectError(Error.InvalidKit, parse(&[_]u8{ 4, 4, kit_descs.CELL_W, kit_descs.CELL_H, kit_descs.KITS.len, 0, 0, 0, 0, 0 }, &arena));
+    try std.testing.expectError(Error.TruncatedCells, parse(&[_]u8{ 4, 4, kit_descs.CELL_W, kit_descs.CELL_H, 0, 0, 0, 0, 0 }, &arena));
+    try std.testing.expectError(Error.TruncatedObject, parse(&[_]u8{ 4, 4, kit_descs.CELL_W, kit_descs.CELL_H, 0, 0, 0, 0, 0, 0, 0 }, &arena));
+    try std.testing.expectError(Error.CellOutOfRange, parse(&[_]u8{ 4, 4, kit_descs.CELL_W, kit_descs.CELL_H, 0, 0, 16, 0, 0, 0 }, &arena));
+    try std.testing.expectError(Error.StartOnBlockedCell, parse(&[_]u8{ 4, 4, kit_descs.CELL_W, kit_descs.CELL_H, 0, 0, 0, 0, 1, 0 }, &arena));
+    try std.testing.expectError(Error.CellOutOfRange, parse(&[_]u8{ 4, 4, kit_descs.CELL_W, kit_descs.CELL_H, 0, 0, 0, 0, 0, 0, 16, 0, 1 }, &arena));
+    try std.testing.expectError(Error.InvalidSpriteId, parse(&[_]u8{ 4, 4, kit_descs.CELL_W, kit_descs.CELL_H, 0, 0, 0, 0, 0, 0, 1, 0, 127 }, &arena));
+    try std.testing.expectError(Error.TruncatedDrops, parse(&[_]u8{ 4, 4, kit_descs.CELL_W, kit_descs.CELL_H, 0, 2, 0, 0, 5, 0, 0 }, &arena));
+    try std.testing.expectError(Error.CellOutOfRange, parse(&[_]u8{ 4, 4, kit_descs.CELL_W, kit_descs.CELL_H, 0, 1, 0, 0, 16, 0, 0, 0, 0 }, &arena));
+    try std.testing.expectError(Error.InvalidDropSize, parse(&[_]u8{ 4, 4, kit_descs.CELL_W, kit_descs.CELL_H, 0, 1, 0, 0, 5, 0, 2, 0, 0 }, &arena));
+    try std.testing.expectError(Error.WrongCellSize, parse(&[_]u8{ 4, 4, 128, 128, 0, 0, 0, 0, 0, 0 }, &arena));
+    try std.testing.expectError(Error.DropOnBlockedCell, parse(&[_]u8{ 4, 4, kit_descs.CELL_W, kit_descs.CELL_H, 0, 1, 2, 0, 0, 0, 0, 1, 0 }, &arena));
 }

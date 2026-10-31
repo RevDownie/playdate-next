@@ -1,9 +1,12 @@
+/// Updates the enemy movement, using the flow field as primary navigation, but also handles bump backs and local avoidance
+///
 const std = @import("std");
 const maths = @import("maths.zig");
 const consts = @import("tweak_constants.zig");
 const memory = @import("memory.zig");
 const Enemies = @import("game_state.zig").Enemies;
 const CollisionGrid = @import("collision_grid.zig").CollisionGrid;
+const kit_descs = @import("kit_descs.zig");
 const flow = @import("flow_field.zig");
 const FlowField = flow.FlowField;
 
@@ -204,11 +207,11 @@ test "[enemy_movement_system] enemies path around a wall instead of walking into
 }
 
 test "[enemy_movement_system] an enemy close to the player goes round a single obstacle between them" {
-    //Level sized cells (57x27px, 0.21m tall): the player is directly below a blocked cell and the enemy two
+    //Level sized cells (0.21m tall): the player is directly below a blocked cell and the enemy two
     //rows above it, so the straight line to the player (0.42m) runs into the obstacle
     var cells: [9 * 9]bool = @splat(false);
     cells[4 * 9 + 4] = true;
-    const grid = CollisionGrid{ .cells = &cells, .width = 9, .height = 9, .cell_width = 57, .cell_height = 27 };
+    const grid = CollisionGrid{ .cells = &cells, .width = 9, .height = 9, .cell_width = kit_descs.CELL_W, .cell_height = kit_descs.CELL_H };
     var buffer: [2048]u8 = undefined;
     var arena = memory.Arena.init("level", &buffer);
     const player = grid.cellCentre(5 * 9 + 4);
@@ -247,7 +250,7 @@ test "[enemy_movement_system] each enemy seeks at its own speed" {
     var e = Enemies{};
     e.addKind(Vec2f{ -1.5, 0 }, .walker, consts.ENEMY_SLOW_SPEED);
     e.addKind(Vec2f{ 1.5, 0 }, .walker, consts.ENEMY_RUNNER_SPEED);
-    for (0..30) |_| update(&e, &field, &grid, @splat(0), 1.0 / 50.0);
+    for (0..30) |_| update(&e, &field, &grid, @splat(0), consts.TARGET_FRAME_DT);
     //Up to speed after easing in: the runner has covered more ground
     try std.testing.expect(1.5 - @abs(e.pos[1][0]) > 1.5 - @abs(e.pos[0][0]) + 0.1);
     try std.testing.expect(maths.magnitude(e.vel[1]) > consts.PLAYER_MAX_SPEED);

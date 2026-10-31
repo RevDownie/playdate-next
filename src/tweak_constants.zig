@@ -1,4 +1,5 @@
 const bitmap_descs = @import("bitmap_descs.zig");
+const kit_descs = @import("kit_descs.zig");
 
 /// Main constants that impact on gameplay and feel
 pub const MAX_ENEMIES: u8 = 100;
@@ -73,8 +74,9 @@ pub const DROPLET_LIFT_MAX: f32 = 1.4;
 pub const WOUND_DROPLETS: u8 = 4;
 comptime {
     //Enemy steps are only tested at their destination, so one frame's move must stay under the smallest cell side
-    //(0.21m on the levels) even on the longest frame
-    if (ENEMY_MAX_SPEED * MAX_FRAME_DT >= 0.2) @compileError("Enemies are fast enough to step over a cell in one frame");
+    //even on the longest frame
+    if (ENEMY_MAX_SPEED * MAX_FRAME_DT >= CELL_MIN_SIDE_M) @compileError("Enemies are fast enough to step over a cell in one frame");
+    if (ENEMY_SEPARATION_MAX_PUSH >= CELL_MIN_SIDE_M) @compileError("Separation can push an enemy over a cell in one frame");
 }
 pub const ENEMY_SEPARATION_DIST: f32 = CHAR_WIDTH_M * 0.75; //Enemies are pushed apart when their centres are closer than this
 pub const ENEMY_SEPARATION_MAX_PUSH: f32 = 0.1; //Most an enemy is moved by separation in one frame (must stay under a cell)
@@ -198,8 +200,8 @@ comptime {
     if (BULLET_LIFETIME * 200.0 > @as(f32, @floatFromInt(BULLET_POOL_SIZE))) @compileError("BULLET_POOL_SIZE can't hold every bullet in flight at 200 FPS");
 }
 
-/// Ammo. Nothing reloads the gun on its own: it only refills from ammo drops, so the player has to go out and
-/// find them. Picking one up reloads for a while (longer for a large drop) and the gun can't fire meanwhile
+/// Ammo. Nothing refills the gun on its own: only ammo drops do, so the player has to go out and find them. A
+/// pickup can be fired straight away
 pub const START_AMMO: u8 = 80; //About 7s of a steady crank
 pub const MAX_AMMO: u8 = 200; //Most the player can carry: a large drop tops it up rather than doubling it. Drops are left lying while full
 
@@ -210,9 +212,12 @@ pub const FIRST_DROP_TIME: f32 = 3.0;
 pub const DROP_INTERVAL: f32 = 3.0; //Seconds between drops while there is room for one
 pub const DROP_LIFETIME: f32 = 20.0; //Uncollected drops vanish, so the map keeps changing and hoarding a spot doesn't pay
 pub const DROP_BLINK_TIME: f32 = 4.0; //A drop blinks for its last few seconds
-pub const DROP_LARGE_CHANCE: f32 = 0.35; //Chance a new drop goes on a large point rather than a small one
+pub const DROP_LARGE_CHANCE: f32 = 0.25; //Chance a new drop goes on a large point rather than a small one
 pub const DROP_LULL_INTERVAL: f32 = 1.5; //Between waves drops come faster...
-pub const DROP_LULL_LARGE_CHANCE: f32 = 0.6; //...and are more often large
+pub const DROP_LULL_LARGE_CHANCE: f32 = 0.4; //...and are more often large, but still rarer than small ones
+comptime {
+    if (DROP_LARGE_CHANCE >= 0.5 or DROP_LULL_LARGE_CHANCE >= 0.5) @compileError("Large drops must be rarer than small ones");
+}
 pub const DROP_MIN_PLAYER_DIST: f32 = 2.0; //Drops never appear this close to the player: they have to go and get them
 pub const DROP_SPAWN_ATTEMPTS: u8 = 4; //Random points tried per drop (must be free and far enough away), then retried next frame
 pub const DROP_PICKUP_RADIUS: f32 = CHAR_WIDTH_M * 0.5;
@@ -228,8 +233,6 @@ pub const DROP_AMMO_CHANCE_MIN: f32 = 0.3;
 pub const DROP_AMMO_CHANCE_MAX: f32 = 0.75;
 pub const AMMO_DROP_SMALL: u8 = 40;
 pub const AMMO_DROP_LARGE: u8 = 150;
-pub const RELOAD_TIME_SMALL: f32 = 0.6; //Picking up ammo takes this long before the gun fires again
-pub const RELOAD_TIME_LARGE: f32 = 2.0; //...a large crate leaves the player defenceless for a while, out where the enemies spawn
 pub const HEALTH_DROP_SMALL: u8 = 12;
 pub const HEALTH_DROP_LARGE: u8 = 35;
 
@@ -268,11 +271,18 @@ comptime {
     if (GAME_OVER_PANEL_DELAY > GAME_OVER_INPUT_DELAY) @compileError("The run end panel must show before A/B can restart");
 }
 
+/// The shipping frame rate on device (the display refreshes at up to 50 Hz). Budgets and tunneling checks are made
+/// against its frame time; longer frames are allowed to be slightly worse for the odd hitch
+pub const TARGET_FPS: u32 = 50;
+pub const TARGET_FRAME_DT: f32 = 1.0 / @as(f32, @floatFromInt(TARGET_FPS));
+
 /// Longest step the simulation takes in one frame. Larger gaps (e.g. returning from the system menu) are clamped
 /// so enemies and bullets don't teleport
 pub const MAX_FRAME_DT: f32 = 0.1;
 
 pub const METRES_TO_PIXELS: f32 = 128.0;
+/// The smaller side of a level cell (kit_descs.CELL_W x CELL_H px), about 0.21m
+pub const CELL_MIN_SIDE_M: f32 = @as(f32, @floatFromInt(@min(kit_descs.CELL_W, kit_descs.CELL_H))) / METRES_TO_PIXELS;
 pub const CHAR_WIDTH_M: f32 = @as(f32, @floatFromInt(bitmap_descs.CHAR_W)) / METRES_TO_PIXELS;
 pub const CHAR_BULLET_COLL_RADIUS: f32 = CHAR_WIDTH_M * 0.5;
 pub const CHAR_ENEMY_COLL_RADIUS: f32 = CHAR_WIDTH_M * 0.5 * 1.25;

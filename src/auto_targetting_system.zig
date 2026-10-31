@@ -1,9 +1,12 @@
+/// This module calculates which enemy the player should aim at factoring in distance, line of sight, etc
+///
 const std = @import("std");
 const maths = @import("maths.zig");
 const consts = @import("tweak_constants.zig");
 const memory = @import("memory.zig");
 const state = @import("game_state.zig");
 const CollisionGrid = @import("collision_grid.zig").CollisionGrid;
+const kit_descs = @import("kit_descs.zig");
 
 const Vec2f = @Vector(2, f32);
 
@@ -69,13 +72,18 @@ pub fn findTarget(player_pos: Vec2f, move_dir: Vec2f, aim_dir: Vec2f, view_centr
     return null;
 }
 
-/// 30x30 grid of the levels' 57x27px cells (about 13.4 x 6.3m), open apart from a wall down column 17 (x = 0.67m to 1.11m)
-fn testGrid(cells: *[30 * 30]bool, wall: bool) CollisionGrid {
+/// Test grids are TEST_GRID cells square, much bigger than the view, so only a wall blocks the line of sight
+const TEST_GRID = 30;
+/// Two cells right of the player at the origin (the grid is centred on it): x = 0.67m to 1.11m with the levels' cells
+const TEST_WALL_COL = TEST_GRID / 2 + 2;
+
+/// A grid of the levels' cells, open apart from a wall down TEST_WALL_COL
+fn testGrid(cells: *[TEST_GRID * TEST_GRID]bool, wall: bool) CollisionGrid {
     @memset(cells, false);
     if (wall) {
-        for (0..30) |row| cells[row * 30 + 17] = true;
+        for (0..TEST_GRID) |row| cells[row * TEST_GRID + TEST_WALL_COL] = true;
     }
-    return .{ .cells = cells, .width = 30, .height = 30, .cell_width = 57, .cell_height = 27 };
+    return .{ .cells = cells, .width = TEST_GRID, .height = TEST_GRID, .cell_width = kit_descs.CELL_W, .cell_height = kit_descs.CELL_H };
 }
 
 const WALKER_HEALTH = state.EnemyKind.walker.def().health;
@@ -93,7 +101,7 @@ fn testFindHurt(player_pos: Vec2f, move_dir: Vec2f, aim_dir: Vec2f, enemies: []c
 }
 
 test "[auto_targetting] nearest visible enemy, or nothing" {
-    var cells: [30 * 30]bool = undefined;
+    var cells: [TEST_GRID * TEST_GRID]bool = undefined;
     const grid = testGrid(&cells, false);
     try std.testing.expect(testFind(@splat(0), @splat(0), .{ 1, 0 }, &.{}, &grid) == null);
 
@@ -104,7 +112,7 @@ test "[auto_targetting] nearest visible enemy, or nothing" {
 }
 
 test "[auto_targetting] enemies off screen are ignored" {
-    var cells: [30 * 30]bool = undefined;
+    var cells: [TEST_GRID * TEST_GRID]bool = undefined;
     const grid = testGrid(&cells, false);
     //Close but above the top of the screen (it shows ~0.94m up and down), and beyond the right edge (~1.56m)
     const hidden = [_]Vec2f{ .{ 0, 1.2 }, .{ 1.8, 0 } };
@@ -115,14 +123,16 @@ test "[auto_targetting] enemies off screen are ignored" {
 }
 
 test "[auto_targetting] enemies behind walls are ignored" {
-    var cells: [30 * 30]bool = undefined;
+    var cells: [TEST_GRID * TEST_GRID]bool = undefined;
     const grid = testGrid(&cells, true);
+    //The positions below assume the wall lies between the player and x = 1.3m
+    try std.testing.expect(grid.isOccupied(.{ 0.9, 0 }) and !grid.isOccupied(.{ 0.6, 0 }) and !grid.isOccupied(.{ 1.3, 0 }));
     const enemies = [_]Vec2f{ .{ 1.3, 0 }, .{ 1.3, 0.3 }, .{ -1.5, 0 } }; //Two close ones behind the wall
     try std.testing.expect(testFind(@splat(0), @splat(0), .{ 1, 0 }, &enemies, &grid).?.pos[0] == -1.5);
 }
 
 test "[auto_targetting] line of sight tests are bounded" {
-    var cells: [30 * 30]bool = undefined;
+    var cells: [TEST_GRID * TEST_GRID]bool = undefined;
     const grid = testGrid(&cells, true);
     //More enemies behind the wall than are tested: the one in the open further away is missed this frame
     var enemies: [consts.TARGET_MAX_LOS_TESTS + 1]Vec2f = undefined;
@@ -132,7 +142,7 @@ test "[auto_targetting] line of sight tests are bounded" {
 }
 
 test "[auto_targetting] prefers enemies ahead of the player's movement, even when ringed" {
-    var cells: [30 * 30]bool = undefined;
+    var cells: [TEST_GRID * TEST_GRID]bool = undefined;
     const grid = testGrid(&cells, false);
     //Ringed by the horde, the one behind a touch closer and the aim elsewhere: moving right shoots the way out
     const ring = [_]Vec2f{ .{ -0.18, 0 }, .{ 0, 0.19 }, .{ 0.2, 0 }, .{ 0, -0.19 } };
@@ -147,7 +157,7 @@ test "[auto_targetting] prefers enemies ahead of the player's movement, even whe
 }
 
 test "[auto_targetting] keeps aiming at a target that is about as close as another" {
-    var cells: [30 * 30]bool = undefined;
+    var cells: [TEST_GRID * TEST_GRID]bool = undefined;
     const grid = testGrid(&cells, false);
     const enemies = [_]Vec2f{ .{ -0.5, 0 }, .{ 0.52, 0 } };
     try std.testing.expect(testFind(@splat(0), @splat(0), .{ 1, 0 }, &enemies, &grid).?.pos[0] == 0.52);
@@ -155,7 +165,7 @@ test "[auto_targetting] keeps aiming at a target that is about as close as anoth
 }
 
 test "[auto_targetting] finishes off a damaged enemy knocked back out of the ring" {
-    var cells: [30 * 30]bool = undefined;
+    var cells: [TEST_GRID * TEST_GRID]bool = undefined;
     const grid = testGrid(&cells, false);
     //The last target, a shambler with one hit left, was knocked back a little out of the ring (~0.19m), off the aim
     const enemies = [_]Vec2f{ .{ 0.29, 0.06 }, .{ 0, 0.19 }, .{ -0.19, 0 } };
@@ -168,7 +178,7 @@ test "[auto_targetting] finishes off a damaged enemy knocked back out of the rin
 }
 
 test "[auto_targetting] a damaged enemy behind doesn't beat a fresh one in the player's way" {
-    var cells: [30 * 30]bool = undefined;
+    var cells: [TEST_GRID * TEST_GRID]bool = undefined;
     const grid = testGrid(&cells, false);
     //Ringed and moving right, aiming at the nearly dead enemy behind: a brute with one hit left, the most a finish
     //can count for

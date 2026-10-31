@@ -1,3 +1,5 @@
+/// The main game loop that ticks all the systems to update the state data. Only runs the simulation, no rendering
+///
 const std = @import("std");
 const maths = @import("maths.zig");
 const consts = @import("tweak_constants.zig");
@@ -30,16 +32,16 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     const grid = &level.collision_grid;
     game.run_time += dt;
 
-    //1. Waves of enemies drop in just off screen
+    //Spawn enemies offscreen
     enemy_spawn_sys.update(&game.spawner, &game.enemies, game.rng.random(), game.player.pos, &level.spawn_cells, field, grid, dt);
 
-    //Ammo and health drops on the level's drop points, faster and bigger between waves
+    //Ammo and health drops
     const lull = game.spawner.phase == .lull;
     const drop_interval = if (lull) consts.DROP_LULL_INTERVAL else consts.DROP_INTERVAL;
     const drop_large_chance = if (lull) consts.DROP_LULL_LARGE_CHANCE else consts.DROP_LARGE_CHANCE;
     drop_sys.update(&game.drops, game.rng.random(), game.player.pos, game.player.health, game.bullets.ammo, level.drop_cells, level.drop_sizes, grid, drop_interval, drop_large_chance, dt);
 
-    //2. Movement. The flow field follows the player, a bounded slice of a rebuild per frame. The player picks up
+    //Character Movement. The flow field follows the player, a bounded slice of a rebuild per frame. The player picks up
     //the drops they walk over
     player_move_sys.update(&game.player, input, grid, dt);
     drop_sys.collect(&game.drops, &game.player, &game.bullets);
@@ -48,7 +50,7 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     enemy_move_sys.update(&game.enemies, field, grid, game.player.pos, dt);
     enemy_move_sys.separate(&game.enemies, game.player.pos, field, grid, frame_arena.alloc(Vec2f, game.enemies.len));
 
-    //3. Move projectiles (walls stop them) and resolve bullet and melee hits on enemies (kills are flagged then compacted
+    //Move projectiles (walls stop them) and resolve bullet and melee hits on enemies (kills are flagged then compacted
     //out). Wounds spray blood and kills burst into gore
     bullet_sys.update(&game.bullets, grid, dt);
     const hits = bullet_sys.collide(&game.bullets, game.enemies.positions(), game.enemies.kind[0..game.enemies.len], frame_arena.alloc(state.Hit, game.bullets.len));
@@ -61,18 +63,18 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     game.bullets.removeDead();
     game.enemies.removeDead();
 
-    //4. Enemies touching the player hurt them
+    //Enemies touching the player hurt them
     combat_sys.applyEnemyContact(&game.enemies, &game.player, if (game.invincible) 0 else consts.CONTACT_DMG, &game.popups);
     if (game.player.health == 0) {
         game.player.hit_flash_timer = 0; //The run end screen shows the last frame, so don't leave it inverted
         return .player_died;
     }
 
-    //5. Camera, trailing the player and leaning towards last frame's aim. Before targeting, as the gun only aims at
+    //Camera, trailing the player and leaning towards last frame's aim. Before targeting, as the gun only aims at
     //what is on screen
     camera_sys.update(&game.camera, game.player.pos, game.player.vel, game.player.facing_dir, dt);
 
-    //6. Now that the enemy positions are final, aim at the best target the player can see and fire.
+    //Now that the enemy positions are final, aim at the best target the player can see and fire.
     //With nothing in sight aim the way the player is moving, or keep the last aim while standing still
     const move_dir = maths.normaliseSafe(game.player.vel, @splat(0));
     const target = auto_target_sys.findTarget(game.player.pos, move_dir, game.player.facing_dir, game.camera.pos, game.enemies.positions(), game.enemies.health[0..game.enemies.len], game.enemies.kind[0..game.enemies.len], grid, frame_arena.alloc(f32, game.enemies.len));
@@ -87,10 +89,64 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     game.player.facing_dir = aim_dir; //Player faces the way they are firing
     game.player.target_pos = if (target) |t| t.pos else null;
 
-    //7. Effects
+    //Apply Effects
     game.player.hit_flash_timer = @max(game.player.hit_flash_timer - dt, 0);
     game.popups.update(dt);
     gore_sys.update(&game.gore, grid, dt);
 
     return .playing;
+}
+
+/// Start a fresh run at the level's `start_pos`: everything back to the start (the rngs and debug settings carry
+/// on), the camera on the player, and the A/B press that started the run doesn't also fire
+///
+pub fn beginRun(game: *state.GameState, start_pos: Vec2f) void {
+    game.reset();
+    game.player.pos = start_pos;
+    game.camera.pos = start_pos;
+    game.trigger.button_cooldown = consts.FIRE_BUTTON_DELAY;
+}
+
+/// Whether the run that just ended beats the saved `best`. Debug invincibility is a cheat, so it never does
+///
+pub fn isNewBest(game: *const state.GameState, best: u64) bool {
+    return game.player.score > best and !game.invincible;
+}
+
+test "[game] a run begins at the start point with nothing carried over but the rngs and debug settings" {
+    var game = state.GameState{};
+    game.player.score = 500;
+    game.player.health = 1;
+    game.bullets.ammo = 0;
+    game.enemies.add(.{ 1, 1 });
+    game.invincible = true;
+    _ = game.rng.random().int(u32);
+    const rng_next = game.rng;
+
+    beginRun(&game, .{ 2, -3 });
+    try std.testing.expect(game.player.score == 0 and game.player.health == consts.PLAYER_MAX_HEALTH);
+    try std.testing.expect(game.bullets.ammo == consts.START_AMMO and game.enemies.len == 0);
+    try std.testing.expect(@reduce(.And, game.player.pos == Vec2f{ 2, -3 }) and @reduce(.And, game.camera.pos == Vec2f{ 2, -3 }));
+    try std.testing.expect(game.trigger.button_cooldown == consts.FIRE_BUTTON_DELAY);
+    try std.testing.expect(game.invincible);
+    try std.testing.expect(std.meta.eql(game.rng, rng_next)); //The random sequence carries on
+}
+
+test "[game] only a higher score sets a new best, and never while invincible" {
+    var game = state.GameState{};
+    game.player.score = 100;
+    try std.testing.expect(isNewBest(&game, 99));
+    try std.testing.expect(!isNewBest(&game, 100));
+    game.invincible = true;
+    try std.testing.expect(!isNewBest(&game, 99));
+}
+
+test "[game] the run end screen ignores fire until its delay is up" {
+    var over = state.RunEnd{ .new_best = false };
+    const fire = state.Input{ .fire_pressed = true };
+    try std.testing.expect(!over.update(fire, consts.GAME_OVER_INPUT_DELAY / 2));
+    try std.testing.expect(!over.canRestart());
+    try std.testing.expect(!over.update(.{}, consts.GAME_OVER_INPUT_DELAY)); //Can restart now, but no press
+    try std.testing.expect(over.canRestart());
+    try std.testing.expect(over.update(fire, consts.TARGET_FRAME_DT));
 }

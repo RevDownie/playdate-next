@@ -1,3 +1,5 @@
+/// Responsible for updating the camera state based on the player state
+///
 const std = @import("std");
 const consts = @import("tweak_constants.zig");
 const maths = @import("maths.zig");
@@ -23,7 +25,6 @@ const LAG_MAX = Vec2f{ consts.CAMERA_LAG_MAX_X, consts.CAMERA_LAG_MAX_Y };
 pub fn update(camera: *Camera, player_pos: Vec2f, player_vel: Vec2f, aim_dir: Vec2f, dt: f32) void {
     const lead = &camera.lead;
     const lead_vel = &camera.lead_vel;
-    //Lag: exponential catch up without a runtime exp (rate*dt / (1 + rate*dt) stays under 1 however long the frame)
     const k = consts.CAMERA_FOLLOW_RATE * dt;
     var follow = camera.pos - lead.*;
     follow += (player_pos - follow) * @as(Vec2f, @splat(k / (1 + k)));
@@ -68,7 +69,7 @@ comptime {
     if (consts.CAMERA_LEAD_FREQ * consts.MAX_FRAME_DT > 0.5) @compileError("CAMERA_LEAD_FREQ is too stiff for MAX_FRAME_DT");
 }
 
-const TEST_DT: f32 = 1.0 / 50.0;
+const TEST_DT: f32 = consts.TARGET_FRAME_DT;
 
 test "[camera_system] a running player sits ahead of centre, and the camera catches up gently when they stop" {
     var cam = Camera{};

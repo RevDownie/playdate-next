@@ -1,7 +1,10 @@
+/// Holds the direction from each cell to the player in a flow field. Used by the enemies to path to the player.
+///
 const std = @import("std");
 const memory = @import("memory.zig");
 const Arena = memory.Arena;
 const CollisionGrid = @import("collision_grid.zig").CollisionGrid;
+const kit_descs = @import("kit_descs.zig");
 
 const Vec2f = @Vector(2, f32);
 
@@ -237,7 +240,7 @@ fn testGrid(comptime rows: []const []const u8, cells: []bool) CollisionGrid {
     for (rows, 0..) |row, y| {
         for (row, 0..) |c, x| cells[y * rows[0].len + x] = c == '#';
     }
-    return .{ .cells = cells[0 .. rows.len * rows[0].len], .width = rows[0].len, .height = rows.len, .cell_width = 57, .cell_height = 27 };
+    return .{ .cells = cells[0 .. rows.len * rows[0].len], .width = rows[0].len, .height = rows.len, .cell_width = kit_descs.CELL_W, .cell_height = kit_descs.CELL_H };
 }
 
 /// Follow the field from `start`, returning the number of steps to reach the goal (null if it never does)
@@ -329,7 +332,7 @@ test "[flow_field] diagonals never cut an obstacle's corner" {
 test "[flow_field] rebuilds are spread over frames and only published when complete" {
     var cells: [10 * 10]bool = undefined;
     @memset(&cells, false);
-    const grid = CollisionGrid{ .cells = &cells, .width = 10, .height = 10, .cell_width = 57, .cell_height = 27 };
+    const grid = CollisionGrid{ .cells = &cells, .width = 10, .height = 10, .cell_width = kit_descs.CELL_W, .cell_height = kit_descs.CELL_H };
     var buffer: [2048]u8 = undefined;
     var arena = Arena.init("level", &buffer);
     var field = FlowField.init(&arena, &grid, 0);

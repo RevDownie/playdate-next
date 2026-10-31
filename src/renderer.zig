@@ -43,6 +43,7 @@ pub const Assets = struct {
     //environment art is dithered once per screen pixel phase (x even/odd, y even/odd, kit_descs.PHASES) and drawn with
     //the version matching where it lands, so its dither stays fixed to the screen and doesn't flicker as it scrolls
     kit_pieces: [kit_descs.KITS.len][kit_descs.MAX_KIT_PIECES][kit_descs.PHASES]*pd.LCDBitmap,
+    kit_tables: [kit_descs.KITS.len]*pd.LCDBitmapTable, //Own the kit_pieces bitmaps: one file per kit
     grounds: [MAX_LEVELS][kit_descs.PHASES]*pd.LCDBitmap,
     fonts: hud_mod.Fonts,
 };
@@ -123,10 +124,18 @@ pub fn loadAssets(playdate_api: *pd.PlaydateAPI, level_names: []const [:0]const 
     }
     var name_buf: [64]u8 = undefined;
     for (kit_descs.KITS, 0..) |kit, k| {
-        for (0..kit.pieces.len) |i| {
+        //Piece i's phase v is at index i * PHASES + v (env_kits.py). The table keeps each bitmap's own size
+        const name = std.fmt.bufPrintSentinel(&name_buf, "{s}-pieces", .{kit.name}, 0) catch unreachable;
+        const table = graphics.loadBitmapTable.?(name, null) orelse @panic("loadAssets: Failed to load a kit's pieces");
+        assets.kit_tables[k] = table;
+        for (kit.pieces, 0..) |piece, i| {
             for (0..kit_descs.PHASES) |v| {
-                const name = std.fmt.bufPrintSentinel(&name_buf, "{s}-piece-{d}-p{d}", .{ kit.name, i, v }, 0) catch unreachable;
-                assets.kit_pieces[k][i][v] = graphics.loadBitmap.?(name, null) orelse @panic("loadAssets: Failed to load a kit piece");
+                const bitmap = graphics.getTableBitmap.?(table, @intCast(i * kit_descs.PHASES + v)) orelse @panic("loadAssets: A kit's pieces table is short");
+                var w: c_int = 0;
+                var h: c_int = 0;
+                graphics.getBitmapData.?(bitmap, &w, &h, null, null, null);
+                if (w != piece.w or h != piece.h) @panic("loadAssets: A kit piece's size doesn't match kit_descs (re-run env_kits.py)");
+                assets.kit_pieces[k][i][v] = bitmap;
             }
         }
     }
@@ -312,13 +321,13 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     }
 
     //The run end screen covers the middle, so it waits for the player to finish falling down
-    const panel: ?Hud.GameOver = if (hud.game_over) |over| (if (over.time >= consts.GAME_OVER_PANEL_DELAY) over else null) else null;
+    const panel: ?state.RunEnd = if (hud.game_over) |over| (if (over.time >= consts.GAME_OVER_PANEL_DELAY) over else null) else null;
     if (panel) |over| {
         hud_mod.drawGameOver(graphics, assets.fonts, game, hud, over, screen.width, screen.height);
     } else {
         hud_mod.drawHud(graphics, assets.fonts, game, hud, screen.width, screen.height);
     }
-    sys.drawFPS.?(0, 0);
+    hud_mod.drawFps(sys, screen.width, screen.height);
     return .{ .drawn = @intCast(list.len) };
 }
 

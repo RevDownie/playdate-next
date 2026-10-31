@@ -1,3 +1,5 @@
+/// Responsible for applying damage to hit enemies and to the player. Also responsible for the combo state
+///
 const std = @import("std");
 const maths = @import("maths.zig");
 const consts = @import("tweak_constants.zig");

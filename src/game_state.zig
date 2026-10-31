@@ -1,3 +1,5 @@
+/// Defines all the persistent state for the game
+///
 const std = @import("std");
 const consts = @import("tweak_constants.zig");
 const memory = @import("memory.zig");
@@ -146,12 +148,7 @@ pub const Bullets = struct {
     barrel: [capacity]u8 align(memory.CACHE_LINE_SIZE) = undefined, //Gatling barrel it left from, only read when drawn
 
     ammo: u8 = consts.START_AMMO,
-    reload_timer: f32 = 0, //Reloading an ammo drop while > 0, and can't fire
     next_barrel: u8 = 0, //Barrel the next shot leaves from, turns with every shot
-
-    pub fn isReloading(self: *const Bullets) bool {
-        return self.reload_timer > 0;
-    }
 
     /// Swap-remove every bullet whose lifetime has run out
     ///
@@ -505,6 +502,25 @@ pub const Camera = struct {
 
     pub fn drawPos(self: Camera) Vec2f {
         return self.pos + self.shake;
+    }
+};
+
+/// The run end screen. The simulation stops ticking and the last frame stays up under it until the player chooses to
+/// go again, which they can only do after GAME_OVER_INPUT_DELAY so a player still hammering fire doesn't skip it
+///
+pub const RunEnd = struct {
+    new_best: bool, //The run that ended beat the saved best
+    time: f32 = 0, //Seconds since the run ended (the player falls down)
+
+    pub fn canRestart(self: RunEnd) bool {
+        return self.time >= consts.GAME_OVER_INPUT_DELAY;
+    }
+
+    /// Count the time on the screen. True once the player asks for the next run
+    ///
+    pub fn update(self: *RunEnd, input: Input, dt: f32) bool {
+        self.time += dt;
+        return self.canRestart() and input.fire_pressed;
     }
 };
 

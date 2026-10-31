@@ -5,7 +5,7 @@ param(
     [int]$Seconds = 8,
     [switch]$NoBuild,
     [switch]$Invincible, # Debug build where enemies can't hurt the player (also a system menu checkmark)
-    [string]$Level = "" # Debug build that only plays this level (LEVEL_NAMES in main.zig; also a system menu option)
+    [string]$Level = "" # Debug build that only plays this level (LEVEL_NAMES in src/level_descs.zig; also a system menu option)
 )
 
 . "$PSScriptRoot\sim-common.ps1"

@@ -1,3 +1,5 @@
+/// Responsible for player movement in response to input state. Using the collision grid to block and slide
+///
 const std = @import("std");
 const consts = @import("tweak_constants.zig");
 const maths = @import("maths.zig");

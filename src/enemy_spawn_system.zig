@@ -1,3 +1,5 @@
+/// Responsible for calculating enemy spawn waves frequency and spawn locations
+///
 const std = @import("std");
 const maths = @import("maths.zig");
 const consts = @import("tweak_constants.zig");

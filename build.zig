@@ -9,8 +9,10 @@ pub fn build(b: *std.Build) void {
     const invincible = b.option(bool, "invincible", "Debug builds: start with the player invincible (toggle it from the system menu)") orelse false;
     const build_options = b.addOptions();
     build_options.addOption(bool, "invincible", invincible);
-    const level = b.option([]const u8, "level", "Debug: play only this level (a name from LEVEL_NAMES in main.zig; also a system menu option) instead of a random one per run") orelse "";
+    const level = b.option([]const u8, "level", "Debug: play only this level (a name from LEVEL_NAMES in src/level_descs.zig; also a system menu option) instead of a random one per run") orelse "";
     build_options.addOption([]const u8, "level", level);
+    const fps = b.option(bool, "fps", "Draw the SDK's FPS counter (bottom centre, clear of the HUD); turn it off for shipping builds") orelse true;
+    build_options.addOption(bool, "fps", fps);
 
     const environ = b.graph.environ_map;
     const sdk_path = environ.get("PLAYDATE_SDK_PATH") orelse @panic("PLAYDATE_SDK_PATH is not set");
@@ -73,11 +75,15 @@ pub fn build(b: *std.Build) void {
     game_elf.lto = .none; // the release device build fails with LTO
     b.installArtifact(game_elf);
 
-    //Everything that pdc packages lives in zig-out/lib
+    //pdc packages a staging directory that holds exactly the current inputs, so a file deleted from images/ or
+    //levels/ is never shipped (installs never delete, so zig-out/lib can hold stale copies)
     const pdc_inputs = b.step("pdc-inputs", "Everything pdc needs to build the pdx package");
+    const staging = b.addWriteFiles();
+    pdc_inputs.dependOn(&staging.step);
 
     //pdc converts the elf to pdex.bin itself
     pdc_inputs.dependOn(&b.addInstallLibFile(game_elf.getEmittedBin(), "pdex.elf").step);
+    _ = staging.addCopyFile(game_elf.getEmittedBin(), "pdex.elf");
 
     //Simulator DLL
     const simulator = b.addLibrary(.{
@@ -86,23 +92,21 @@ pub fn build(b: *std.Build) void {
         .root_module = createGameModule(b, sim_target, optimize, c_sdk_path, arm_toolchain_path, .simulator, is_release, build_options),
     });
     pdc_inputs.dependOn(&b.addInstallArtifact(simulator, .{ .dest_dir = .{ .override = .lib }, .pdb_dir = .disabled, .implib_dir = .disabled }).step);
+    _ = staging.addCopyFile(simulator.getEmittedBin(), "pdex.dll");
 
     //Assets
-    pdc_inputs.dependOn(&b.addInstallLibFile(b.path("pdxinfo"), "pdxinfo").step);
-    for ([_][]const u8{ "images", "levels" }) |asset_dir| {
-        pdc_inputs.dependOn(&b.addInstallDirectory(.{
-            .source_dir = b.path(asset_dir),
-            .install_dir = .lib,
-            .install_subdir = "",
-        }).step);
-    }
+    _ = staging.addCopyFile(b.path("pdxinfo"), "pdxinfo");
+    for ([_][]const u8{ "images", "levels" }) |asset_dir| _ = staging.addCopyDirectory(b.path(asset_dir), "", .{});
 
-    //pdc step to create pdx package
+    //pdc step to create pdx package, into an empty pdx (pdc leaves files it no longer writes in place)
     const pdx_path = b.graph.path(.install_prefix, game_name ++ ".pdx");
+    const clear_pdx = b.addSystemCommand(&.{ "powershell", "-NoProfile", "-Command", "& { Remove-Item -LiteralPath $args[0] -Recurse -Force -ErrorAction SilentlyContinue }" });
+    clear_pdx.addDirectoryArg(pdx_path);
     const pdc = b.addSystemCommand(&.{"pdc"});
-    pdc.addDirectoryArg(b.graph.path(.install_lib, ""));
+    pdc.addDirectoryArg(staging.getDirectory());
     pdc.addDirectoryArg(pdx_path);
     pdc.step.dependOn(pdc_inputs);
+    pdc.step.dependOn(&clear_pdx.step);
     b.getInstallStep().dependOn(&pdc.step);
 
     //Run on simulator

@@ -1,3 +1,5 @@
+/// Uses the input state to determine if a bullet should be firec
+///
 const std = @import("std");
 const consts = @import("tweak_constants.zig");
 const state = @import("game_state.zig");

@@ -1,8 +1,11 @@
+/// Responsible for spawning a bullet and updating the lifetime state of active bullets
+///
 const std = @import("std");
 const maths = @import("maths.zig");
 const consts = @import("tweak_constants.zig");
 const state = @import("game_state.zig");
 const CollisionGrid = @import("collision_grid.zig").CollisionGrid;
+const kit_descs = @import("kit_descs.zig");
 const Bullets = state.Bullets;
 const Hit = state.Hit;
 
@@ -15,22 +18,21 @@ const HIT_RADIUS_SQRD = blk: {
     break :blk r;
 };
 
-/// `collide` tests a point after each move, so a bullet must not step over an enemy's hit circle in one
-/// frame at the target 50 FPS (longer frames can, which is acceptable for the odd hitch)
-const TARGET_FRAME_DT: f32 = 1.0 / 50.0;
+//`collide` tests a point after each move, so a bullet must not step over an enemy's hit circle in one
+//frame at TARGET_FPS (longer frames can, which is acceptable for the odd hitch)
 comptime {
     var min_hit_radius: f32 = std.math.inf(f32);
     for (consts.ENEMY_KINDS) |k| min_hit_radius = @min(min_hit_radius, k.hit_radius);
-    if (consts.BULLET_MAX_SPEED * TARGET_FRAME_DT >= 2 * min_hit_radius) @compileError("Bullets are fast enough to skip over enemies in one frame");
+    if (consts.BULLET_MAX_SPEED * consts.TARGET_FRAME_DT >= 2 * min_hit_radius) @compileError("Bullets are fast enough to skip over enemies in one frame");
 }
 
 /// Spawn a new bullet at `world_pos` (the player's feet) heading along `world_dir`, turned sideways by
-/// `stray` (-1 to 1) times BULLET_SPREAD for a little machine gun scatter. Nothing fires while an ammo drop is
-/// reloading or when out of ammo: the gun never reloads by itself, only from drops (see drop_system).
+/// `stray` (-1 to 1) times BULLET_SPREAD for a little machine gun scatter. Nothing fires when out of ammo: the
+/// gun is only refilled by ammo drops (see drop_system).
 /// Returns whether a shot went off
 ///
 pub fn fire(bullets: *Bullets, world_pos: Vec2f, world_dir: Vec2f, stray: f32) bool {
-    if (bullets.isReloading() or bullets.ammo == 0) return false;
+    if (bullets.ammo == 0) return false;
     if (bullets.len >= Bullets.capacity) return false; //Pool exhausted - drop the shot rather than overrun
 
     const right = Vec2f{ world_dir[1], -world_dir[0] };
@@ -45,13 +47,11 @@ pub fn fire(bullets: *Bullets, world_pos: Vec2f, world_dir: Vec2f, stray: f32) b
     return true;
 }
 
-/// Count down any reload, age the bullets and move them along their trajectories. Each move is sampled at least every half
+/// Age the bullets and move them along their trajectories. Each move is sampled at least every half
 /// cell so a bullet can't tunnel through a wall; one that reaches a blocked cell (or leaves the map) stops
 /// at its last free point. Expired and blocked bullets are flagged (lifetime <= 0) and removed by `Bullets.removeDead`
 ///
 pub fn update(bullets: *Bullets, grid: *const CollisionGrid, dt: f32) void {
-    if (bullets.isReloading()) bullets.reload_timer -= dt;
-
     const step = consts.BULLET_MAX_SPEED * dt;
     const num_samples: u32 = @intFromFloat(@max(@ceil(step / grid.sampleLength()), 1));
     const sample_step: Vec2f = @splat(step / @as(f32, @floatFromInt(num_samples)));
@@ -97,25 +97,26 @@ pub fn collide(bullets: *Bullets, enemy_positions: []const Vec2f, enemy_kinds: [
     return hits_out[0..num_hits];
 }
 
-/// 30x30 grid of 64px (0.5m) cells with nothing in it: the map's edge (+-7.5m) is beyond BULLET_RANGE from the origin
+/// 30x30 grid of 64px (0.5m) cells with nothing in it, so bullets fired from the origin expire before the map's edge
 const open_cells: [30 * 30]bool = @splat(false);
 const OPEN_GRID = CollisionGrid{ .cells = &open_cells, .width = 30, .height = 30, .cell_width = 64, .cell_height = 64 };
+comptime {
+    for ([_]Vec2f{ .{ 1, 0 }, .{ -1, 0 }, .{ 0, 1 }, .{ 0, -1 } }) |d| {
+        if (OPEN_GRID.isOccupied(d * @as(Vec2f, @splat(consts.BULLET_RANGE)))) @compileError("OPEN_GRID is smaller than BULLET_RANGE: test bullets would hit its edge before they expire");
+    }
+}
 
-test "[bullet_system] an empty gun stays empty, and a reload holds fire until it is done" {
+test "[bullet_system] an empty gun stays empty until ammo is picked up" {
     var b = Bullets{};
     b.ammo = 1;
     try std.testing.expect(fire(&b, @splat(0), Vec2f{ 1, 0 }, 0));
     try std.testing.expect(b.len == 1 and b.ammo == 0);
 
-    try std.testing.expect(!fire(&b, @splat(0), Vec2f{ 1, 0 }, 0)); //Empty: nothing happens, and it never reloads by itself
+    try std.testing.expect(!fire(&b, @splat(0), Vec2f{ 1, 0 }, 0)); //Empty: nothing happens, and it never refills by itself
     update(&b, &OPEN_GRID, 10);
-    try std.testing.expect(b.len == 1 and b.ammo == 0 and !b.isReloading());
+    try std.testing.expect(b.len == 1 and b.ammo == 0);
 
-    b.ammo = 10; //As if an ammo drop was picked up
-    b.reload_timer = consts.RELOAD_TIME_SMALL;
-    try std.testing.expect(!fire(&b, @splat(0), Vec2f{ 1, 0 }, 0)); //Reloading
-    try std.testing.expect(b.ammo == 10);
-    update(&b, &OPEN_GRID, consts.RELOAD_TIME_SMALL + 0.01);
+    b.ammo = 10; //As if an ammo drop was picked up: it fires straight away
     try std.testing.expect(fire(&b, @splat(0), Vec2f{ 1, 0 }, 0));
     try std.testing.expect(b.ammo == 9);
 }
@@ -168,21 +169,30 @@ test "[bullet_system] big enemies are easier to hit than small ones" {
     try std.testing.expect(got.len == 1 and got[0].enemy_idx == 1);
 }
 
-test "[bullet_system] walls stop bullets, even on the longest frame" {
-    //Same 0.5m cells, with a one cell thick wall in column 17 (x = 1m)
-    var cells: [30 * 30]bool = @splat(false);
-    for (0..30) |row| cells[row * 30 + 17] = true;
-    const grid = CollisionGrid{ .cells = &cells, .width = 30, .height = 30, .cell_width = 64, .cell_height = 64 };
+test "[bullet_system] walls one level cell thick stop bullets, even on the longest frame" {
+    //The levels' cells, with a wall down the column two right of the origin and along the row two above it. A row
+    //is the thin way through (CELL_H), which a bullet crosses several times over on a MAX_FRAME_DT step
+    const n = 30;
+    const centre: u16 = (n / 2) * n + n / 2;
+    var cells: [n * n]bool = @splat(false);
+    for (0..n) |i| {
+        cells[i * n + n / 2 + 2] = true;
+        cells[(n / 2 - 2) * n + i] = true;
+    }
+    const grid = CollisionGrid{ .cells = &cells, .width = n, .height = n, .cell_width = kit_descs.CELL_W, .cell_height = kit_descs.CELL_H };
+    const right_face = (grid.cellCentre(centre + 1)[0] + grid.cellCentre(centre + 2)[0]) / 2;
+    const top_face = (grid.cellCentre(centre - n)[1] + grid.cellCentre(centre - 2 * n)[1]) / 2;
 
-    for ([_]f32{ 1.0 / 50.0, consts.MAX_FRAME_DT }) |dt| {
+    for ([_]f32{ consts.TARGET_FRAME_DT, consts.MAX_FRAME_DT }) |dt| {
         var b = Bullets{};
-        _ = fire(&b, @splat(0), Vec2f{ 1, 0 }, 0);
-        _ = fire(&b, @splat(0), maths.normaliseSafe(Vec2f{ 1, 0.3 }, @splat(0)), 0);
-        while (b.len > 0) {
+        for ([_]Vec2f{ .{ 1, 0 }, .{ 1, 0.3 }, .{ 0, 1 }, .{ 0.3, 1 } }) |d| _ = fire(&b, @splat(0), maths.normaliseSafe(d, @splat(0)), 0);
+        var t: f32 = 0;
+        while (b.len > 0) : (t += dt) {
             update(&b, &grid, dt);
-            for (b.positions()) |p| try std.testing.expect(p[0] < 0.75); //The wall's near face
+            for (b.positions()) |p| try std.testing.expect(p[0] < right_face and p[1] < top_face);
             b.removeDead();
         }
+        try std.testing.expect(t < consts.BULLET_LIFETIME / 2); //Stopped by the walls, not expired
     }
 }
 
@@ -194,7 +204,7 @@ test "[bullet_system] a bullet fired inside a wall or off the map dies at once" 
     var b = Bullets{};
     _ = fire(&b, @splat(0), Vec2f{ 1, 0 }, 0);
     _ = fire(&b, Vec2f{ 7.2, 3 }, Vec2f{ 1, 0 }, 0); //Leaves the map this frame
-    update(&b, &grid, 1.0 / 50.0);
+    update(&b, &grid, consts.TARGET_FRAME_DT);
     b.removeDead();
     try std.testing.expect(b.len == 0);
 }

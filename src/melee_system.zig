@@ -1,3 +1,5 @@
+/// Responsible for player attacks when out of ammo
+///
 const std = @import("std");
 const maths = @import("maths.zig");
 const consts = @import("tweak_constants.zig");
