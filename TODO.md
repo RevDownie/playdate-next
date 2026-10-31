@@ -3,7 +3,6 @@
 ## Gameplay
 - Swap level mid run
 - Explosive barrels
-- Reloading: show it where the player is looking (or drop the reload pause altogether)
 
 ## Enemy spawning
 - Packs sometimes fail to find a spawn cell and wait for the next interval: make that rarer
