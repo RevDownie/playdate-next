@@ -6,6 +6,14 @@ pub const MAX_ENEMIES: u8 = 100;
 
 pub const PLAYER_ACC: f32 = 2.0;
 pub const PLAYER_MAX_SPEED: f32 = 1.5;
+/// Holding one direction into a wall slides the player round its end when they are within this fraction of a cell
+/// of the opening, so a d-pad doesn't have to find the diagonal (under half a cell, so only one side can qualify)
+pub const PLAYER_CORNER_NUDGE: f32 = 0.4;
+comptime {
+    //The player's steps are only tested at their destination and stop flush against the cell they would enter
+    if (PLAYER_MAX_SPEED * MAX_FRAME_DT >= CELL_MIN_SIDE_M) @compileError("The player is fast enough to step over a cell in one frame");
+    if (PLAYER_CORNER_NUDGE >= 0.5) @compileError("PLAYER_CORNER_NUDGE must be under half a cell");
+}
 /// Enemies come in four kinds (game_state.EnemyKind), each with its own look (character_sprites.py). Most are walkers
 /// at about ENEMY_SPEED (a little faster or slower each), some shamblers, from wave 2 a growing share are runners,
 /// faster than the player, so a crowd strings out as it closes in and the player can't simply outrun every wave,
@@ -244,6 +252,7 @@ pub const MUZZLE_FORWARD: f32 = 0.14; //Metres ahead of the player the barrels e
 pub const BARREL_RADIUS: f32 = 0.013; //Metres from the gun's axis to each barrel
 pub const MUZZLE_CONVERGE_DIST: f32 = 1.5; //The drawn muzzle offset fades out over this many metres so tracers meet the aim line
 pub const TRACER_LENGTH: f32 = 0.3; //Metres of trail drawn behind each bullet (longer than a 50 FPS step so the stream looks unbroken)
+pub const MUZZLE_FLASH_TIME: f32 = 0.06; //Seconds each shot's flash shows at the muzzle, shrinking (about 3 frames at TARGET_FPS)
 
 pub const FLASH_HIT_EFFECT_DURATION: f32 = 0.3; //The player shows the hurt pose for as long
 
