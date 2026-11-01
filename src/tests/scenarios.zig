@@ -395,9 +395,9 @@ test "[scenario] a story chapter stops spawning after its waves and is complete 
     var t: TestLevel = .{};
     t.init(false);
     var game = state.GameState{ .invincible = true };
-    game_mod.beginChapter(&game, t.level.start_pos, .{ .level = 0, .objective = .survive, .first_wave = 1, .last_wave = 2 });
+    game_mod.beginChapter(&game, t.level.start_pos, .{ .level = 0, .objective = .survive, .first_wave = 1, .last_wave = 2 }, .{});
     try std.testing.expect(t.tick(&game, .{}) == .playing); //Not complete before the first wave
-    try std.testing.expect(!game.scoring); //Story has no score
+    try std.testing.expect(game.story.active); //So no score
 
     //Wave 1: cleared as soon as it stops spawning
     var frames: u32 = 0;
@@ -445,7 +445,7 @@ test "[scenario] a later story chapter starts on its first wave and ends after i
     var t: TestLevel = .{};
     t.init(false);
     var game = state.GameState{ .invincible = true };
-    game_mod.beginChapter(&game, t.level.start_pos, .{ .level = 0, .objective = .survive, .first_wave = 4, .last_wave = 5 });
+    game_mod.beginChapter(&game, t.level.start_pos, .{ .level = 0, .objective = .survive, .first_wave = 4, .last_wave = 5 }, .{});
     var frames: u32 = 0;
     var first_seen: u16 = 0;
     var result = game_mod.TickResult.playing;
@@ -463,7 +463,7 @@ test "[scenario] a walk chapter never spawns and is complete once the player has
     var t: TestLevel = .{};
     t.init(false);
     var game = state.GameState{};
-    game_mod.beginChapter(&game, t.level.start_pos, .{ .level = 0, .objective = .walk });
+    game_mod.beginChapter(&game, t.level.start_pos, .{ .level = 0, .objective = .walk }, .{});
     //Standing still never completes it
     for (0..consts.TARGET_FPS * 30) |_| try std.testing.expect(t.tick(&game, .{}) == .playing);
     try std.testing.expect(game.enemies.len == 0);
@@ -479,4 +479,67 @@ test "[scenario] a walk chapter never spawns and is complete once the player has
     try std.testing.expect(result == .chapter_complete);
     const walked = @as(f32, @floatFromInt(frames)) / 60.0 * consts.PLAYER_MAX_SPEED;
     try std.testing.expect(walked >= story.WALK_DIST * 0.95 and walked <= story.WALK_DIST * 1.3);
+}
+
+/// Tick a story chapter until `stop` says so (or it ends), clearing each wave the moment it stops spawning
+fn playChapter(t: *TestLevel, game: *state.GameState, max_secs: u32, kill: bool, comptime stop: fn (*const state.GameState) bool) !game_mod.TickResult {
+    var frames: u32 = 0;
+    while (!stop(game)) : (frames += 1) {
+        const result = t.tick(game, .{});
+        if (result != .playing) return result;
+        if (kill and game.spawner.phase == .wave and !game.spawner.isHolding()) game.enemies.len = 0;
+        try std.testing.expect(frames < 60 * max_secs);
+    }
+    return .playing;
+}
+
+test "[scenario] clearing chapter 1's first wave queues Ellie's first line, and Tom's reply after it" {
+    var t: TestLevel = .{};
+    t.init(false);
+    var game = state.GameState{ .invincible = true };
+    game_mod.beginChapter(&game, t.level.start_pos, story.CHAPTERS[0], story.chapterBeats(0));
+    const hasLines = struct {
+        fn f(g: *const state.GameState) bool {
+            return g.story.lines.len > 0;
+        }
+    }.f;
+    _ = try playChapter(&t, &game, 120, true, hasLines);
+    try std.testing.expect(game.spawner.wave == 1 and game.spawner.phase == .lull);
+    const first = story.BEATS[story.chapterBeats(0).start];
+    try std.testing.expect(game.story.lines.front().?.voice == .ellie and game.story.lines.front().?.text == first.text);
+    try std.testing.expect(game.story.lines.len == 3 and game.story.lines.items[1].voice == .tom_radio);
+}
+
+test "[scenario] a wave's lines still play when it runs out of time into the next" {
+    var t: TestLevel = .{};
+    t.init(false);
+    var game = state.GameState{ .invincible = true };
+    //Town Centre's exchange is on its wave 2 ending; nothing is killed, so wave 2 times out into wave 3
+    game_mod.beginChapter(&game, t.level.start_pos, story.CHAPTERS[1], story.chapterBeats(1));
+    const heardEllie = struct {
+        fn f(g: *const state.GameState) bool {
+            for (g.story.lines.items[0..g.story.lines.len]) |l| if (l.voice == .ellie) return true;
+            return false;
+        }
+    }.f;
+    _ = try playChapter(&t, &game, 300, false, heardEllie);
+    try std.testing.expect(game.spawner.wave == story.CHAPTERS[1].first_wave + 2 and !game.spawner.cleared);
+}
+
+test "[scenario] a chapter isn't complete until its last line has been heard" {
+    var t: TestLevel = .{};
+    t.init(false);
+    var game = state.GameState{ .invincible = true };
+    game_mod.beginChapter(&game, t.level.start_pos, story.CHAPTERS[0], story.chapterBeats(0));
+    const never = struct {
+        fn f(_: *const state.GameState) bool {
+            return false;
+        }
+    }.f;
+    const result = try playChapter(&t, &game, 400, true, never);
+    try std.testing.expect(result == .chapter_complete and game.story.lines.len == 0);
+    const r = story.chapterBeats(0);
+    try std.testing.expect(game.story.fired == (@as(u64, 1) << @intCast(r.end - r.start)) - 1); //Every line, "I'm coming" last
+    //It waited for that last line, past the usual pause after the last wave
+    try std.testing.expect(game.spawner.phase_time > consts.CHAPTER_COMPLETE_DELAY);
 }

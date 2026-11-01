@@ -19,6 +19,7 @@ const melee_sys = @import("melee_system.zig");
 const gore_sys = @import("gore_system.zig");
 const camera_sys = @import("camera_system.zig");
 const story = @import("story.zig");
+const story_sys = @import("story_system.zig");
 
 const Vec2f = @Vector(2, f32);
 
@@ -33,9 +34,13 @@ pub const TickResult = enum { playing, player_died, chapter_complete };
 pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.FlowField, input: state.Input, dt: f32, frame_arena: *Arena) TickResult {
     const grid = &level.collision_grid;
     game.run_time += dt;
+    game.events.len = 0;
 
-    //Spawn enemies offscreen
+    //Spawn enemies offscreen. A wave starting or ending is a story moment
+    const wave_before = game.spawner.wave;
+    const phase_before = game.spawner.phase;
     enemy_spawn_sys.update(&game.spawner, &game.enemies, game.rng.random(), game.player.pos, &level.spawn_cells, field, grid, dt);
+    waveEvents(&game.events, &game.spawner, wave_before, phase_before);
 
     //Ammo and health drops
     const lull = game.spawner.phase == .lull;
@@ -56,17 +61,19 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     //out). Wounds spray blood and kills burst into gore
     bullet_sys.update(&game.bullets, grid, dt);
     const hits = bullet_sys.collide(&game.bullets, game.enemies.positions(), game.enemies.kind[0..game.enemies.len], frame_arena.alloc(state.Hit, game.bullets.len));
-    const impacts = combat_sys.applyHits(hits, &game.enemies, &game.player, &game.popups, game.scoring, frame_arena.alloc(state.Impact, hits.len));
+    const impacts = combat_sys.applyHits(hits, &game.enemies, &game.player, &game.popups, !game.story.active, frame_arena.alloc(state.Impact, hits.len));
     gore_sys.spawn(&game.gore, impacts, game.gore_rng.random());
     //Out of ammo, the player strikes the nearest enemies in reach instead
     const melee_hits = melee_sys.update(&game.melee, game.enemies.positions(), game.player.pos, game.bullets.ammo, dt, frame_arena.alloc(state.Hit, consts.MELEE_MAX_TARGETS));
-    const melee_impacts = combat_sys.applyHits(melee_hits, &game.enemies, &game.player, &game.popups, game.scoring, frame_arena.alloc(state.Impact, melee_hits.len));
+    const melee_impacts = combat_sys.applyHits(melee_hits, &game.enemies, &game.player, &game.popups, !game.story.active, frame_arena.alloc(state.Impact, melee_hits.len));
     gore_sys.spawn(&game.gore, melee_impacts, game.gore_rng.random());
     game.bullets.removeDead();
     game.enemies.removeDead();
 
-    //Enemies touching the player hurt them
+    //Enemies touching the player hurt them. Falling to low health is a story moment
+    const health_before = game.player.health;
     combat_sys.applyEnemyContact(&game.enemies, &game.player, if (game.invincible) 0 else consts.CONTACT_DMG, &game.popups);
+    if (health_before > consts.PLAYER_LOW_HEALTH and game.player.health <= consts.PLAYER_LOW_HEALTH) game.events.add(.{ .trigger = .low_health });
     if (game.player.health == 0) {
         game.player.hit_flash_timer = 0; //The run end screen shows the last frame, so don't leave it inverted
         return .player_died;
@@ -96,15 +103,31 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     game.popups.update(dt);
     gore_sys.update(&game.gore, grid, dt);
 
-    //A story chapter is done once its last wave is cleared, after a moment to see it was, or once its walk
-    //is walked
-    if (game.walk_left > 0) {
-        game.walk_left -= maths.magnitude(game.player.vel) * dt;
-        if (game.walk_left <= 0) return .chapter_complete;
+    //Story: this frame's moments set off the chapter's lines. It is done once its last wave is cleared (after a
+    //moment to see it was) or its walk is walked, and every line has been heard
+    if (!game.story.active) return .playing;
+    story_sys.update(&game.story, story.BEATS[game.story.beats.start..game.story.beats.end], game.events.slice(), dt);
+    const done = switch (game.story.objective) {
+        .survive => game.spawner.isLastWave() and game.spawner.phase == .lull and game.spawner.phase_time >= consts.CHAPTER_COMPLETE_DELAY,
+        .walk => blk: {
+            game.walk_left -= maths.magnitude(game.player.vel) * dt;
+            break :blk game.walk_left <= 0;
+        },
+    };
+    return if (done and game.story.lines.len == 0) .chapter_complete else .playing;
+}
+
+/// The story moments in the spawner's last update: a wave starting, and the one before it over (cleared, or run out
+/// of time into the next), and the last wave of a chapter cleared
+///
+fn waveEvents(events: *state.StoryEvents, spawner: *const state.Spawner, wave_before: u16, phase_before: state.WavePhase) void {
+    if (spawner.wave != wave_before) {
+        if (phase_before == .wave) events.add(.{ .trigger = .wave_over, .wave = wave_before });
+        events.add(.{ .trigger = .wave_started, .wave = spawner.wave });
+    } else if (phase_before == .wave and spawner.phase == .lull) {
+        events.add(.{ .trigger = .wave_over, .wave = spawner.wave });
+        if (spawner.isLastWave()) events.add(.{ .trigger = .chapter_cleared });
     }
-    const spawner = &game.spawner;
-    if (spawner.isLastWave() and spawner.phase == .lull and spawner.phase_time >= consts.CHAPTER_COMPLETE_DELAY) return .chapter_complete;
-    return .playing;
 }
 
 /// Start a fresh run at the level's `start_pos`: everything back to the start (the rngs and debug settings carry
@@ -118,11 +141,12 @@ pub fn beginRun(game: *state.GameState, start_pos: Vec2f) void {
 }
 
 /// Start a story chapter: a fresh run that plays the chapter's waves and then stops spawning, or for a walk
-/// chapter never spawns and has the player walk story.WALK_DIST
+/// chapter never spawns and has the player walk story.WALK_DIST. `beats` are its lines (story.chapterBeats; the
+/// tests can give a chapter none)
 ///
-pub fn beginChapter(game: *state.GameState, start_pos: Vec2f, chapter: story.Chapter) void {
+pub fn beginChapter(game: *state.GameState, start_pos: Vec2f, chapter: story.Chapter, beats: story.BeatRange) void {
     beginRun(game, start_pos);
-    game.scoring = false; //Story is about getting through, not the score
+    game.story = .{ .active = true, .objective = chapter.objective, .beats = beats, .wave_offset = chapter.first_wave -| 1 };
     switch (chapter.objective) {
         .survive => {
             game.spawner.wave = chapter.first_wave - 1; //The lull counts down to the first
@@ -156,7 +180,7 @@ test "[game] a run begins at the start point with nothing carried over but the r
     try std.testing.expect(game.bullets.ammo == consts.START_AMMO and game.enemies.len == 0);
     try std.testing.expect(@reduce(.And, game.player.pos == Vec2f{ 2, -3 }) and @reduce(.And, game.camera.pos == Vec2f{ 2, -3 }));
     try std.testing.expect(game.trigger.button_cooldown == consts.RUN_START_FIRE_DELAY);
-    try std.testing.expect(game.invincible and game.scoring);
+    try std.testing.expect(game.invincible and !game.story.active);
     try std.testing.expect(std.meta.eql(game.rng, rng_next)); //The random sequence carries on
 }
 

@@ -3,6 +3,7 @@
 const std = @import("std");
 const consts = @import("tweak_constants.zig");
 const memory = @import("memory.zig");
+const story = @import("story.zig");
 
 const Vec2f = @Vector(2, f32);
 
@@ -534,6 +535,77 @@ pub const RunEnd = struct {
     }
 };
 
+/// A story moment this frame, written by game.tick (see story.Trigger). `wave` is the wave table's number (u16 so
+/// survival's endless waves never overflow it); story_system makes it the chapter's own
+///
+pub const StoryEvent = struct {
+    trigger: story.Trigger,
+    wave: u16 = 0,
+};
+
+pub const StoryEvents = struct {
+    pub const capacity = consts.MAX_STORY_EVENTS;
+
+    len: u8 = 0,
+    items: [capacity]StoryEvent = undefined,
+
+    /// More moments than fit in one frame can't happen in play; any past capacity are dropped
+    pub fn add(self: *StoryEvents, event: StoryEvent) void {
+        if (self.len == capacity) return;
+        self.items[self.len] = event;
+        self.len += 1;
+    }
+
+    pub fn slice(self: *const StoryEvents) []const StoryEvent {
+        return self.items[0..self.len];
+    }
+};
+
+/// A line of dialogue waiting to show, or showing (the front one): `time` is how long it has been up
+pub const Line = struct {
+    text: story.TextId,
+    voice: story.Voice,
+    time: f32 = 0,
+};
+
+/// The lines to show, in order, one at a time
+///
+pub const Lines = struct {
+    pub const capacity = consts.MAX_DIALOGUE_LINES;
+
+    len: u8 = 0,
+    items: [capacity]Line = undefined,
+
+    /// Queue a line. When full the oldest goes, even if it is showing: what is newest matters most
+    pub fn push(self: *Lines, line: Line) void {
+        if (self.len == capacity) self.popFront();
+        self.items[self.len] = line;
+        self.len += 1;
+    }
+
+    pub fn popFront(self: *Lines) void {
+        std.debug.assert(self.len > 0);
+        std.mem.copyForwards(Line, self.items[0 .. self.len - 1], self.items[1..self.len]);
+        self.len -= 1;
+    }
+
+    pub fn front(self: *const Lines) ?Line {
+        return if (self.len > 0) self.items[0] else null;
+    }
+};
+
+/// A story chapter's state: which of its beats have fired this attempt and the lines they queued. Small and cold:
+/// read once a frame by story_system and the HUD, never by the hot loops
+///
+pub const Story = struct {
+    active: bool = false, //A story chapter (survival leaves it off): no score, beats, objectives
+    objective: story.Objective = .survive,
+    beats: story.BeatRange = .{}, //This chapter's slice of story.BEATS
+    wave_offset: u16 = 0, //The wave table's number of the chapter's wave 0
+    fired: u64 = 0, //Bit per beat in `beats`
+    lines: Lines = .{},
+};
+
 pub const GameState = struct {
     player: Player = .{},
     enemies: Enemies = .{},
@@ -546,8 +618,9 @@ pub const GameState = struct {
     spawner: Spawner = .{},
     camera: Camera = .{},
     run_time: f32 = 0, //Seconds survived this run
-    walk_left: f32 = 0, //Story walk chapter: metres left to walk (0 in every other run)
-    scoring: bool = true, //Kills score and build combos (survival). Story runs have no score
+    walk_left: f32 = 0, //Story walk chapter: metres left to walk
+    events: StoryEvents = .{}, //This frame's story moments (cleared at the start of each tick)
+    story: Story = .{}, //Story mode only (`active`)
     rng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(consts.RNG_SEED), //Not reset between runs
     gore_rng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(consts.RNG_SEED + 1), //Gore only, so it never changes the gameplay rolls
     invincible: bool = false, //Debug: enemies can't hurt the player (set from the debug menu). Not reset between runs

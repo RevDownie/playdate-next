@@ -8,6 +8,7 @@ const consts = @import("tweak_constants.zig");
 const memory = @import("memory.zig");
 const hud_mod = @import("hud.zig");
 const screens = @import("screens.zig");
+const story = @import("story.zig");
 const maths = @import("maths.zig");
 const state = @import("game_state.zig");
 const GameState = state.GameState;
@@ -334,10 +335,16 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     if (panel) |over| {
         hud_mod.drawGameOver(graphics, assets.fonts, game, hud, over, screen.width, screen.height);
     } else {
-        hud_mod.drawHud(graphics, assets.fonts, game, hud, screen.width, screen.height);
+        hud_mod.drawHud(graphics, assets.fonts, game, hud, screen.width, screen.height, sys.getReduceFlashing.?() != 0);
     }
     hud_mod.drawFps(sys, screen.width, screen.height);
     return .{ .drawn = @intCast(list.len) };
+}
+
+/// Whether a story line fits its voice's box on this screen (main checks every line at init, Debug only)
+///
+pub fn lineFits(playdate_api: *pd.PlaydateAPI, assets: *const Assets, voice: story.Voice, text: []const u8) bool {
+    return hud_mod.lineFits(playdate_api.graphics.*, assets.fonts, voice, text, playdate_api.display.*.getWidth.?());
 }
 
 /// A screen with no world under it (the title, story cards): the text on white

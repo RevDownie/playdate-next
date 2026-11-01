@@ -106,6 +106,16 @@ pub const COMBO_MILESTONE_FIRST: u32 = 5;
 pub const COMBO_MILESTONE_EVERY: u32 = 10; //...then every multiple of this
 pub const COMBO_LOST_MIN: u32 = 5; //Losing a combo at least this long shows "COMBO LOST"
 pub const MAX_POPUPS: u8 = 8; //Messages in the world at once; a new one replaces the oldest
+pub const PLAYER_LOW_HEALTH: u8 = 25; //At or below: the HUD's health turns loud, and story can have a line
+
+/// Story dialogue (see story.zig and story_system). One line shows at a time, for long enough to read it
+pub const MAX_STORY_EVENTS: u8 = 8; //Story moments in one frame: a wave ending, the next starting, low health...
+pub const MAX_DIALOGUE_LINES: u8 = 4; //Lines waiting their turn; a new one past this drops the oldest
+pub const LINE_BASE_TIME: f32 = 1.5; //Seconds every line shows...
+pub const LINE_TIME_PER_CHAR: f32 = 0.055; //...plus this per character, so a long line is up long enough to read
+pub const RADIO_TUNE_TIME: f32 = 0.35; //Ellie: seconds of static as the walkie-talkie picks her up, before her words
+pub const RADIO_DROP_TIME: f32 = 0.2; //...and as she drops out after them
+pub const RADIO_STATIC_FPS: f32 = 15; //How often the static on the walkie-talkie's box changes
 pub const POPUP_TIME: f32 = 0.7; //Seconds a combo message shows
 pub const POPUP_BIG_TIME: f32 = 1.4; //...and a milestone or COMBO LOST
 
