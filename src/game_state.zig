@@ -565,6 +565,7 @@ pub const StoryEvents = struct {
 pub const Line = struct {
     text: story.TextId,
     voice: story.Voice,
+    beat: u8 = 0, //Its beat's index in the chapter's beats
     time: f32 = 0,
 };
 
@@ -594,7 +595,7 @@ pub const Lines = struct {
     }
 };
 
-/// A story chapter's state: which of its beats have fired this attempt and the lines they queued. Small and cold:
+/// A story chapter's state: which of its beats have fired and the lines they queued. Small and cold:
 /// read once a frame by story_system and the HUD, never by the hot loops
 ///
 pub const Story = struct {
@@ -604,6 +605,15 @@ pub const Story = struct {
     wave_offset: u16 = 0, //The wave table's number of the chapter's wave 0
     fired: u64 = 0, //Bit per beat in `beats`
     lines: Lines = .{},
+
+    /// The beats whose lines have been heard: fired and no longer queued. A retry of the chapter starts with these
+    /// already fired, so each line plays once per chapter rather than once per attempt, while a line cut off by a
+    /// death plays again
+    pub fn heard(self: *const Story) u64 {
+        var queued: u64 = 0;
+        for (self.lines.items[0..self.lines.len]) |l| queued |= @as(u64, 1) << @intCast(l.beat);
+        return self.fired & ~queued;
+    }
 };
 
 pub const GameState = struct {

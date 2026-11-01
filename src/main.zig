@@ -172,12 +172,12 @@ fn startRun() void {
     screen = .playing;
 }
 
-/// Start (or retry) story chapter `index` on its own level
+/// Start (or retry) story chapter `index` on its own level, with the beats in `heard` already played
 ///
-fn startChapter(index: u8) void {
+fn startChapter(index: u8, heard: u64) void {
     const c = story.CHAPTERS[index];
     if (c.level != current_level) loadLevel(c.level);
-    game.beginChapter(&game_state, level.start_pos, c, story.chapterBeats(index));
+    game.beginChapter(&game_state, level.start_pos, c, story.chapterBeats(index), heard);
     mode = .story;
     chapter = index;
     screen = .playing;
@@ -188,7 +188,7 @@ fn startChapter(index: u8) void {
 fn restart() void {
     switch (mode) {
         .survival => startRun(),
-        .story => startChapter(chapter),
+        .story => startChapter(chapter, game_state.story.heard()), //Lines play once per chapter, not per attempt
     }
 }
 
@@ -214,7 +214,7 @@ fn continueFromCard(card: screens.StoryCard) void {
     switch (card.kind) {
         .intro => {
             chapter_secs = 0;
-            startChapter(card.chapter);
+            startChapter(card.chapter, 0);
         },
         .outro => screen = .{ .story_card = if (card.chapter + 1 < story.CHAPTERS.len)
             .{ .kind = .intro, .chapter = card.chapter + 1 }

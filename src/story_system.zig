@@ -6,7 +6,7 @@ const state = @import("game_state.zig");
 const story = @import("story.zig");
 
 /// The front line counts its time and goes once it has been up for `story.lineDuration`. Then each of the chapter's
-/// `beats` (its slice of story.BEATS) that hasn't fired this attempt fires if one of `events` is its trigger,
+/// `beats` (its slice of story.BEATS) that hasn't fired this chapter fires if one of `events` is its trigger,
 /// queueing its line. Beats are checked in table order, so lines set off together play in that order
 ///
 pub fn update(st: *state.Story, beats: []const story.Beat, events: []const state.StoryEvent, dt: f32) void {
@@ -24,7 +24,7 @@ pub fn update(st: *state.Story, beats: []const story.Beat, events: []const state
         for (events) |e| {
             if (!matches(beat, e, st.wave_offset)) continue;
             st.fired |= bit;
-            lines.push(.{ .text = beat.text, .voice = beat.voice });
+            lines.push(.{ .text = beat.text, .voice = beat.voice, .beat = @intCast(i) });
             break;
         }
     }

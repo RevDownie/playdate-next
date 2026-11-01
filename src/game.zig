@@ -142,11 +142,12 @@ pub fn beginRun(game: *state.GameState, start_pos: Vec2f) void {
 
 /// Start a story chapter: a fresh run that plays the chapter's waves and then stops spawning, or for a walk
 /// chapter never spawns and has the player walk story.WALK_DIST. `beats` are its lines (story.chapterBeats; the
-/// tests can give a chapter none)
+/// tests can give a chapter none) and `heard` those already heard on an earlier attempt (Story.heard), which don't
+/// play again
 ///
-pub fn beginChapter(game: *state.GameState, start_pos: Vec2f, chapter: story.Chapter, beats: story.BeatRange) void {
+pub fn beginChapter(game: *state.GameState, start_pos: Vec2f, chapter: story.Chapter, beats: story.BeatRange, heard: u64) void {
     beginRun(game, start_pos);
-    game.story = .{ .active = true, .objective = chapter.objective, .beats = beats, .wave_offset = chapter.first_wave -| 1 };
+    game.story = .{ .active = true, .objective = chapter.objective, .beats = beats, .wave_offset = chapter.first_wave -| 1, .fired = heard };
     switch (chapter.objective) {
         .survive => {
             game.spawner.wave = chapter.first_wave - 1; //The lull counts down to the first
