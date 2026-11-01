@@ -21,6 +21,8 @@ pub const Input = struct {
     down: bool = false,
     fire_held: bool = false, //A or B
     fire_pressed: bool = false, //A or B went down this frame
+    up_pressed: bool = false, //Up went down this frame (menus)
+    down_pressed: bool = false, //Down went down this frame (menus)
     crank_delta: f32 = 0, //Degrees turned since last frame, positive is forward
 };
 
@@ -406,7 +408,7 @@ pub const Gore = struct {
 pub const WavePhase = enum(u8) { lull, wave };
 
 /// Where the run is in its waves (see the WAVE_* constants and enemy_spawn_system). A lull counts down to the next
-/// wave; a wave holds out (spawning) for `hold` seconds, then must be cleared to be survived
+/// wave; a wave keeps coming (spawning) for `hold` seconds, then must be cleared
 ///
 pub const Spawner = struct {
     wave: u16 = 0, //The current wave, or during a lull the one just fought (0 before the first)
@@ -417,11 +419,17 @@ pub const Spawner = struct {
     peak: u8 = 0,
     pack: u8 = 0,
     sides: u8 = 0, //Bit per level_loader.MapSide the wave comes from
-    survived: bool = false, //This lull follows a wave the player survived (rather than one that ran out of time)
+    cleared: bool = false, //This lull follows a wave the player cleared (rather than one that ran out of time)
+    last_wave: u16 = 0, //Story: no wave after this one (0 = endless, survival)
 
     /// Still spawning: the wave is being held out
     pub fn isHolding(self: *const Spawner) bool {
         return self.phase == .wave and self.phase_time < self.hold;
+    }
+
+    /// Fighting the last wave there will be (never in an endless run)
+    pub fn isLastWave(self: *const Spawner) bool {
+        return self.last_wave != 0 and self.wave >= self.last_wave;
     }
 };
 
@@ -538,6 +546,8 @@ pub const GameState = struct {
     spawner: Spawner = .{},
     camera: Camera = .{},
     run_time: f32 = 0, //Seconds survived this run
+    walk_left: f32 = 0, //Story walk chapter: metres left to walk (0 in every other run)
+    scoring: bool = true, //Kills score and build combos (survival). Story runs have no score
     rng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(consts.RNG_SEED), //Not reset between runs
     gore_rng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(consts.RNG_SEED + 1), //Gore only, so it never changes the gameplay rolls
     invincible: bool = false, //Debug: enemies can't hurt the player (set from the debug menu). Not reset between runs

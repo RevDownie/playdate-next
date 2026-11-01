@@ -7,6 +7,7 @@ const kit_descs = @import("kit_descs.zig");
 const consts = @import("tweak_constants.zig");
 const memory = @import("memory.zig");
 const hud_mod = @import("hud.zig");
+const screens = @import("screens.zig");
 const maths = @import("maths.zig");
 const state = @import("game_state.zig");
 const GameState = state.GameState;
@@ -337,6 +338,28 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     }
     hud_mod.drawFps(sys, screen.width, screen.height);
     return .{ .drawn = @intCast(list.len) };
+}
+
+/// A screen with no world under it (the title, story cards): the text on white
+///
+pub fn renderTitle(playdate_api: *pd.PlaydateAPI, assets: *const Assets, title: screens.Title) void {
+    const graphics = clearForText(playdate_api);
+    hud_mod.drawTitle(graphics, assets.fonts, title, playdate_api.display.*.getWidth.?());
+    hud_mod.drawFps(playdate_api.system.*, playdate_api.display.*.getWidth.?(), playdate_api.display.*.getHeight.?());
+}
+
+pub fn renderStoryCard(playdate_api: *pd.PlaydateAPI, assets: *const Assets, card: screens.StoryCard) void {
+    const graphics = clearForText(playdate_api);
+    const disp = playdate_api.display.*;
+    hud_mod.drawStoryCard(graphics, assets.fonts, card, disp.getWidth.?(), disp.getHeight.?());
+    hud_mod.drawFps(playdate_api.system.*, disp.getWidth.?(), disp.getHeight.?());
+}
+
+fn clearForText(playdate_api: *pd.PlaydateAPI) pd.playdate_graphics {
+    const graphics = playdate_api.graphics.*;
+    _ = graphics.setDrawMode.?(pd.kDrawModeCopy);
+    graphics.clear.?(pd.kColorWhite);
+    return graphics;
 }
 
 const Screen = struct {

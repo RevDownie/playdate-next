@@ -11,6 +11,7 @@ const Level = @import("../level_loader.zig").Level;
 const FlowField = @import("../flow_field.zig").FlowField;
 const level_loader = @import("../level_loader.zig");
 const maths = @import("../maths.zig");
+const story = @import("../story.zig");
 
 const Vec2f = @Vector(2, f32);
 
@@ -388,4 +389,94 @@ test "[scenario] out of ammo, the player's melee fights off a few enemies" {
     try std.testing.expect(game.enemies.len == 0);
     try std.testing.expect(game.player.kills == 3 and swings >= 2);
     try std.testing.expect(game.player.health > consts.PLAYER_MAX_HEALTH - 4 * consts.CONTACT_DMG); //Mostly held off
+}
+
+test "[scenario] a story chapter stops spawning after its waves and is complete once they are cleared" {
+    var t: TestLevel = .{};
+    t.init(false);
+    var game = state.GameState{ .invincible = true };
+    game_mod.beginChapter(&game, t.level.start_pos, .{ .level = 0, .objective = .survive, .first_wave = 1, .last_wave = 2 });
+    try std.testing.expect(t.tick(&game, .{}) == .playing); //Not complete before the first wave
+    try std.testing.expect(!game.scoring); //Story has no score
+
+    //Wave 1: cleared as soon as it stops spawning
+    var frames: u32 = 0;
+    while (game.spawner.wave < 2) : (frames += 1) {
+        try std.testing.expect(t.tick(&game, .{}) == .playing);
+        if (game.spawner.phase == .wave and !game.spawner.isHolding()) game.enemies.len = 0;
+        try std.testing.expect(frames < consts.TARGET_FPS * 120);
+    }
+
+    //Wave 2, the last: left standing well past the time a survival wave is followed by the next
+    const limit: u32 = @intFromFloat((game.spawner.hold + consts.WAVE_CLEAR_MAX_TIME + 5) * 60);
+    for (0..limit) |_| {
+        try std.testing.expect(t.tick(&game, .{}) == .playing);
+        try std.testing.expect(game.spawner.wave == 2);
+    }
+    try std.testing.expect(game.spawner.phase == .wave and game.enemies.len > 0);
+
+    //Cleared: a moment to see it was, then complete, with nothing more spawned
+    game.enemies.len = 0;
+    var result = game_mod.TickResult.playing;
+    frames = 0;
+    while (result == .playing) : (frames += 1) {
+        result = t.tick(&game, .{});
+        try std.testing.expect(game.enemies.len == 0);
+        try std.testing.expect(frames < 60 * 10);
+    }
+    try std.testing.expect(result == .chapter_complete and game.spawner.wave == 2);
+    try std.testing.expect(@as(f32, @floatFromInt(frames)) / 60.0 >= consts.CHAPTER_COMPLETE_DELAY - 0.1);
+}
+
+test "[scenario] a survival run is never complete: its waves go on" {
+    var t: TestLevel = .{};
+    t.init(false);
+    var game = t.newRun();
+    game.invincible = true;
+    var frames: u32 = 0;
+    while (game.spawner.wave < 3) : (frames += 1) {
+        try std.testing.expect(t.tick(&game, .{}) == .playing);
+        if (game.spawner.phase == .wave and !game.spawner.isHolding()) game.enemies.len = 0;
+        try std.testing.expect(frames < consts.TARGET_FPS * 300);
+    }
+}
+
+test "[scenario] a later story chapter starts on its first wave and ends after its last" {
+    var t: TestLevel = .{};
+    t.init(false);
+    var game = state.GameState{ .invincible = true };
+    game_mod.beginChapter(&game, t.level.start_pos, .{ .level = 0, .objective = .survive, .first_wave = 4, .last_wave = 5 });
+    var frames: u32 = 0;
+    var first_seen: u16 = 0;
+    var result = game_mod.TickResult.playing;
+    while (result == .playing) : (frames += 1) {
+        result = t.tick(&game, .{});
+        if (first_seen == 0 and game.spawner.wave > 0 and game.spawner.phase == .wave) first_seen = game.spawner.wave;
+        if (game.spawner.phase == .wave and !game.spawner.isHolding()) game.enemies.len = 0;
+        try std.testing.expect(game.spawner.wave <= 5);
+        try std.testing.expect(frames < consts.TARGET_FPS * 300);
+    }
+    try std.testing.expect(result == .chapter_complete and first_seen == 4 and game.spawner.wave == 5);
+}
+
+test "[scenario] a walk chapter never spawns and is complete once the player has walked its distance" {
+    var t: TestLevel = .{};
+    t.init(false);
+    var game = state.GameState{};
+    game_mod.beginChapter(&game, t.level.start_pos, .{ .level = 0, .objective = .walk });
+    //Standing still never completes it
+    for (0..consts.TARGET_FPS * 30) |_| try std.testing.expect(t.tick(&game, .{}) == .playing);
+    try std.testing.expect(game.enemies.len == 0);
+    //Walk back and forth across the open middle of the map
+    var frames: u32 = 0;
+    var result = game_mod.TickResult.playing;
+    while (result == .playing) : (frames += 1) {
+        const right = (frames / (consts.TARGET_FPS * 2)) % 2 == 0;
+        result = t.tick(&game, .{ .right = right, .left = !right });
+        try std.testing.expect(game.enemies.len == 0);
+        try std.testing.expect(frames < 60 * 120);
+    }
+    try std.testing.expect(result == .chapter_complete);
+    const walked = @as(f32, @floatFromInt(frames)) / 60.0 * consts.PLAYER_MAX_SPEED;
+    try std.testing.expect(walked >= story.WALK_DIST * 0.95 and walked <= story.WALK_DIST * 1.3);
 }

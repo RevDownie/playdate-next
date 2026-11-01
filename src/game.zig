@@ -18,10 +18,12 @@ const drop_sys = @import("drop_system.zig");
 const melee_sys = @import("melee_system.zig");
 const gore_sys = @import("gore_system.zig");
 const camera_sys = @import("camera_system.zig");
+const story = @import("story.zig");
 
 const Vec2f = @Vector(2, f32);
 
-pub const TickResult = enum { playing, player_died };
+/// `chapter_complete` only comes in a story chapter: once its last wave is cleared, or its walk is walked
+pub const TickResult = enum { playing, player_died, chapter_complete };
 
 /// The orchestrator: advances the simulation one frame by running every system in a fixed order.
 /// Systems only see the data they are handed; per frame scratch comes from `frame_arena`.
@@ -54,11 +56,11 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     //out). Wounds spray blood and kills burst into gore
     bullet_sys.update(&game.bullets, grid, dt);
     const hits = bullet_sys.collide(&game.bullets, game.enemies.positions(), game.enemies.kind[0..game.enemies.len], frame_arena.alloc(state.Hit, game.bullets.len));
-    const impacts = combat_sys.applyHits(hits, &game.enemies, &game.player, &game.popups, frame_arena.alloc(state.Impact, hits.len));
+    const impacts = combat_sys.applyHits(hits, &game.enemies, &game.player, &game.popups, game.scoring, frame_arena.alloc(state.Impact, hits.len));
     gore_sys.spawn(&game.gore, impacts, game.gore_rng.random());
     //Out of ammo, the player strikes the nearest enemies in reach instead
     const melee_hits = melee_sys.update(&game.melee, game.enemies.positions(), game.player.pos, game.bullets.ammo, dt, frame_arena.alloc(state.Hit, consts.MELEE_MAX_TARGETS));
-    const melee_impacts = combat_sys.applyHits(melee_hits, &game.enemies, &game.player, &game.popups, frame_arena.alloc(state.Impact, melee_hits.len));
+    const melee_impacts = combat_sys.applyHits(melee_hits, &game.enemies, &game.player, &game.popups, game.scoring, frame_arena.alloc(state.Impact, melee_hits.len));
     gore_sys.spawn(&game.gore, melee_impacts, game.gore_rng.random());
     game.bullets.removeDead();
     game.enemies.removeDead();
@@ -94,6 +96,14 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     game.popups.update(dt);
     gore_sys.update(&game.gore, grid, dt);
 
+    //A story chapter is done once its last wave is cleared, after a moment to see it was, or once its walk
+    //is walked
+    if (game.walk_left > 0) {
+        game.walk_left -= maths.magnitude(game.player.vel) * dt;
+        if (game.walk_left <= 0) return .chapter_complete;
+    }
+    const spawner = &game.spawner;
+    if (spawner.isLastWave() and spawner.phase == .lull and spawner.phase_time >= consts.CHAPTER_COMPLETE_DELAY) return .chapter_complete;
     return .playing;
 }
 
@@ -104,7 +114,25 @@ pub fn beginRun(game: *state.GameState, start_pos: Vec2f) void {
     game.reset();
     game.player.pos = start_pos;
     game.camera.pos = start_pos;
-    game.trigger.button_cooldown = consts.FIRE_BUTTON_DELAY;
+    game.trigger.button_cooldown = consts.RUN_START_FIRE_DELAY;
+}
+
+/// Start a story chapter: a fresh run that plays the chapter's waves and then stops spawning, or for a walk
+/// chapter never spawns and has the player walk story.WALK_DIST
+///
+pub fn beginChapter(game: *state.GameState, start_pos: Vec2f, chapter: story.Chapter) void {
+    beginRun(game, start_pos);
+    game.scoring = false; //Story is about getting through, not the score
+    switch (chapter.objective) {
+        .survive => {
+            game.spawner.wave = chapter.first_wave - 1; //The lull counts down to the first
+            game.spawner.last_wave = chapter.last_wave;
+        },
+        .walk => {
+            game.spawner.timer = std.math.inf(f32);
+            game.walk_left = story.WALK_DIST;
+        },
+    }
 }
 
 /// Whether the run that just ended beats the saved `best`. Debug invincibility is a cheat, so it never does
@@ -127,8 +155,8 @@ test "[game] a run begins at the start point with nothing carried over but the r
     try std.testing.expect(game.player.score == 0 and game.player.health == consts.PLAYER_MAX_HEALTH);
     try std.testing.expect(game.bullets.ammo == consts.START_AMMO and game.enemies.len == 0);
     try std.testing.expect(@reduce(.And, game.player.pos == Vec2f{ 2, -3 }) and @reduce(.And, game.camera.pos == Vec2f{ 2, -3 }));
-    try std.testing.expect(game.trigger.button_cooldown == consts.FIRE_BUTTON_DELAY);
-    try std.testing.expect(game.invincible);
+    try std.testing.expect(game.trigger.button_cooldown == consts.RUN_START_FIRE_DELAY);
+    try std.testing.expect(game.invincible and game.scoring);
     try std.testing.expect(std.meta.eql(game.rng, rng_next)); //The random sequence carries on
 }
 

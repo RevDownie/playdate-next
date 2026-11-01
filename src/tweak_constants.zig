@@ -120,7 +120,7 @@ pub const WaveDef = struct {
     hold: f32, //Seconds the wave keeps spawning
     peak: u8, //Enemies kept alive by the end of the hold
     pack: u8, //Enemies per pack (they drop in together on one cell, so they arrive as a crowd)
-    lull: f32, //Seconds of quiet after it is survived
+    lull: f32, //Seconds of quiet after it is cleared
 };
 pub const WAVES = [_]WaveDef{
     .{ .hold = 20, .peak = 14, .pack = 4, .lull = 7 }, //1: from one side, a taste
@@ -146,11 +146,12 @@ pub const WAVE_PEAK_SCALE: f32 = 1.0; //Every wave's peak is multiplied by this 
 /// four. One side is easy to read and to back away from; a horde on a single front walks into the gun in single
 /// file, so the surround is what eventually overruns the player
 pub const WAVES_PER_EXTRA_SIDE: u16 = 3;
-pub const WAVE_CLEAR_LEFT: u8 = 3; //After the hold, a wave is survived once no more than this many enemies are left
+pub const WAVE_CLEAR_LEFT: u8 = 3; //After the hold, a wave is cleared once no more than this many enemies are left
 pub const WAVE_CLEAR_MAX_TIME: f32 = 20.0; //...or followed straight away by the next wave (no lull) if that takes longer
 pub const FIRST_WAVE_DELAY: f32 = 3.0;
 pub const WAVE_BANNER_TIME: f32 = 2.0; //How long "WAVE N" shows when a wave starts, and "CLEAR THE REST" after the hold
-pub const WAVE_SURVIVED_BANNER_TIME: f32 = 2.5; //...and "WAVE N SURVIVED" when it is survived
+pub const WAVE_CLEARED_BANNER_TIME: f32 = 2.5; //...and "WAVE N CLEARED" when it is cleared
+pub const CHAPTER_COMPLETE_DELAY: f32 = 2.5; //Story: seconds after the last wave is cleared before the chapter ends
 pub const SPAWN_EDGE_BAND: f32 = 1.0; //Enemies drop in on free cells within this many metres of the map's edge
 /// ...but never closer than this to the player, measured on the spawn ring (an ellipse with the screen's aspect:
 /// 2.3m to the sides is 1.38m above and below), which keeps the screen's corners inside it
@@ -192,7 +193,15 @@ pub const CAMERA_SHAKE_MAX: f32 = 3.0 / METRES_TO_PIXELS;
 pub const CAMERA_SHAKE_SETTLE_RATE: f32 = 25; //Per second: most of a kick has gone in a few frames
 
 pub const FIRE_ANGLE_DELTA: f32 = 30; //12 bullets per crank revolution
-pub const FIRE_BUTTON_DELAY: f32 = 0.25; //Button fire is the fallback: well under the rate of a steadily turned crank
+/// Holding A or B fires nearly as fast as a steadily turned crank, so players who can't crank aren't left far behind.
+/// The crank keeps the edge of turning faster in a burst
+pub const FIRE_BUTTON_DELAY: f32 = 0.1;
+const STEADY_CRANK_SHOTS_PER_SEC: f32 = 360.0 / FIRE_ANGLE_DELTA; //A revolution a second
+comptime {
+    if (1.0 / FIRE_BUTTON_DELAY > STEADY_CRANK_SHOTS_PER_SEC) @compileError("Button fire should not outpace a steadily turned crank");
+    if (1.0 / FIRE_BUTTON_DELAY < STEADY_CRANK_SHOTS_PER_SEC * 0.75) @compileError("Button fire should be close to a steadily turned crank, for players who can't crank");
+}
+pub const RUN_START_FIRE_DELAY: f32 = 0.3; //Seconds holding A/B doesn't fire at the start of a run, so the press that started it doesn't
 
 pub const BUMP_DISTANCE = 0.2;
 pub const BUMP_DISTANCE_SMALL = 0.125;
@@ -275,6 +284,7 @@ pub const DROP_MARKER_INSET_SIDE: i32 = 24;
 
 pub const MAX_SCORE: u64 = 9999999999;
 pub const GAME_OVER_INPUT_DELAY: f32 = 1.0; //Seconds the run end screen ignores fire before A/B starts the next run
+pub const CARD_INPUT_DELAY: f32 = 0.6; //Seconds a story card ignores A, so a press held from before doesn't skip it
 pub const GAME_OVER_PANEL_DELAY: f32 = 0.8; //Seconds the player is seen falling down before the run end panel covers them
 comptime {
     if (GAME_OVER_PANEL_DELAY > GAME_OVER_INPUT_DELAY) @compileError("The run end panel must show before A/B can restart");
