@@ -30,7 +30,9 @@ pub const CardKind = enum(u8) { intro, outro, the_end };
 pub const StoryCard = struct {
     kind: CardKind,
     chapter: u8, //Index into story.CHAPTERS
-    time: f32 = 0,
+    secs: u32 = 0, //Outro: the chapter's play time over every attempt. The end: the whole story's
+    deaths: u16 = 0, //...and its deaths
+    time: f32 = 0, //On the card
 
     pub fn canContinue(self: StoryCard) bool {
         return self.time >= consts.CARD_INPUT_DELAY;

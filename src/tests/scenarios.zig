@@ -11,6 +11,7 @@ const Level = @import("../level_loader.zig").Level;
 const FlowField = @import("../flow_field.zig").FlowField;
 const level_loader = @import("../level_loader.zig");
 const maths = @import("../maths.zig");
+const story = @import("../story.zig");
 
 const Vec2f = @Vector(2, f32);
 
@@ -394,7 +395,7 @@ test "[scenario] a story chapter stops spawning after its waves and is complete 
     var t: TestLevel = .{};
     t.init(false);
     var game = state.GameState{ .invincible = true };
-    game_mod.beginChapter(&game, t.level.start_pos, 2);
+    game_mod.beginChapter(&game, t.level.start_pos, .{ .level = 0, .objective = .survive, .first_wave = 1, .last_wave = 2 });
     try std.testing.expect(t.tick(&game, .{}) == .playing); //Not complete before the first wave
 
     //Wave 1: cleared as soon as it stops spawning
@@ -437,4 +438,44 @@ test "[scenario] a survival run is never complete: its waves go on" {
         if (game.spawner.phase == .wave and !game.spawner.isHolding()) game.enemies.len = 0;
         try std.testing.expect(frames < consts.TARGET_FPS * 300);
     }
+}
+
+test "[scenario] a later story chapter starts on its first wave and ends after its last" {
+    var t: TestLevel = .{};
+    t.init(false);
+    var game = state.GameState{ .invincible = true };
+    game_mod.beginChapter(&game, t.level.start_pos, .{ .level = 0, .objective = .survive, .first_wave = 4, .last_wave = 5 });
+    var frames: u32 = 0;
+    var first_seen: u16 = 0;
+    var result = game_mod.TickResult.playing;
+    while (result == .playing) : (frames += 1) {
+        result = t.tick(&game, .{});
+        if (first_seen == 0 and game.spawner.wave > 0 and game.spawner.phase == .wave) first_seen = game.spawner.wave;
+        if (game.spawner.phase == .wave and !game.spawner.isHolding()) game.enemies.len = 0;
+        try std.testing.expect(game.spawner.wave <= 5);
+        try std.testing.expect(frames < consts.TARGET_FPS * 300);
+    }
+    try std.testing.expect(result == .chapter_complete and first_seen == 4 and game.spawner.wave == 5);
+}
+
+test "[scenario] a walk chapter never spawns and is complete once the player has walked its distance" {
+    var t: TestLevel = .{};
+    t.init(false);
+    var game = state.GameState{};
+    game_mod.beginChapter(&game, t.level.start_pos, .{ .level = 0, .objective = .walk });
+    //Standing still never completes it
+    for (0..consts.TARGET_FPS * 30) |_| try std.testing.expect(t.tick(&game, .{}) == .playing);
+    try std.testing.expect(game.enemies.len == 0);
+    //Walk back and forth across the open middle of the map
+    var frames: u32 = 0;
+    var result = game_mod.TickResult.playing;
+    while (result == .playing) : (frames += 1) {
+        const right = (frames / (consts.TARGET_FPS * 2)) % 2 == 0;
+        result = t.tick(&game, .{ .right = right, .left = !right });
+        try std.testing.expect(game.enemies.len == 0);
+        try std.testing.expect(frames < 60 * 120);
+    }
+    try std.testing.expect(result == .chapter_complete);
+    const walked = @as(f32, @floatFromInt(frames)) / 60.0 * consts.PLAYER_MAX_SPEED;
+    try std.testing.expect(walked >= story.WALK_DIST * 0.95 and walked <= story.WALK_DIST * 1.3);
 }

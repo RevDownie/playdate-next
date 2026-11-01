@@ -546,6 +546,7 @@ pub const GameState = struct {
     spawner: Spawner = .{},
     camera: Camera = .{},
     run_time: f32 = 0, //Seconds survived this run
+    walk_left: f32 = 0, //Story walk chapter: metres left to walk (0 in every other run)
     rng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(consts.RNG_SEED), //Not reset between runs
     gore_rng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(consts.RNG_SEED + 1), //Gore only, so it never changes the gameplay rolls
     invincible: bool = false, //Debug: enemies can't hurt the player (set from the debug menu). Not reset between runs

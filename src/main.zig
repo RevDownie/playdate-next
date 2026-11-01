@@ -70,6 +70,9 @@ var screen: ScreenUp = .{ .title = .{} };
 var mode: screens.Mode = .survival; //Of the run being played (or last played)
 var story_save: story.Save = .{}; //Read once at init, written at chapter boundaries
 var chapter: u8 = 0; //Story: the chapter being played, or on its card
+var chapter_secs: f32 = 0; //Story: play time of every attempt at this chapter so far (for judging its length)
+var chapter_deaths: u16 = 0;
+var story_finished: story.Save = .{}; //The totals of the story just finished, for The End card
 
 /// Frame timing and requests from outside the frame loop
 var time_last_tick_ms: u32 = 0;
@@ -169,7 +172,7 @@ fn startRun() void {
 fn startChapter(index: u8) void {
     const c = story.CHAPTERS[index];
     if (c.level != current_level) loadLevel(c.level);
-    game.beginChapter(&game_state, level.start_pos, c.waves);
+    game.beginChapter(&game_state, level.start_pos, c);
     mode = .story;
     chapter = index;
     screen = .playing;
@@ -184,15 +187,19 @@ fn restart() void {
     }
 }
 
-/// The chapter's last wave is cleared: save the next one to play (back to the first after the last) and show its
-/// outro card
+/// The chapter is complete: add its time and deaths to the story's, save the next chapter to play (a fresh story
+/// after the last) and show its outro card
 ///
 fn completeChapter() void {
-    const next: u8 = if (chapter + 1 < story.CHAPTERS.len) chapter + 1 else 0;
-    story_save.chapter = next;
+    chapter_secs += game_state.run_time;
+    const secs: u32 = @intFromFloat(chapter_secs);
+    const last = chapter + 1 == story.CHAPTERS.len;
+    const totals = story.Save{ .chapter = if (last) 0 else chapter + 1, .play_secs = story_save.play_secs +| secs, .deaths = story_save.deaths +| chapter_deaths };
+    if (last) story_finished = totals;
+    story_save = if (last) .{} else totals;
     writeStorySave(story_save);
-    screen = .{ .story_card = .{ .kind = .outro, .chapter = chapter } };
-    debugLog("chapter complete: chapter={d} time={d:.1}s kills={d} next={d}", .{ chapter + 1, game_state.run_time, game_state.player.kills, next + 1 });
+    screen = .{ .story_card = .{ .kind = .outro, .chapter = chapter, .secs = secs, .deaths = chapter_deaths } };
+    debugLog("chapter complete: chapter={d} attempt={d:.1}s chapter_time={d}s deaths={d} kills={d} story_time={d}s story_deaths={d}", .{ chapter + 1, game_state.run_time, secs, chapter_deaths, game_state.player.kills, totals.play_secs, totals.deaths });
 }
 
 /// A on a story card: the intro starts its chapter, an outro leads to the next chapter's intro (or the end), and the
@@ -200,11 +207,15 @@ fn completeChapter() void {
 ///
 fn continueFromCard(card: screens.StoryCard) void {
     switch (card.kind) {
-        .intro => startChapter(card.chapter),
+        .intro => {
+            chapter_secs = 0;
+            chapter_deaths = 0;
+            startChapter(card.chapter);
+        },
         .outro => screen = .{ .story_card = if (card.chapter + 1 < story.CHAPTERS.len)
             .{ .kind = .intro, .chapter = card.chapter + 1 }
         else
-            .{ .kind = .the_end, .chapter = card.chapter } },
+            .{ .kind = .the_end, .chapter = card.chapter, .secs = story_finished.play_secs, .deaths = story_finished.deaths } },
         .the_end => screen = .{ .title = .{} },
     }
 }
@@ -218,6 +229,10 @@ fn endRun() void {
     //A story chapter is retried, not scored against the level's best
     const new_best = mode == .survival and game.isNewBest(&game_state, bests[lvl].best_score);
     screen = .{ .run_end = .{ .new_best = new_best } };
+    if (mode == .story) {
+        chapter_secs += game_state.run_time;
+        chapter_deaths +|= 1;
+    }
     if (new_best) {
         bests[lvl].best_score = p.score;
         writeSave(LEVEL_NAMES[lvl], bests[lvl]);
@@ -329,6 +344,7 @@ fn gameUpdateWrapper(_: ?*anyopaque) callconv(.c) c_int {
     if (restart_requested) {
         restart_requested = false;
         //Only a run (or its end screen) has a level to restart
+        if (screen == .playing and mode == .story) chapter_secs += game_state.run_time; //An abandoned attempt still counts
         if (screen == .playing or screen == .run_end) restart();
     }
 
