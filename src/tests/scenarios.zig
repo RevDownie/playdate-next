@@ -397,6 +397,7 @@ test "[scenario] a story chapter stops spawning after its waves and is complete 
     var game = state.GameState{ .invincible = true };
     game_mod.beginChapter(&game, t.level.start_pos, .{ .level = 0, .objective = .survive, .first_wave = 1, .last_wave = 2 });
     try std.testing.expect(t.tick(&game, .{}) == .playing); //Not complete before the first wave
+    try std.testing.expect(!game.scoring); //Story has no score
 
     //Wave 1: cleared as soon as it stops spawning
     var frames: u32 = 0;

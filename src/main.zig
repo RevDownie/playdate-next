@@ -377,7 +377,7 @@ fn gameUpdateWrapper(_: ?*anyopaque) callconv(.c) c_int {
         .story_card => |card| renderer.renderStoryCard(playdate_api, &assets, card),
         .playing, .run_end => {
             const hud = renderer.Hud{
-                .best_score = if (mode == .survival) bests[current_level.?].best_score else 0, //Story isn't scored against a best
+                .best_score = bests[current_level.?].best_score,
                 .level_name = LEVEL_NAMES[current_level.?],
                 .game_over = if (screen == .run_end) screen.run_end else null,
                 .chapter = if (mode == .story) chapter else null,

@@ -119,18 +119,10 @@ pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameSt
     const bottom_y = height - row_h;
     drawBoxed(graphics, font, format(&buf, "HP {d}", .{game.player.health}), BOX_PAD_X, bottom_y, .left, if (game.player.health <= 25) .loud else .normal);
 
-    //Top right, one row: the score, loud once it beats the best, and to its left the combo multiplying each kill's
-    //score, louder once it is worth protecting
+    //Top right, one row (survival only: story has no score): the score, loud once it beats the best, and to its left
+    //the combo multiplying each kill's score, louder once it is worth protecting
     const right = width - BOX_PAD_X;
-    const beating_best = hud.best_score > 0 and game.player.score > hud.best_score;
-    const score_text = format(&buf, "{d}", .{game.player.score});
-    drawBoxed(graphics, font, score_text, right, BOX_PAD_Y, .right, if (beating_best) .loud else .normal);
-    const combo = game.player.kill_streak;
-    if (combo >= consts.COMBO_SHOW_FROM) {
-        const combo_right = right - graphics.getTextWidth.?(font, score_text.ptr, textLen(score_text), pd.kUTF8Encoding, 0) - BOX_PAD_X * 2 - 2;
-        var combo_buf: [16]u8 = undefined;
-        drawBoxed(graphics, font, format(&combo_buf, "x{d}", .{combo}), combo_right, BOX_PAD_Y, .right, if (combo >= consts.COMBO_LOST_MIN) .loud else .normal);
-    }
+    if (hud.chapter == null) drawScore(graphics, font, game, hud, right);
 
     //Bottom right: ammo (health is bottom left). Full says so, as ammo drops are then left lying
     if (game.bullets.ammo == 0) {
@@ -250,8 +242,23 @@ const PATTERN_DIM: pd.LCDPattern = .{ 0, 0, 0, 0, 0, 0, 0, 0, 0xAA, 0x55, 0xAA, 
 
 const PANEL_W = 260;
 const PANEL_LINES = 6; //Below the title, including the "go again" prompt
+const STORY_PANEL_LINES = 4;
 
-/// The run end screen over the frozen last frame: how the run went, the best, and how to go again
+fn drawScore(graphics: pd.playdate_graphics, font: *pd.LCDFont, game: *const GameState, hud: Hud, right: c_int) void {
+    var buf: [24]u8 = undefined;
+    const beating_best = hud.best_score > 0 and game.player.score > hud.best_score;
+    const score_text = format(&buf, "{d}", .{game.player.score});
+    drawBoxed(graphics, font, score_text, right, BOX_PAD_Y, .right, if (beating_best) .loud else .normal);
+    const combo = game.player.kill_streak;
+    if (combo >= consts.COMBO_SHOW_FROM) {
+        const combo_right = right - graphics.getTextWidth.?(font, score_text.ptr, textLen(score_text), pd.kUTF8Encoding, 0) - BOX_PAD_X * 2 - 2;
+        var combo_buf: [16]u8 = undefined;
+        drawBoxed(graphics, font, format(&combo_buf, "x{d}", .{combo}), combo_right, BOX_PAD_Y, .right, if (combo >= consts.COMBO_LOST_MIN) .loud else .normal);
+    }
+}
+
+/// The run end screen over the frozen last frame: how the run went and how to go again. Survival shows the score
+/// and the best to beat; story (no score) the chapter and how far into it the player got
 ///
 pub fn drawGameOver(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameState, hud: Hud, over: state.RunEnd, width: c_int, height: c_int) void {
     var buf: [48]u8 = undefined;
@@ -260,7 +267,8 @@ pub fn drawGameOver(graphics: pd.playdate_graphics, fonts: Fonts, game: *const G
     //Sized from the fonts so the lines always fit
     const small_h: c_int = graphics.getFontHeight.?(fonts.small) + 4;
     const big_h: c_int = graphics.getFontHeight.?(fonts.big) + 6;
-    const panel_h = 10 + big_h + PANEL_LINES * small_h + 4 + 10;
+    const lines: c_int = if (hud.chapter != null) STORY_PANEL_LINES else PANEL_LINES;
+    const panel_h = 10 + big_h + lines * small_h + 4 + 10;
     const left = @divTrunc(width - PANEL_W, 2);
     const top = @divTrunc(height - panel_h, 2);
     graphics.fillRect.?(left, top, PANEL_W, panel_h, pd.kColorWhite);
@@ -273,6 +281,17 @@ pub fn drawGameOver(graphics: pd.playdate_graphics, fonts: Fonts, game: *const G
 
     const p = game.player;
     const secs: u32 = @intFromFloat(game.run_time);
+    if (hud.chapter) |ch| {
+        const c = story.CHAPTERS[ch];
+        drawBoxed(graphics, fonts.small, format(&buf, "Ch{d}  {s}", .{ ch + 1, story.CHAPTER_NAMES[ch] }), cx, y, .centre, .normal);
+        y += small_h;
+        drawBoxed(graphics, fonts.small, format(&buf, "Wave {d}/{d}   Survived {d}:{d:0>2}", .{ game.spawner.wave -| (c.first_wave -| 1), c.waveCount(), secs / 60, secs % 60 }), cx, y, .centre, .normal);
+        y += small_h;
+        drawBoxed(graphics, fonts.small, format(&buf, "Kills {d}", .{p.kills}), cx, y, .centre, .normal);
+        y += small_h + 4;
+        if (over.canRestart()) drawBoxed(graphics, fonts.small, "Press " ++ BUTTON_A ++ " to retry", cx, y, .centre, .loud);
+        return;
+    }
     drawBoxed(graphics, fonts.small, format(&buf, "Wave {d}   Survived {d}:{d:0>2}", .{ game.spawner.wave, secs / 60, secs % 60 }), cx, y, .centre, .normal);
     y += small_h;
     drawBoxed(graphics, fonts.small, format(&buf, "Kills {d}", .{p.kills}), cx, y, .centre, .normal);
@@ -281,15 +300,13 @@ pub fn drawGameOver(graphics: pd.playdate_graphics, fonts: Fonts, game: *const G
     y += small_h;
     drawBoxed(graphics, fonts.small, format(&buf, "Score {d}", .{p.score}), cx, y, .centre, .normal);
     y += small_h;
-    if (hud.chapter) |ch| {
-        drawBoxed(graphics, fonts.small, format(&buf, "Story chapter {d}", .{ch + 1}), cx, y, .centre, .normal);
-    } else if (over.new_best) {
+    if (over.new_best) {
         drawBoxed(graphics, fonts.small, "NEW BEST!", cx, y, .centre, .loud);
     } else {
         drawBoxed(graphics, fonts.small, format(&buf, "Best on {s} {d}", .{ hud.level_name, hud.best_score }), cx, y, .centre, .normal);
     }
     y += small_h + 4;
-    if (over.canRestart()) drawBoxed(graphics, fonts.small, if (hud.chapter != null) "Press " ++ BUTTON_A ++ " to retry" else "Press " ++ BUTTON_A ++ " to go again", cx, y, .centre, .loud);
+    if (over.canRestart()) drawBoxed(graphics, fonts.small, "Press " ++ BUTTON_A ++ " to go again", cx, y, .centre, .loud);
 }
 
 const TITLE_Y = 50;

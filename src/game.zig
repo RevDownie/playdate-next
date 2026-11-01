@@ -56,11 +56,11 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     //out). Wounds spray blood and kills burst into gore
     bullet_sys.update(&game.bullets, grid, dt);
     const hits = bullet_sys.collide(&game.bullets, game.enemies.positions(), game.enemies.kind[0..game.enemies.len], frame_arena.alloc(state.Hit, game.bullets.len));
-    const impacts = combat_sys.applyHits(hits, &game.enemies, &game.player, &game.popups, frame_arena.alloc(state.Impact, hits.len));
+    const impacts = combat_sys.applyHits(hits, &game.enemies, &game.player, &game.popups, game.scoring, frame_arena.alloc(state.Impact, hits.len));
     gore_sys.spawn(&game.gore, impacts, game.gore_rng.random());
     //Out of ammo, the player strikes the nearest enemies in reach instead
     const melee_hits = melee_sys.update(&game.melee, game.enemies.positions(), game.player.pos, game.bullets.ammo, dt, frame_arena.alloc(state.Hit, consts.MELEE_MAX_TARGETS));
-    const melee_impacts = combat_sys.applyHits(melee_hits, &game.enemies, &game.player, &game.popups, frame_arena.alloc(state.Impact, melee_hits.len));
+    const melee_impacts = combat_sys.applyHits(melee_hits, &game.enemies, &game.player, &game.popups, game.scoring, frame_arena.alloc(state.Impact, melee_hits.len));
     gore_sys.spawn(&game.gore, melee_impacts, game.gore_rng.random());
     game.bullets.removeDead();
     game.enemies.removeDead();
@@ -122,6 +122,7 @@ pub fn beginRun(game: *state.GameState, start_pos: Vec2f) void {
 ///
 pub fn beginChapter(game: *state.GameState, start_pos: Vec2f, chapter: story.Chapter) void {
     beginRun(game, start_pos);
+    game.scoring = false; //Story is about getting through, not the score
     switch (chapter.objective) {
         .survive => {
             game.spawner.wave = chapter.first_wave - 1; //The lull counts down to the first
@@ -155,7 +156,7 @@ test "[game] a run begins at the start point with nothing carried over but the r
     try std.testing.expect(game.bullets.ammo == consts.START_AMMO and game.enemies.len == 0);
     try std.testing.expect(@reduce(.And, game.player.pos == Vec2f{ 2, -3 }) and @reduce(.And, game.camera.pos == Vec2f{ 2, -3 }));
     try std.testing.expect(game.trigger.button_cooldown == consts.RUN_START_FIRE_DELAY);
-    try std.testing.expect(game.invincible);
+    try std.testing.expect(game.invincible and game.scoring);
     try std.testing.expect(std.meta.eql(game.rng, rng_next)); //The random sequence carries on
 }
 

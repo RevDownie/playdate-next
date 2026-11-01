@@ -1,4 +1,5 @@
-/// Responsible for applying damage to hit enemies and to the player. Also responsible for the combo state
+/// Responsible for applying damage to hit enemies and to the player. Also responsible for the combo state (survival
+/// only: story has no score)
 ///
 const std = @import("std");
 const maths = @import("maths.zig");
@@ -12,10 +13,11 @@ const CHAR_ENEMY_COLL_RADIUS_SQRD = consts.CHAR_ENEMY_COLL_RADIUS * consts.CHAR_
 
 /// Apply hits on enemies (from bullets or the melee): push the enemy back and deduct health. Enemies that run out of health are
 /// left flagged dead (health 0) for `Enemies.removeDead`; later hits on them in the same frame are ignored.
-/// Each kill grows the combo and shows it where the enemy fell (big at a milestone). Every hit that landed is
-/// written to `impacts_out` (at least `hits.len` long) for the gore, and the ones written returned
+/// With `scoring` (survival) each kill scores, grows the combo and shows it where the enemy fell (big at a
+/// milestone); without it (story) a kill is only counted. Every hit that landed is written to `impacts_out` (at
+/// least `hits.len` long) for the gore, and the ones written returned
 ///
-pub fn applyHits(hits: []const Hit, enemies: *state.Enemies, player: *state.Player, popups: *state.Popups, impacts_out: []state.Impact) []state.Impact {
+pub fn applyHits(hits: []const Hit, enemies: *state.Enemies, player: *state.Player, popups: *state.Popups, scoring: bool, impacts_out: []state.Impact) []state.Impact {
     var num_impacts: usize = 0;
     for (hits) |hit| {
         const i = hit.enemy_idx;
@@ -28,8 +30,9 @@ pub fn applyHits(hits: []const Hit, enemies: *state.Enemies, player: *state.Play
         if (killed) {
             //Dead: it bursts into gore (see gore_system) and is compacted out
             enemies.health[i] = 0;
-            player.kill_streak += 1;
             player.kills += 1;
+            if (!scoring) continue;
+            player.kill_streak += 1;
             player.best_streak = @max(player.best_streak, player.kill_streak);
             player.score = @min(player.score + consts.SCORE_PER_KILL * player.kill_streak, consts.MAX_SCORE);
             if (isMilestone(player.kill_streak)) {
@@ -53,7 +56,7 @@ fn isMilestone(combo: u32) bool {
 
 /// Enemies that walk into the player hurt them by `damage` (CONTACT_DMG, or 0 when invincible) and recoil.
 /// An enemy that is still recoiling can't hurt the player again, so damage is per contact rather than per frame.
-/// Being touched breaks the combo, which says so at the player if it was a good one
+/// Being touched breaks the combo, which says so at the player if it was a good one (there is none without scoring)
 ///
 pub fn applyEnemyContact(enemies: *state.Enemies, player: *state.Player, damage: u8, popups: *state.Popups) void {
     var num_hits: u32 = 0;
@@ -83,7 +86,7 @@ test "[combat_system] a second hit on a killed enemy is ignored" {
     enemies.health[0] = consts.DMG_PER_HIT;
 
     const hits = [_]Hit{ .{ .enemy_idx = 0, .impact_dir = Vec2f{ 1, 0 } }, .{ .enemy_idx = 0, .impact_dir = Vec2f{ 1, 0 } } };
-    const impacts = applyHits(&hits, &enemies, &player, &popups, &test_impacts);
+    const impacts = applyHits(&hits, &enemies, &player, &popups, true, &test_impacts);
 
     try std.testing.expect(impacts.len == 1 and impacts[0].killed and impacts[0].kind == .walker); //Bursts once
     try std.testing.expect(enemies.health[0] == 0);
@@ -100,10 +103,10 @@ test "[combat_system] a fresh walker is knocked back by the first hit and killed
     enemies.add(Vec2f{ 0, 0 });
 
     const hit = [_]Hit{.{ .enemy_idx = 0, .impact_dir = Vec2f{ 1, 0 } }};
-    const wound = applyHits(&hit, &enemies, &player, &popups, &test_impacts);
+    const wound = applyHits(&hit, &enemies, &player, &popups, true, &test_impacts);
     try std.testing.expect(wound.len == 1 and !wound[0].killed and wound[0].dir[0] == 1);
     try std.testing.expect(enemies.health[0] > 0 and enemies.isBumping(0));
-    _ = applyHits(&hit, &enemies, &player, &popups, &test_impacts);
+    _ = applyHits(&hit, &enemies, &player, &popups, true, &test_impacts);
     try std.testing.expect(enemies.health[0] == 0);
 }
 
@@ -151,7 +154,7 @@ test "[combat_system] kills show the growing combo where they fell, big at miles
     enemies.health[0] = consts.DMG_PER_HIT;
     enemies.health[1] = consts.DMG_PER_HIT;
     const hits = [_]Hit{ .{ .enemy_idx = 0, .impact_dir = Vec2f{ 1, 0 } }, .{ .enemy_idx = 1, .impact_dir = Vec2f{ 1, 0 } } };
-    _ = applyHits(&hits, &enemies, &player, &popups, &test_impacts);
+    _ = applyHits(&hits, &enemies, &player, &popups, true, &test_impacts);
 
     try std.testing.expect(popups.len == 2);
     try std.testing.expect(popups.kind[0] == .combo and popups.value[0] == consts.COMBO_MILESTONE_FIRST - 1);
@@ -167,7 +170,7 @@ test "[combat_system] a first kill shows nothing, and only a good combo says it 
     var popups = state.Popups{};
     enemies.add(Vec2f{ 0, 0 });
     enemies.health[0] = consts.DMG_PER_HIT;
-    _ = applyHits(&[_]Hit{.{ .enemy_idx = 0, .impact_dir = Vec2f{ 1, 0 } }}, &enemies, &player, &popups, &test_impacts);
+    _ = applyHits(&[_]Hit{.{ .enemy_idx = 0, .impact_dir = Vec2f{ 1, 0 } }}, &enemies, &player, &popups, true, &test_impacts);
     try std.testing.expect(popups.len == 0);
 
     var toucher = state.Enemies{};
@@ -180,4 +183,20 @@ test "[combat_system] a first kill shows nothing, and only a good combo says it 
     player.kill_streak = consts.COMBO_LOST_MIN;
     applyEnemyContact(&toucher2, &player, consts.CONTACT_DMG, &popups);
     try std.testing.expect(popups.len == 1 and popups.kind[0] == .lost and popups.value[0] == consts.COMBO_LOST_MIN);
+}
+
+test "[combat_system] without scoring a kill is only counted: no score, combo or popups" {
+    var test_impacts: [8]state.Impact = undefined;
+    var enemies = state.Enemies{};
+    var player = state.Player{};
+    var popups = state.Popups{};
+    for (0..consts.COMBO_MILESTONE_FIRST) |i| {
+        enemies.add(Vec2f{ @floatFromInt(i), 0 });
+        enemies.health[i] = consts.DMG_PER_HIT;
+    }
+    var hits: [consts.COMBO_MILESTONE_FIRST]Hit = undefined;
+    for (&hits, 0..) |*h, i| h.* = .{ .enemy_idx = @intCast(i), .impact_dir = Vec2f{ 1, 0 } };
+    const impacts = applyHits(&hits, &enemies, &player, &popups, false, &test_impacts);
+    try std.testing.expect(impacts.len == hits.len and player.kills == hits.len);
+    try std.testing.expect(player.score == 0 and player.kill_streak == 0 and player.best_streak == 0 and popups.len == 0);
 }
