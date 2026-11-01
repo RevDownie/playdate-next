@@ -1,5 +1,5 @@
 # Drive a running Playdate Simulator with button / D-pad / crank input, then inspect the result.
-#   powershell -NoProfile -ExecutionPolicy Bypass -File tools/sim-input.ps1 -Steps "right:1500,a:600,crank:180,wait:500,shot,log"
+#   powershell -NoProfile -ExecutionPolicy Bypass -File tools/sim-input.ps1 -Steps "down:200,wait:300,a:200,wait:1000,right:1500,a:600,crank:180,wait:500,shot,log"
 #
 # Steps (comma separated, run in order):
 #   up|down|left|right|a|b[:ms]   hold that button for ms (default 300)

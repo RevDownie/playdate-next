@@ -55,7 +55,7 @@ Notes:
 The game starts on the title screen (Story is chosen, `down` picks Survival, `a` starts), so begin a sequence with `down:200,wait:300,a:200` for survival or `a:200,wait:1000,a:200` for story (the second press is the chapter's intro card). With the game running (`tools/sim.ps1 -Seconds 4`), `tools/sim-input.ps1` posts button / D-pad / crank input to the simulator window and can screenshot or print the game log between steps:
 
 ```
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/sim-input.ps1 -Steps "right:1000,wait:800,log:1,a:1300,crank:120,wait:800,log:1,shot:after"
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/sim-input.ps1 -Steps "down:200,wait:300,a:200,wait:1000,right:1000,wait:800,log:1,a:1300,crank:120,wait:800,log:1,shot:after"
 ```
 Steps run in order, comma separated:
 | Step | Meaning |

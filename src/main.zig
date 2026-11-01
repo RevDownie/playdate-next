@@ -111,12 +111,13 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
 
     sys.setUpdateCallback.?(gameUpdateWrapper, null);
     //The system menu has room for three of the game's own items
-    _ = sys.addMenuItem.?("Restart Level", restartLevel, null);
-    _ = sys.addMenuItem.?("Title", goToTitle, null);
+    if (sys.addMenuItem.?("Restart Level", restartLevel, null) == null) debugLog("WARNING: no room for the Restart Level menu item", .{});
+    if (sys.addMenuItem.?("Title", goToTitle, null) == null) debugLog("WARNING: no room for the Title menu item", .{});
     if (builtin.mode == .debug) {
         //Debug only: `zig build -Dinvincible` (or `tools/sim.ps1 -Invincible`) starts with it ticked
         game_state.invincible = build_options.invincible;
         invincible_menu_item = sys.addCheckmarkMenuItem.?("Invincible", @intFromBool(game_state.invincible), toggleInvincible, null);
+        if (invincible_menu_item == null) debugLog("WARNING: no room for the Invincible menu item", .{});
     }
 
     //Locked at TARGET_FPS; `zig build -Duncapped` runs flat out (0) so the FPS counter shows the headroom
@@ -360,7 +361,7 @@ fn gameUpdateWrapper(_: ?*anyopaque) callconv(.c) c_int {
         .story_card => |card| renderer.renderStoryCard(playdate_api, &assets, card),
         .playing, .run_end => {
             const hud = renderer.Hud{
-                .best_score = bests[current_level.?].best_score,
+                .best_score = if (mode == .survival) bests[current_level.?].best_score else 0, //Story isn't scored against a best
                 .level_name = LEVEL_NAMES[current_level.?],
                 .game_over = if (screen == .run_end) screen.run_end else null,
                 .chapter = if (mode == .story) chapter else null,
