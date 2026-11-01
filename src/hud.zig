@@ -85,7 +85,7 @@ fn format(buffer: []u8, comptime fmt: []const u8, args: anytype) []const u8 {
 /// the score (and combo), health and ammo, and the wave banners. The best to beat is on the run end screen; the
 /// score turns loud once it is being beaten
 ///
-pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameState, hud: Hud, width: c_int, height: c_int) void {
+pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameState, hud: Hud, width: c_int, height: c_int, reduce_flashing: bool) void {
     var buf: [48]u8 = undefined;
     const font = fonts.hud;
     const row_h: c_int = graphics.getFontHeight.?(font) + BOX_PAD_Y * 2 + 1;
@@ -97,27 +97,21 @@ pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameSt
     const wave_text = if (hud.chapter) |ch| if (story.CHAPTERS[ch].objective == .walk)
         format(&buf, "STORY Ch{d}  {s}", .{ ch + 1, story.CHAPTER_NAMES[ch] })
     else switch (spawner.phase) {
-        .wave => if (spawner.isHolding())
-            format(&buf, "STORY Ch{d}  Wave {d}/{d}  {d}s", .{ ch + 1, spawner.wave - wave_offset, story.CHAPTERS[ch].waveCount(), secondsLeft(spawner.hold - spawner.phase_time) })
-        else
-            format(&buf, "STORY Ch{d}  Wave {d}/{d}  Clear!", .{ ch + 1, spawner.wave - wave_offset, story.CHAPTERS[ch].waveCount() }),
+        .wave => format(&buf, "STORY Ch{d}  Wave {d}/{d}  {d} left", .{ ch + 1, spawner.wave - wave_offset, story.CHAPTERS[ch].waveCount(), spawner.left(game.enemies.len) }),
         .lull => if (spawner.isLastWave())
             format(&buf, "STORY Ch{d}  Cleared", .{ch + 1})
         else
             format(&buf, "STORY Ch{d}  Wave {d}/{d} in {d}", .{ ch + 1, spawner.wave + 1 - wave_offset, story.CHAPTERS[ch].waveCount(), secondsLeft(spawner.timer) }),
     } else switch (spawner.phase) {
-        .wave => if (spawner.isHolding())
-            format(&buf, "Wave {d}  {d}s", .{ spawner.wave, secondsLeft(spawner.hold - spawner.phase_time) })
-        else
-            format(&buf, "Wave {d}  Clear!", .{spawner.wave}),
+        .wave => format(&buf, "Wave {d}  {d} left", .{ spawner.wave, spawner.left(game.enemies.len) }),
         .lull => format(&buf, "Wave {d} in {d}", .{ spawner.wave + 1, secondsLeft(spawner.timer) }),
     };
     drawBoxed(graphics, font, wave_text, BOX_PAD_X, BOX_PAD_Y, .left, .normal);
-    drawWaveBanner(graphics, fonts, spawner, wave_offset, width);
+    drawWaveBanner(graphics, fonts, spawner, wave_offset, hud.chapter != null, width);
 
     //Bottom left: health, next to the ammo so the two resources read together
     const bottom_y = height - row_h;
-    drawBoxed(graphics, font, format(&buf, "HP {d}", .{game.player.health}), BOX_PAD_X, bottom_y, .left, if (game.player.health <= 25) .loud else .normal);
+    drawBoxed(graphics, font, format(&buf, "HP {d}", .{game.player.health}), BOX_PAD_X, bottom_y, .left, if (game.player.health <= consts.PLAYER_LOW_HEALTH) .loud else .normal);
 
     //Top right, one row (survival only: story has no score): the score, loud once it beats the best, and to its left
     //the combo multiplying each kill's score, louder once it is worth protecting
@@ -134,6 +128,136 @@ pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameSt
     }
 
     if (game.invincible) drawBoxed(graphics, font, "INVINCIBLE", BOX_PAD_X, BOX_PAD_Y + row_h, .left, .loud); //Debug, so screenshots don't mislead
+
+    //Story: the line being spoken, between the top and bottom rows
+    if (hud.chapter != null) {
+        if (game.story.lines.front()) |line| drawLine(graphics, fonts, line, width, row_h + LINE_GAP, bottom_y - LINE_GAP, reduce_flashing);
+    }
+}
+
+const LINE_GAP = 3; //Between a line and the HUD rows
+const LINE_MARGIN = 6; //Either side of Ellie's box
+const LINE_PAD = 4; //Inside a line's box, around its text
+const RADIO_BORDER = 5; //The static round Ellie's box
+const TOM_TEXT_W = 300; //Tom's lines wrap at this, centred
+const PA_TEXT_W = 340;
+const WALKIE_W = 11;
+const WALKIE_H = 24;
+
+/// Static on the walkie-talkie: noise patterns cycled at RADIO_STATIC_FPS (frozen with Reduce Flashing on)
+const PATTERN_STATIC = [_]pd.LCDPattern{
+    .{ 0x5A, 0xA7, 0x3C, 0xD2, 0x69, 0x1E, 0xB4, 0x8B, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF },
+    .{ 0xC3, 0x2D, 0x96, 0x71, 0xE8, 0x4B, 0x1D, 0xA6, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF },
+    .{ 0x9C, 0x63, 0xA9, 0x56, 0x3A, 0xC5, 0x6E, 0x91, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF },
+    .{ 0x27, 0xD8, 0x4E, 0xB1, 0x8D, 0x72, 0xE4, 0x1B, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF },
+};
+/// The edge behind Tom's lines: white on every other pixel, so his words sit on a soft patch over the world rather
+/// than in a hard box like the HUD's
+const PATTERN_SOFT_EDGE: pd.LCDPattern = .{ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55 };
+const SOFT_EDGE = 3;
+
+/// The widest a voice's text is allowed before it wraps, on a screen `width` wide
+///
+pub fn lineTextWidth(voice: story.Voice, width: c_int) c_int {
+    return switch (voice) {
+        .ellie => width - 2 * (LINE_MARGIN + RADIO_BORDER) - 3 * LINE_PAD - WALKIE_W,
+        .tom, .tom_radio => TOM_TEXT_W,
+        .pa => PA_TEXT_W,
+    };
+}
+
+/// Whether a line fits the two rows its box has room for (main checks every line once at init, Debug only)
+///
+pub fn lineFits(graphics: pd.playdate_graphics, fonts: Fonts, voice: story.Voice, text: []const u8, width: c_int) bool {
+    const h = graphics.getTextHeightForMaxWidth.?(fonts.hud, text.ptr, textLen(text), lineTextWidth(voice, width), pd.kUTF8Encoding, pd.kWrapWord, 0, 0);
+    return h <= 2 * graphics.getFontHeight.?(fonts.hud);
+}
+
+/// One line of dialogue, drawn in its voice (see story.Voice). `top` and `bottom` are the free space between the
+/// HUD rows
+///
+fn drawLine(graphics: pd.playdate_graphics, fonts: Fonts, line: state.Line, width: c_int, top: c_int, bottom: c_int, reduce_flashing: bool) void {
+    const text = story.TEXT[line.text];
+    const len = textLen(text);
+    const font = fonts.hud; //The HUD's small font, so two rows hold any line and Ellie's box stays short
+    graphics.setFont.?(font);
+    const max_w = lineTextWidth(line.voice, width);
+    const text_h = graphics.getTextHeightForMaxWidth.?(font, text.ptr, len, max_w, pd.kUTF8Encoding, pd.kWrapWord, 0, 0);
+    const cx = @divTrunc(width, 2);
+    switch (line.voice) {
+        //The walkie-talkie: a box at the top edged in static, the handset at its left. The static fills it as she
+        //comes through and again as she drops out, and the handset's light blinks while she speaks
+        .ellie => {
+            const h = @max(text_h, WALKIE_H) + 2 * (RADIO_BORDER + LINE_PAD);
+            const x = LINE_MARGIN;
+            const w = width - 2 * LINE_MARGIN;
+            const frame: u32 = if (reduce_flashing) 0 else @intFromFloat(line.time * consts.RADIO_STATIC_FPS);
+            graphics.fillRect.?(x, top, w, h, @intFromPtr(&PATTERN_STATIC[frame % PATTERN_STATIC.len]));
+            const duration = story.lineDuration(line.voice, line.text);
+            const speaking = line.time >= consts.RADIO_TUNE_TIME and line.time < duration - consts.RADIO_DROP_TIME;
+            if (speaking or reduce_flashing) {
+                graphics.fillRect.?(x + RADIO_BORDER, top + RADIO_BORDER, w - 2 * RADIO_BORDER, h - 2 * RADIO_BORDER, pd.kColorWhite);
+                graphics.drawRect.?(x + RADIO_BORDER, top + RADIO_BORDER, w - 2 * RADIO_BORDER, h - 2 * RADIO_BORDER, pd.kColorBlack);
+                const text_x = x + RADIO_BORDER + 2 * LINE_PAD + WALKIE_W;
+                _ = graphics.drawTextInRect.?(text.ptr, len, pd.kUTF8Encoding, text_x, top + RADIO_BORDER + LINE_PAD, max_w, text_h, pd.kWrapWord, pd.kAlignTextLeft);
+            }
+            const blink = speaking and (reduce_flashing or @as(u32, @intFromFloat(line.time * 4)) % 2 == 0);
+            drawWalkie(graphics, x + RADIO_BORDER + LINE_PAD, top + RADIO_BORDER + LINE_PAD, blink);
+        },
+        //Tom: his words over the world at the bottom. Answering Ellie he holds the handset, its light on as he
+        //transmits
+        .tom, .tom_radio => {
+            const w = @min(graphics.getTextWidth.?(font, text.ptr, len, pd.kUTF8Encoding, 0) + 1, max_w);
+            const y = bottom - text_h;
+            const radio = line.voice == .tom_radio;
+            const icon_w: c_int = if (radio) WALKIE_W + LINE_PAD else 0;
+            const icon_h: c_int = if (radio) WALKIE_H else 0;
+            const left = cx - @divTrunc(w + icon_w, 2);
+            const block_h = @max(text_h, icon_h);
+            const back_x = left - LINE_PAD;
+            const back_y = bottom - block_h - LINE_PAD;
+            const back_w = w + icon_w + 2 * LINE_PAD;
+            const back_h = block_h + LINE_PAD;
+            graphics.fillRect.?(back_x - SOFT_EDGE, back_y - SOFT_EDGE, back_w + 2 * SOFT_EDGE, back_h + SOFT_EDGE, @intFromPtr(&PATTERN_SOFT_EDGE));
+            graphics.fillRect.?(back_x, back_y, back_w, back_h, pd.kColorWhite);
+            if (radio) drawWalkie(graphics, left, bottom - WALKIE_H, true);
+            _ = graphics.drawTextInRect.?(text.ptr, len, pd.kUTF8Encoding, left + icon_w, y, w, text_h, pd.kWrapWord, pd.kAlignTextCenter);
+        },
+        //Loudspeakers: a hard black box, white capitals
+        .pa => {
+            const w = @min(graphics.getTextWidth.?(font, text.ptr, len, pd.kUTF8Encoding, 0) + 1, max_w);
+            graphics.fillRect.?(cx - @divTrunc(w, 2) - 2 * LINE_PAD, top, w + 4 * LINE_PAD, text_h + 2 * LINE_PAD, pd.kColorBlack);
+            _ = graphics.setDrawMode.?(pd.kDrawModeFillWhite);
+            _ = graphics.drawTextInRect.?(text.ptr, len, pd.kUTF8Encoding, cx - @divTrunc(w, 2), top + LINE_PAD, w, text_h, pd.kWrapWord, pd.kAlignTextCenter);
+            _ = graphics.setDrawMode.?(pd.kDrawModeCopy);
+        },
+    }
+}
+
+/// The last few of a wave, off screen: a small black arrowhead edged in white, at the edge pointing the way to it,
+/// so a straggler is never lost. `dir` is unit length, screen space
+///
+pub fn drawEnemyMarker(graphics: pd.playdate_graphics, x: c_int, y: c_int, dir: @Vector(2, f32)) void {
+    const at = @Vector(2, f32){ @floatFromInt(x), @floatFromInt(y) };
+    const side = @Vector(2, f32){ -dir[1], dir[0] };
+    inline for (.{ .{ 9, 6, pd.kColorWhite }, .{ 7, 4, pd.kColorBlack } }) |s| {
+        const tip: @Vector(2, c_int) = @intFromFloat(@round(at + dir * @as(@Vector(2, f32), @splat(s[0]))));
+        const b1: @Vector(2, c_int) = @intFromFloat(@round(at - dir * @as(@Vector(2, f32), @splat(s[1])) + side * @as(@Vector(2, f32), @splat(s[0] - 1))));
+        const b2: @Vector(2, c_int) = @intFromFloat(@round(at - dir * @as(@Vector(2, f32), @splat(s[1])) - side * @as(@Vector(2, f32), @splat(s[0] - 1))));
+        graphics.fillTriangle.?(tip[0], tip[1], b1[0], b1[1], b2[0], b2[1], s[2]);
+    }
+}
+
+/// The walkie-talkie handset, WALKIE_W x WALKIE_H with its top left at `x`, `y`: an antenna, the body, the speaker
+/// grille and the light. Edged in white so it reads over the static
+///
+fn drawWalkie(graphics: pd.playdate_graphics, x: c_int, y: c_int, light: bool) void {
+    graphics.fillRect.?(x + 1, y - 1, 4, 8, pd.kColorWhite);
+    graphics.fillRect.?(x - 1, y + 5, WALKIE_W + 2, WALKIE_H - 4, pd.kColorWhite);
+    graphics.fillRect.?(x + 2, y, 2, 7, pd.kColorBlack);
+    graphics.fillRect.?(x, y + 6, WALKIE_W, WALKIE_H - 6, pd.kColorBlack);
+    for (0..3) |k| graphics.fillRect.?(x + 2, y + 14 + @as(c_int, @intCast(k)) * 3, WALKIE_W - 4, 1, pd.kColorWhite);
+    if (light) graphics.fillRect.?(x + WALKIE_W - 4, y + 8, 2, 2, pd.kColorWhite);
 }
 
 const FPS_W = 15; //The SDK's counter at two digits
@@ -198,23 +322,21 @@ fn secondsLeft(timer: f32) u32 {
     return @as(u32, @intFromFloat(timer)) + 1;
 }
 
-/// The beats of a wave: "WAVE N", how long it keeps coming and from where as it starts, "CLEAR THE REST" when the
-/// spawning stops, and "WAVE N CLEARED" when it is cleared (not when it ran out of time: then the next
-/// wave starts straight away instead)
+/// The beats of a wave: "WAVE N" and how many are coming from where as it starts (in story Tom calls where from
+/// instead, story.warningText), and "WAVE N CLEARED" when it is cleared
 ///
-fn drawWaveBanner(graphics: pd.playdate_graphics, fonts: Fonts, spawner: *const state.Spawner, wave_offset: u16, width: c_int) void {
+fn drawWaveBanner(graphics: pd.playdate_graphics, fonts: Fonts, spawner: *const state.Spawner, wave_offset: u16, in_story: bool, width: c_int) void {
     var buf: [48]u8 = undefined;
     const cx = @divTrunc(width, 2);
     const big_h: c_int = graphics.getFontHeight.?(fonts.big) + BOX_PAD_Y * 2 + 2;
     switch (spawner.phase) {
         .wave => if (spawner.phase_time < consts.WAVE_BANNER_TIME) {
             drawBoxed(graphics, fonts.big, format(&buf, "WAVE {d}", .{spawner.wave - wave_offset}), cx, BANNER_Y, .centre, .loud);
+            if (in_story) return;
             var sides_buf: [40]u8 = undefined;
-            drawBoxed(graphics, fonts.small, format(&buf, "Incoming for {d}s {s}", .{ secondsLeft(spawner.hold) - 1, sidesText(&sides_buf, spawner.sides) }), cx, BANNER_Y + big_h, .centre, .normal);
-        } else if (!spawner.isHolding() and spawner.phase_time < spawner.hold + consts.WAVE_BANNER_TIME) {
-            drawBoxed(graphics, fonts.big, "CLEAR THE REST", cx, BANNER_Y, .centre, .loud);
+            drawBoxed(graphics, fonts.small, format(&buf, "{d} coming {s}", .{ spawner.count, sidesText(&sides_buf, spawner.sides) }), cx, BANNER_Y + big_h, .centre, .normal);
         },
-        .lull => if (spawner.cleared and spawner.phase_time < consts.WAVE_CLEARED_BANNER_TIME) {
+        .lull => if (spawner.wave > 0 and spawner.phase_time < consts.WAVE_CLEARED_BANNER_TIME) {
             drawBoxed(graphics, fonts.big, format(&buf, "WAVE {d} CLEARED", .{spawner.wave - wave_offset}), cx, BANNER_Y, .centre, .normal);
             drawBoxed(graphics, fonts.small, if (spawner.isLastWave()) "Chapter clear" else "Grab what you can", cx, BANNER_Y + big_h, .centre, .normal);
         },

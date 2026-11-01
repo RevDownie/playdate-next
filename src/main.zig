@@ -128,7 +128,16 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
     level_rng = std.Random.DefaultPrng.init(@as(u64, sys.getSecondsSinceEpoch.?(null)) << 16 ^ sys.getCurrentTimeMilliseconds.?());
     if (debug_logging) sys.resetElapsedTime.?();
     assets = renderer.loadAssets(playdate_api, &LEVEL_NAMES);
-    if (debug_logging) debugLog("load: assets {d:.1}ms", .{sys.getElapsedTime.?() * 1000});
+    if (debug_logging) {
+        debugLog("load: assets {d:.1}ms", .{sys.getElapsedTime.?() * 1000});
+        //Every story line must fit the two rows of its voice's box, in the real font
+        for (story.BEATS) |b| {
+            if (!renderer.lineFits(playdate_api, &assets, b.voice, story.TEXT[b.text])) debugLog("WARNING: story line too long for its box: \"{s}\"", .{story.TEXT[b.text]});
+        }
+        for (story.TEXT[story.WARNINGS_START..]) |text| {
+            if (!renderer.lineFits(playdate_api, &assets, .tom, text)) debugLog("WARNING: story line too long for its box: \"{s}\"", .{text});
+        }
+    }
 
     for (&bests, LEVEL_NAMES) |*b, name| b.* = readSave(name);
     story_save = readStorySave();
@@ -166,12 +175,12 @@ fn startRun() void {
     screen = .playing;
 }
 
-/// Start (or retry) story chapter `index` on its own level
+/// Start (or retry) story chapter `index` on its own level, with the beats in `heard` already played
 ///
-fn startChapter(index: u8) void {
+fn startChapter(index: u8, heard: u64) void {
     const c = story.CHAPTERS[index];
     if (c.level != current_level) loadLevel(c.level);
-    game.beginChapter(&game_state, level.start_pos, c);
+    game.beginChapter(&game_state, level.start_pos, c, story.chapterBeats(index), heard);
     mode = .story;
     chapter = index;
     screen = .playing;
@@ -182,7 +191,7 @@ fn startChapter(index: u8) void {
 fn restart() void {
     switch (mode) {
         .survival => startRun(),
-        .story => startChapter(chapter),
+        .story => startChapter(chapter, game_state.story.heard()), //Lines play once per chapter, not per attempt
     }
 }
 
@@ -208,7 +217,7 @@ fn continueFromCard(card: screens.StoryCard) void {
     switch (card.kind) {
         .intro => {
             chapter_secs = 0;
-            startChapter(card.chapter);
+            startChapter(card.chapter, 0);
         },
         .outro => screen = .{ .story_card = if (card.chapter + 1 < story.CHAPTERS.len)
             .{ .kind = .intro, .chapter = card.chapter + 1 }
@@ -433,7 +442,7 @@ fn logStatus(now_ms: u32) void {
         const d = e - game_state.camera.pos;
         if (@abs(d[0]) < consts.VIEW_HALF_WIDTH and @abs(d[1]) < consts.VIEW_HALF_HEIGHT) on_screen += 1;
     }
-    debugLog("t={d}ms screen={s} mode={s} chapter={d} level={s} wave={d}:{s} enemies={d} on_screen={d} health={d} score={d} combo={d} pos=({d:.2},{d:.2}) bullets={d} drops={d} invincible={} near={s}({d:.2},{d:.2}) aim=({d:.2},{d:.2}) target={s} crank={d:.1} frame_mem={d} drawn={d} gibs={d} droplets={d} splats={d} sim_ms_max={d:.2}", .{ now_ms, @tagName(screen), @tagName(mode), if (mode == .story) chapter + 1 else 0, LEVEL_NAMES[current_level.?], game_state.spawner.wave, @tagName(game_state.spawner.phase), game_state.enemies.len, on_screen, p.health, p.score, p.kill_streak, p.pos[0], p.pos[1], game_state.bullets.ammo, drops.len, game_state.invincible, if (drops.len > 0) @tagName(drops.kind[near]) else "none", near_pos[0], near_pos[1], p.facing_dir[0], p.facing_dir[1], if (p.target_pos != null) "yes" else "no", playdate_api.system.*.getCrankAngle.?(), frame_arena.high_water, last_render_stats.drawn, game_state.gore.gibs.liveCount(), game_state.gore.droplets.liveCount(), game_state.gore.pools.liveCount() + game_state.gore.spatters.liveCount(), sim_ms_max });
+    debugLog("t={d}ms screen={s} mode={s} chapter={d} level={s} wave={d}:{s} enemies={d} on_screen={d} health={d} score={d} combo={d} pos=({d:.2},{d:.2}) bullets={d} drops={d} invincible={} near={s}({d:.2},{d:.2}) aim=({d:.2},{d:.2}) target={s} crank={d:.1} frame_mem={d} drawn={d} gibs={d} droplets={d} splats={d} line={s} sim_ms_max={d:.2}", .{ now_ms, @tagName(screen), @tagName(mode), if (mode == .story) chapter + 1 else 0, LEVEL_NAMES[current_level.?], game_state.spawner.wave, @tagName(game_state.spawner.phase), game_state.enemies.len, on_screen, p.health, p.score, p.kill_streak, p.pos[0], p.pos[1], game_state.bullets.ammo, drops.len, game_state.invincible, if (drops.len > 0) @tagName(drops.kind[near]) else "none", near_pos[0], near_pos[1], p.facing_dir[0], p.facing_dir[1], if (p.target_pos != null) "yes" else "no", playdate_api.system.*.getCrankAngle.?(), frame_arena.high_water, last_render_stats.drawn, game_state.gore.gibs.liveCount(), game_state.gore.droplets.liveCount(), game_state.gore.pools.liveCount() + game_state.gore.spatters.liveCount(), if (game_state.story.lines.front()) |l| @tagName(l.voice) else "none", sim_ms_max });
     sim_ms_max = 0;
 }
 

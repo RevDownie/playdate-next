@@ -8,6 +8,7 @@ const consts = @import("tweak_constants.zig");
 const memory = @import("memory.zig");
 const hud_mod = @import("hud.zig");
 const screens = @import("screens.zig");
+const story = @import("story.zig");
 const maths = @import("maths.zig");
 const state = @import("game_state.zig");
 const GameState = state.GameState;
@@ -318,6 +319,13 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
             const marker = graphics_coords.offScreenMarker(screen.toScreen(p), screen.width, screen.height, consts.DROP_MARKER_INSET_SIDE, consts.DROP_MARKER_INSET_TOP, consts.DROP_MARKER_INSET_SIDE, consts.DROP_MARKER_INSET_BOTTOM) orelse continue;
             hud_mod.drawDropMarker(graphics, k, marker.pos[0], marker.pos[1], marker.dir);
         }
+        //...and so are the last few of a wave, so a straggler is never lost
+        if (game.spawner.phase == .wave and !game.spawner.isSpawning() and game.enemies.len <= consts.WAVE_MARK_LEFT) {
+            for (game.enemies.positions()) |p| {
+                const marker = graphics_coords.offScreenMarker(screen.toScreen(p), screen.width, screen.height, consts.DROP_MARKER_INSET_SIDE, consts.DROP_MARKER_INSET_TOP, consts.DROP_MARKER_INSET_SIDE, consts.DROP_MARKER_INSET_BOTTOM) orelse continue;
+                hud_mod.drawEnemyMarker(graphics, marker.pos[0], marker.pos[1], marker.dir);
+            }
+        }
     }
 
     //---Combo messages float up from above where they happened
@@ -334,10 +342,16 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
     if (panel) |over| {
         hud_mod.drawGameOver(graphics, assets.fonts, game, hud, over, screen.width, screen.height);
     } else {
-        hud_mod.drawHud(graphics, assets.fonts, game, hud, screen.width, screen.height);
+        hud_mod.drawHud(graphics, assets.fonts, game, hud, screen.width, screen.height, sys.getReduceFlashing.?() != 0);
     }
     hud_mod.drawFps(sys, screen.width, screen.height);
     return .{ .drawn = @intCast(list.len) };
+}
+
+/// Whether a story line fits its voice's box on this screen (main checks every line at init, Debug only)
+///
+pub fn lineFits(playdate_api: *pd.PlaydateAPI, assets: *const Assets, voice: story.Voice, text: []const u8) bool {
+    return hud_mod.lineFits(playdate_api.graphics.*, assets.fonts, voice, text, playdate_api.display.*.getWidth.?());
 }
 
 /// A screen with no world under it (the title, story cards): the text on white

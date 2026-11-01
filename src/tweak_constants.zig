@@ -106,50 +106,59 @@ pub const COMBO_MILESTONE_FIRST: u32 = 5;
 pub const COMBO_MILESTONE_EVERY: u32 = 10; //...then every multiple of this
 pub const COMBO_LOST_MIN: u32 = 5; //Losing a combo at least this long shows "COMBO LOST"
 pub const MAX_POPUPS: u8 = 8; //Messages in the world at once; a new one replaces the oldest
+pub const PLAYER_LOW_HEALTH: u8 = 25; //At or below: the HUD's health turns loud, and story can have a line
+
+/// Story dialogue (see story.zig and story_system). One line shows at a time, for long enough to read it
+pub const MAX_STORY_EVENTS: u8 = 8; //Story moments in one frame: a wave ending, the next starting, low health...
+pub const MAX_DIALOGUE_LINES: u8 = 4; //Lines waiting their turn; a new one past this drops the oldest
+pub const LINE_BASE_TIME: f32 = 1.5; //Seconds every line shows...
+pub const LINE_TIME_PER_CHAR: f32 = 0.055; //...plus this per character, so a long line is up long enough to read
+pub const RADIO_TUNE_TIME: f32 = 0.35; //Ellie: seconds of static as the walkie-talkie picks her up, before her words
+pub const RADIO_DROP_TIME: f32 = 0.2; //...and as she drops out after them
+pub const RADIO_STATIC_FPS: f32 = 15; //How often the static on the walkie-talkie's box changes
 pub const POPUP_TIME: f32 = 0.7; //Seconds a combo message shows
 pub const POPUP_BIG_TIME: f32 = 1.4; //...and a milestone or COMBO LOST
 
-/// Waves. The horde comes in waves with a lull between them. A wave is a fight to hold out through: for `hold`
-/// seconds packs keep spawning to keep the number of enemies alive near a target, which climbs from
-/// WAVE_START_FRACTION of the wave's `peak` to all of it, so the pressure is sustained and builds to a climax
-/// (killing faster only brings the next pack sooner). Then the rest must be cleared (down to WAVE_CLEAR_LEFT) to
-/// survive it. The lull after it is the time to go out for drops (they come faster and bigger then, DROP_LULL_*).
-/// Difficulty rises and falls but trends up: the table runs in fours of a build up, a step back, a peak and a
-/// breather, each four bigger and longer than the last
+/// Waves. The horde comes in waves with a lull between them. A wave is `count` enemies, and is over once every one
+/// of them is dead. They come in packs, keeping the number alive near a target that climbs from
+/// WAVE_START_FRACTION of the wave's `peak` to all of it over WAVE_RAMP_TIME, so the pressure is sustained and
+/// builds to a climax (killing faster only brings the next pack sooner). The lull after it is the time to go out
+/// for drops (they come faster and bigger then, DROP_LULL_*). Difficulty rises and falls but trends up: the table
+/// runs in fours of a build up, a step back, a peak and a breather, each four bigger than the last
 pub const WaveDef = struct {
-    hold: f32, //Seconds the wave keeps spawning
-    peak: u8, //Enemies kept alive by the end of the hold
+    count: u16, //Enemies in the wave
+    peak: u8, //Enemies kept alive by the time the last of them have spawned
     pack: u8, //Enemies per pack (they drop in together on one cell, so they arrive as a crowd)
     lull: f32, //Seconds of quiet after it is cleared
 };
 pub const WAVES = [_]WaveDef{
-    .{ .hold = 20, .peak = 14, .pack = 4, .lull = 7 }, //1: from one side, a taste
-    .{ .hold = 25, .peak = 20, .pack = 4, .lull = 7 },
-    .{ .hold = 20, .peak = 16, .pack = 4, .lull = 6 }, //Step back
-    .{ .hold = 30, .peak = 30, .pack = 5, .lull = 9 }, //Peak, then a longer lull to recover
-    .{ .hold = 25, .peak = 24, .pack = 5, .lull = 7 },
-    .{ .hold = 35, .peak = 38, .pack = 6, .lull = 7 },
-    .{ .hold = 25, .peak = 30, .pack = 5, .lull = 6 },
-    .{ .hold = 40, .peak = 50, .pack = 6, .lull = 9 }, //8: peak
+    .{ .count = 35, .peak = 14, .pack = 4, .lull = 7 }, //1: from one side, a taste
+    .{ .count = 50, .peak = 20, .pack = 4, .lull = 7 },
+    .{ .count = 40, .peak = 16, .pack = 4, .lull = 6 }, //Step back
+    .{ .count = 75, .peak = 30, .pack = 5, .lull = 9 }, //Peak, then a longer lull to recover
+    .{ .count = 60, .peak = 24, .pack = 5, .lull = 7 },
+    .{ .count = 95, .peak = 38, .pack = 6, .lull = 7 },
+    .{ .count = 75, .peak = 30, .pack = 5, .lull = 6 },
+    .{ .count = 125, .peak = 50, .pack = 6, .lull = 9 }, //8: peak
 };
-/// Past the table the last four repeat, each repeat with a higher peak, a longer hold, bigger packs and shorter lulls
+/// Past the table the last four repeat, each repeat with more enemies, a higher peak, bigger packs and shorter lulls
 pub const WAVE_REPEAT_EXTRA_PEAK: u8 = 10;
-pub const WAVE_REPEAT_LONGER: f32 = 5; //Seconds onto the hold
+pub const WAVE_REPEAT_EXTRA_COUNT: u16 = 20;
 pub const WAVE_REPEAT_SHORTER_LULL: f32 = 1.0;
-pub const WAVE_MAX_HOLD: f32 = 60;
+pub const WAVE_MAX_COUNT: u16 = 250;
 pub const WAVE_MAX_PACK: u8 = 8;
 pub const WAVE_MIN_LULL: f32 = 4.0;
 pub const WAVE_START_FRACTION: f32 = 0.4; //Of the peak, kept alive as a wave starts
+pub const WAVE_RAMP_TIME: f32 = 25; //Seconds for the number kept alive to climb to the peak (sooner if the wave is killed faster)
 pub const WAVE_PACK_INTERVAL: f32 = 0.5; //Seconds between packs at most: faster than a steady crank kills, so a crowd builds
-pub const WAVE_PEAK_SCALE: f32 = 1.0; //Every wave's peak is multiplied by this (raise it for a stress test)
+pub const WAVE_PEAK_SCALE: f32 = 1.0; //Every wave's peak and count are multiplied by this (raise it for a stress test)
 /// Waves come from one side of the map, then from one more side every this many waves until they come from all
 /// four. One side is easy to read and to back away from; a horde on a single front walks into the gun in single
 /// file, so the surround is what eventually overruns the player
 pub const WAVES_PER_EXTRA_SIDE: u16 = 3;
-pub const WAVE_CLEAR_LEFT: u8 = 3; //After the hold, a wave is cleared once no more than this many enemies are left
-pub const WAVE_CLEAR_MAX_TIME: f32 = 20.0; //...or followed straight away by the next wave (no lull) if that takes longer
+pub const WAVE_MARK_LEFT: u8 = 5; //Once a wave is down to this many (all spawned), off screen ones are marked at the edge
 pub const FIRST_WAVE_DELAY: f32 = 3.0;
-pub const WAVE_BANNER_TIME: f32 = 2.0; //How long "WAVE N" shows when a wave starts, and "CLEAR THE REST" after the hold
+pub const WAVE_BANNER_TIME: f32 = 2.0; //How long "WAVE N" shows when a wave starts
 pub const WAVE_CLEARED_BANNER_TIME: f32 = 2.5; //...and "WAVE N CLEARED" when it is cleared
 pub const CHAPTER_COMPLETE_DELAY: f32 = 2.5; //Story: seconds after the last wave is cleared before the chapter ends
 pub const SPAWN_EDGE_BAND: f32 = 1.0; //Enemies drop in on free cells within this many metres of the map's edge
@@ -305,3 +314,9 @@ pub const CELL_MIN_SIDE_M: f32 = @as(f32, @floatFromInt(@min(kit_descs.CELL_W, k
 pub const CHAR_WIDTH_M: f32 = @as(f32, @floatFromInt(bitmap_descs.CHAR_W)) / METRES_TO_PIXELS;
 pub const CHAR_BULLET_COLL_RADIUS: f32 = CHAR_WIDTH_M * 0.5;
 pub const CHAR_ENEMY_COLL_RADIUS: f32 = CHAR_WIDTH_M * 0.5 * 1.25;
+
+comptime {
+    for (WAVES, 1..) |w, n| {
+        if (w.count < w.peak) @compileError(@import("std").fmt.comptimePrint("WAVES[{d}]: fewer enemies than its peak", .{n}));
+    }
+}

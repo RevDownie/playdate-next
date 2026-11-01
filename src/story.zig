@@ -1,5 +1,6 @@
 const std = @import("std");
 const level_descs = @import("level_descs.zig");
+const consts = @import("tweak_constants.zig");
 
 // Story mode data: the chapters on the route to St Bride's, their card text and the story save. Plain comptime
 // tables; main plays them (see docs/story-mode-handover.md).
@@ -76,6 +77,170 @@ comptime {
     };
 }
 
+/// Who is speaking, which sets how a line is drawn (see hud.drawLine). The player learns to tell them apart before
+/// they understand what they are
+/// - `tom`: his own thoughts, or said aloud: plain text at the bottom
+/// - `tom_radio`: Tom answering Ellie, into the walkie-talkie: at the bottom with the handset, transmitting
+/// - `ellie`: the walkie-talkie: a box at the top with a static border, the handset and its light
+/// - `pa`: loudspeakers and megaphones: a hard black box, capitals, often cut off
+pub const Voice = enum(u8) { tom, tom_radio, ellie, pa };
+
+/// What sets a beat off. game.tick writes these as `GameState.events`; for a wave trigger the beat's `arg` is the
+/// chapter's own wave number (1 based), and 0 for the rest
+/// - `wave_started`
+/// - `wave_over`: the wave is cleared
+/// - `chapter_cleared`: the last wave is cleared. Stands in for reaching the exit until levels have one
+/// - `low_health`: health fell to PLAYER_LOW_HEALTH
+pub const Trigger = enum(u8) { wave_started, wave_over, chapter_cleared, low_health };
+
+pub const TextId = u16;
+
+/// A line of dialogue that plays once per attempt at its chapter, when its trigger happens. 6 bytes
+pub const Beat = struct {
+    chapter: u8, //Index into CHAPTERS
+    trigger: Trigger,
+    arg: u8,
+    voice: Voice,
+    text: TextId, //Index into TEXT
+};
+
+/// A chapter's beats: BEATS[start..end]
+pub const BeatRange = struct {
+    start: u16 = 0,
+    end: u16 = 0,
+};
+
+const BeatDef = struct { chapter: u8, trigger: Trigger, arg: u8, voice: Voice, text: []const u8 };
+
+/// `chapter` is 1 based here, as the chapters are numbered on screen
+fn line(chapter: u8, trigger: Trigger, arg: u8, voice: Voice, text: []const u8) BeatDef {
+    return .{ .chapter = chapter - 1, .trigger = trigger, .arg = arg, .voice = voice, .text = text };
+}
+
+/// Every beat, in chapter order and, within a chapter, in the order lines triggered together play. Placeholder
+/// lines (the handover's key beats) until the writing pass
+const BEAT_DEFS = [_]BeatDef{
+    line(1, .wave_over, 1, .ellie, "Dad? Dad, can you hear me?"),
+    line(1, .wave_over, 1, .tom_radio, "Ellie! Where are you? Are you hurt?"),
+    line(1, .wave_over, 1, .ellie, "I'm at St Bride's. I'm okay. I'm just waiting for you."),
+    line(1, .chapter_cleared, 0, .tom_radio, "Stay where you are. I'm coming."),
+
+    line(2, .wave_started, 1, .pa, "REMAIN IN YOUR HOMES. HELP IS ON THE -"),
+    line(2, .wave_over, 2, .ellie, "Everyone here keeps asking me questions. I don't know the answers, Dad."),
+    line(2, .wave_over, 2, .tom_radio, "What questions? Ellie, what's going on there?"),
+    line(2, .wave_over, 2, .ellie, "...Just keep coming."),
+    line(2, .wave_started, 3, .pa, "PRESSURE'S EIGHTY OVER -"),
+
+    line(3, .wave_over, 1, .ellie, "Do you remember the pond? You threw bread for the ducks until they got sick of it."),
+    line(3, .low_health, 0, .tom_radio, "Not now, love. Not now."),
+    line(3, .wave_started, 3, .pa, "HE'S NOT RESPONDING. TRY THE OTHER ONE."),
+
+    line(4, .wave_started, 1, .pa, "STAY BACK FROM THE LINE."),
+    line(4, .wave_started, 1, .tom, "My daughter's in there!"),
+    line(4, .wave_over, 3, .ellie, "They told me I should say goodbye. I'm not going to."),
+    line(4, .wave_over, 3, .tom_radio, "Goodbye? Ellie - Ellie, are you hurt?"),
+    line(4, .wave_started, 5, .pa, "FAMILY CAN STAY. FOR NOW."),
+
+    line(5, .wave_over, 2, .ellie, "Something's changed. They're smiling at me. Don't stop now, Dad."),
+    line(5, .chapter_cleared, 0, .tom, "I'm here. I'm here."),
+};
+
+/// The longest line, so every line fits two rows of its box (main also measures them against the font at init)
+pub const MAX_LINE_CHARS = 90;
+/// Each chapter's fired beats are a u64 bitmask
+pub const MAX_BEATS_PER_CHAPTER = 64;
+
+/// Tom calling each wave as it starts, in place of survival's "Incoming" banner: an opener, taken in turn through
+/// the chapter's waves, then where they come from (see warningText)
+const WARNING_OPENERS = [_][]const u8{ "They're coming.", "Here they come again.", "More of them." };
+const SIDE_NAMES = [_][]const u8{ "north", "east", "south", "west" }; //level_loader.MapSide order
+const SIDE_MASKS = 1 << SIDE_NAMES.len;
+
+/// "From the north.", "From the north and east.", ... "From all sides."
+fn sidesPhrase(comptime sides: u8) []const u8 {
+    if (sides == SIDE_MASKS - 1) return "From all sides.";
+    var text: []const u8 = "";
+    var written = 0;
+    for (SIDE_NAMES, 0..) |name, s| {
+        if (sides & (1 << s) == 0) continue;
+        const joiner = if (written == 0) "From the " else if (written + 1 == @popCount(sides)) " and " else ", ";
+        text = text ++ joiner ++ name;
+        written += 1;
+    }
+    return text ++ ".";
+}
+
+/// The beats and, by TextId, every line's text: the beats' then Tom's wave warnings, opener by opener, each for
+/// every set of sides
+pub const BEATS: [BEAT_DEFS.len]Beat = blk: {
+    var beats: [BEAT_DEFS.len]Beat = undefined;
+    for (BEAT_DEFS, 0..) |d, i| beats[i] = .{ .chapter = d.chapter, .trigger = d.trigger, .arg = d.arg, .voice = d.voice, .text = i };
+    break :blk beats;
+};
+pub const TEXT: [BEAT_DEFS.len + WARNING_OPENERS.len * SIDE_MASKS][]const u8 = blk: {
+    @setEvalBranchQuota(20000);
+    var text: [BEAT_DEFS.len + WARNING_OPENERS.len * SIDE_MASKS][]const u8 = undefined;
+    for (BEAT_DEFS, 0..) |d, i| text[i] = d.text;
+    for (WARNING_OPENERS, 0..) |opener, o| {
+        for (0..SIDE_MASKS) |sides| text[BEAT_DEFS.len + o * SIDE_MASKS + sides] = if (sides == 0) opener else opener ++ " " ++ sidesPhrase(sides);
+    }
+    break :blk text;
+};
+/// Tom's wave warnings, TEXT[WARNINGS_START..]
+pub const WARNINGS_START: TextId = BEAT_DEFS.len;
+
+/// Tom's line as the chapter's wave `chapter_wave` (1 based) starts, coming from `sides` (a bit per
+/// level_loader.MapSide)
+///
+pub fn warningText(chapter_wave: u16, sides: u8) TextId {
+    const opener = (chapter_wave -| 1) % WARNING_OPENERS.len;
+    return WARNINGS_START + @as(TextId, @intCast(opener * SIDE_MASKS + (sides & (SIDE_MASKS - 1))));
+}
+
+/// Where each chapter's beats start in BEATS (and the last chapter's end)
+const CHAPTER_BEAT_START: [CHAPTERS.len + 1]u16 = blk: {
+    var starts: [CHAPTERS.len + 1]u16 = undefined;
+    var b: u16 = 0;
+    for (0..CHAPTERS.len + 1) |c| {
+        while (b < BEATS.len and BEATS[b].chapter < c) b += 1;
+        starts[c] = b;
+    }
+    break :blk starts;
+};
+
+/// How long a line shows: long enough to read it, and for Ellie the static either side of her words
+///
+pub fn lineDuration(voice: Voice, text: TextId) f32 {
+    const chars: f32 = @floatFromInt(TEXT[text].len);
+    const radio: f32 = if (voice == .ellie) consts.RADIO_TUNE_TIME + consts.RADIO_DROP_TIME else 0;
+    return consts.LINE_BASE_TIME + chars * consts.LINE_TIME_PER_CHAR + radio;
+}
+
+pub fn chapterBeats(chapter: u8) BeatRange {
+    return .{ .start = CHAPTER_BEAT_START[chapter], .end = CHAPTER_BEAT_START[chapter + 1] };
+}
+
+comptime {
+    @setEvalBranchQuota(20000);
+    if (TEXT.len > std.math.maxInt(TextId)) @compileError("too many lines for a TextId");
+    for (TEXT[WARNINGS_START..]) |t| if (t.len > MAX_LINE_CHARS) @compileError("a wave warning is longer than MAX_LINE_CHARS");
+    for (BEAT_DEFS, 0..) |d, i| {
+        const where = std.fmt.comptimePrint("beat {d} (chapter {d})", .{ i, d.chapter + 1 });
+        if (d.chapter >= CHAPTERS.len) @compileError(where ++ ": no such chapter");
+        if (i > 0 and d.chapter < BEAT_DEFS[i - 1].chapter) @compileError(where ++ ": BEATS must be in chapter order, so each chapter's are one range");
+        switch (d.trigger) {
+            .wave_started, .wave_over => if (d.arg < 1 or d.arg > CHAPTERS[d.chapter].waveCount()) @compileError(where ++ ": its wave isn't one of the chapter's"),
+            .chapter_cleared, .low_health => if (d.arg != 0) @compileError(where ++ ": only wave triggers take an arg"),
+        }
+        if (d.text.len == 0 or d.text.len > MAX_LINE_CHARS) @compileError(where ++ ": a line is 1 to MAX_LINE_CHARS long");
+        if (d.voice == .pa) for (d.text) |ch| if (std.ascii.isLower(ch)) @compileError(where ++ ": the PA speaks in capitals");
+    }
+    for (0..CHAPTERS.len) |c| {
+        const r = chapterBeats(c);
+        if (r.end - r.start > MAX_BEATS_PER_CHAPTER) @compileError(std.fmt.comptimePrint("chapter {d} has more beats than its u64 mask", .{c + 1}));
+    }
+}
+
 /// Where the story is up to, saved between sessions at chapter boundaries only. Fixed size binary: a magic tag, so
 /// a missing, foreign or old format file reads as a fresh story, then the chapter to play next and, for judging the
 /// story's length, the play time of the chapters completed so far
@@ -143,4 +308,23 @@ test "[story] a missing, short, foreign or out of range save is a fresh story" {
     var past_end = bytes;
     past_end[MAGIC.len] = CHAPTERS.len;
     try std.testing.expect(std.meta.eql(decode(&past_end), fresh));
+}
+
+test "[story] each chapter's beats are its own, one range after another, and every line has its text" {
+    var next: u16 = 0;
+    for (0..CHAPTERS.len) |c| {
+        const r = chapterBeats(@intCast(c));
+        try std.testing.expect(r.start == next and r.end >= r.start);
+        for (BEATS[r.start..r.end]) |b| try std.testing.expect(b.chapter == c and TEXT[b.text].len > 0);
+        next = r.end;
+    }
+    try std.testing.expect(next == BEATS.len);
+    try std.testing.expect(BEATS[chapterBeats(0).start].voice == .ellie); //The story opens with her calling
+}
+
+test "[story] Tom's wave warnings name where the wave comes from, and take the openers in turn" {
+    try std.testing.expectEqualStrings("They're coming. From the north.", TEXT[warningText(1, 0b0001)]);
+    try std.testing.expectEqualStrings("Here they come again. From the north and south.", TEXT[warningText(2, 0b0101)]);
+    try std.testing.expectEqualStrings("More of them. From the north, east and west.", TEXT[warningText(3, 0b1011)]);
+    try std.testing.expectEqualStrings("They're coming. From all sides.", TEXT[warningText(4, 0b1111)]);
 }
