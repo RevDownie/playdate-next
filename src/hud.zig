@@ -14,7 +14,8 @@ const MapSide = @import("level_loader.zig").MapSide;
 /// What the HUD needs from outside the simulation (main owns the save and the run phase)
 ///
 pub const Hud = struct {
-    best_score: u64,
+    best_score: u64, //On the current level: each level has its own
+    level_name: []const u8, //The current level, so the run end screen can say whose best it is
     game_over: ?state.RunEnd = null, //Set while the run end screen is up
 };
 
@@ -256,7 +257,7 @@ pub fn drawGameOver(graphics: pd.playdate_graphics, fonts: Fonts, game: *const G
     if (over.new_best) {
         drawBoxed(graphics, fonts.small, "NEW BEST!", cx, y, .centre, .loud);
     } else {
-        drawBoxed(graphics, fonts.small, format(&buf, "Best {d}", .{hud.best_score}), cx, y, .centre, .normal);
+        drawBoxed(graphics, fonts.small, format(&buf, "Best on {s} {d}", .{ hud.level_name, hud.best_score }), cx, y, .centre, .normal);
     }
     y += small_h + 4;
     if (over.canRestart()) drawBoxed(graphics, fonts.small, "Press A to go again", cx, y, .centre, .loud);
