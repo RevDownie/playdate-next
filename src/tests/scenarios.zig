@@ -500,7 +500,7 @@ test "[scenario] clearing chapter 1's first wave queues Ellie's first line, and 
     game_mod.beginChapter(&game, t.level.start_pos, story.CHAPTERS[0], story.chapterBeats(0), 0);
     const hasLines = struct {
         fn f(g: *const state.GameState) bool {
-            return g.story.lines.len > 0;
+            return g.story.lines.len > 0 and g.story.lines.items[g.story.lines.len - 1].beat != null; //Not just a wave warning
         }
     }.f;
     _ = try playChapter(&t, &game, 120, true, hasLines);
@@ -527,7 +527,7 @@ test "[scenario] retrying a chapter skips the lines already heard but replays on
     game_mod.beginChapter(&game, t.level.start_pos, story.CHAPTERS[0], story.chapterBeats(0), heard);
     const hasLines = struct {
         fn f(g: *const state.GameState) bool {
-            return g.story.lines.len > 0;
+            return g.story.lines.len > 0 and g.story.lines.items[g.story.lines.len - 1].beat != null; //Not just a wave warning
         }
     }.f;
     _ = try playChapter(&t, &game, 120, true, hasLines);

@@ -541,6 +541,7 @@ pub const RunEnd = struct {
 pub const StoryEvent = struct {
     trigger: story.Trigger,
     wave: u16 = 0,
+    sides: u8 = 0, //wave_started: where the wave comes from, a bit per level_loader.MapSide
 };
 
 pub const StoryEvents = struct {
@@ -565,7 +566,7 @@ pub const StoryEvents = struct {
 pub const Line = struct {
     text: story.TextId,
     voice: story.Voice,
-    beat: u8 = 0, //Its beat's index in the chapter's beats
+    beat: ?u8 = null, //Its beat's index in the chapter's beats (none for Tom's wave warnings)
     time: f32 = 0,
 };
 
@@ -611,7 +612,9 @@ pub const Story = struct {
     /// death plays again
     pub fn heard(self: *const Story) u64 {
         var queued: u64 = 0;
-        for (self.lines.items[0..self.lines.len]) |l| queued |= @as(u64, 1) << @intCast(l.beat);
+        for (self.lines.items[0..self.lines.len]) |l| {
+            if (l.beat) |b| queued |= @as(u64, 1) << @intCast(b);
+        }
         return self.fired & ~queued;
     }
 };

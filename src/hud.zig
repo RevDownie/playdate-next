@@ -113,7 +113,7 @@ pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameSt
         .lull => format(&buf, "Wave {d} in {d}", .{ spawner.wave + 1, secondsLeft(spawner.timer) }),
     };
     drawBoxed(graphics, font, wave_text, BOX_PAD_X, BOX_PAD_Y, .left, .normal);
-    drawWaveBanner(graphics, fonts, spawner, wave_offset, width);
+    drawWaveBanner(graphics, fonts, spawner, wave_offset, hud.chapter != null, width);
 
     //Bottom left: health, next to the ammo so the two resources read together
     const bottom_y = height - row_h;
@@ -314,17 +314,19 @@ fn secondsLeft(timer: f32) u32 {
     return @as(u32, @intFromFloat(timer)) + 1;
 }
 
-/// The beats of a wave: "WAVE N", how long it keeps coming and from where as it starts, "CLEAR THE REST" when the
+/// The beats of a wave: "WAVE N", how long it keeps coming and from where as it starts (in story Tom calls where
+/// from instead, story.warningText), "CLEAR THE REST" when the
 /// spawning stops, and "WAVE N CLEARED" when it is cleared (not when it ran out of time: then the next
 /// wave starts straight away instead)
 ///
-fn drawWaveBanner(graphics: pd.playdate_graphics, fonts: Fonts, spawner: *const state.Spawner, wave_offset: u16, width: c_int) void {
+fn drawWaveBanner(graphics: pd.playdate_graphics, fonts: Fonts, spawner: *const state.Spawner, wave_offset: u16, in_story: bool, width: c_int) void {
     var buf: [48]u8 = undefined;
     const cx = @divTrunc(width, 2);
     const big_h: c_int = graphics.getFontHeight.?(fonts.big) + BOX_PAD_Y * 2 + 2;
     switch (spawner.phase) {
         .wave => if (spawner.phase_time < consts.WAVE_BANNER_TIME) {
             drawBoxed(graphics, fonts.big, format(&buf, "WAVE {d}", .{spawner.wave - wave_offset}), cx, BANNER_Y, .centre, .loud);
+            if (in_story) return;
             var sides_buf: [40]u8 = undefined;
             drawBoxed(graphics, fonts.small, format(&buf, "Incoming for {d}s {s}", .{ secondsLeft(spawner.hold) - 1, sidesText(&sides_buf, spawner.sides) }), cx, BANNER_Y + big_h, .centre, .normal);
         } else if (!spawner.isHolding() and spawner.phase_time < spawner.hold + consts.WAVE_BANNER_TIME) {

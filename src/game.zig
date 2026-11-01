@@ -123,7 +123,7 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
 fn waveEvents(events: *state.StoryEvents, spawner: *const state.Spawner, wave_before: u16, phase_before: state.WavePhase) void {
     if (spawner.wave != wave_before) {
         if (phase_before == .wave) events.add(.{ .trigger = .wave_over, .wave = wave_before });
-        events.add(.{ .trigger = .wave_started, .wave = spawner.wave });
+        events.add(.{ .trigger = .wave_started, .wave = spawner.wave, .sides = spawner.sides });
     } else if (phase_before == .wave and spawner.phase == .lull) {
         events.add(.{ .trigger = .wave_over, .wave = spawner.wave });
         if (spawner.isLastWave()) events.add(.{ .trigger = .chapter_cleared });

@@ -134,6 +134,9 @@ fn gameInit(playdate: [*c]pd.PlaydateAPI) void {
         for (story.BEATS) |b| {
             if (!renderer.lineFits(playdate_api, &assets, b.voice, story.TEXT[b.text])) debugLog("WARNING: story line too long for its box: \"{s}\"", .{story.TEXT[b.text]});
         }
+        for (story.TEXT[story.WARNINGS_START..]) |text| {
+            if (!renderer.lineFits(playdate_api, &assets, .tom, text)) debugLog("WARNING: story line too long for its box: \"{s}\"", .{text});
+        }
     }
 
     for (&bests, LEVEL_NAMES) |*b, name| b.* = readSave(name);

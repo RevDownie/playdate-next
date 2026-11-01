@@ -151,17 +151,52 @@ pub const MAX_LINE_CHARS = 90;
 /// Each chapter's fired beats are a u64 bitmask
 pub const MAX_BEATS_PER_CHAPTER = 64;
 
-/// The beats and, by TextId, every line's text
+/// Tom calling each wave as it starts, in place of survival's "Incoming" banner: an opener, taken in turn through
+/// the chapter's waves, then where they come from (see warningText)
+const WARNING_OPENERS = [_][]const u8{ "They're coming.", "Here they come again.", "More of them." };
+const SIDE_NAMES = [_][]const u8{ "north", "east", "south", "west" }; //level_loader.MapSide order
+const SIDE_MASKS = 1 << SIDE_NAMES.len;
+
+/// "From the north.", "From the north and east.", ... "From all sides."
+fn sidesPhrase(comptime sides: u8) []const u8 {
+    if (sides == SIDE_MASKS - 1) return "From all sides.";
+    var text: []const u8 = "";
+    var written = 0;
+    for (SIDE_NAMES, 0..) |name, s| {
+        if (sides & (1 << s) == 0) continue;
+        const joiner = if (written == 0) "From the " else if (written + 1 == @popCount(sides)) " and " else ", ";
+        text = text ++ joiner ++ name;
+        written += 1;
+    }
+    return text ++ ".";
+}
+
+/// The beats and, by TextId, every line's text: the beats' then Tom's wave warnings, opener by opener, each for
+/// every set of sides
 pub const BEATS: [BEAT_DEFS.len]Beat = blk: {
     var beats: [BEAT_DEFS.len]Beat = undefined;
     for (BEAT_DEFS, 0..) |d, i| beats[i] = .{ .chapter = d.chapter, .trigger = d.trigger, .arg = d.arg, .voice = d.voice, .text = i };
     break :blk beats;
 };
-pub const TEXT: [BEAT_DEFS.len][]const u8 = blk: {
-    var text: [BEAT_DEFS.len][]const u8 = undefined;
+pub const TEXT: [BEAT_DEFS.len + WARNING_OPENERS.len * SIDE_MASKS][]const u8 = blk: {
+    @setEvalBranchQuota(20000);
+    var text: [BEAT_DEFS.len + WARNING_OPENERS.len * SIDE_MASKS][]const u8 = undefined;
     for (BEAT_DEFS, 0..) |d, i| text[i] = d.text;
+    for (WARNING_OPENERS, 0..) |opener, o| {
+        for (0..SIDE_MASKS) |sides| text[BEAT_DEFS.len + o * SIDE_MASKS + sides] = if (sides == 0) opener else opener ++ " " ++ sidesPhrase(sides);
+    }
     break :blk text;
 };
+/// Tom's wave warnings, TEXT[WARNINGS_START..]
+pub const WARNINGS_START: TextId = BEAT_DEFS.len;
+
+/// Tom's line as the chapter's wave `chapter_wave` (1 based) starts, coming from `sides` (a bit per
+/// level_loader.MapSide)
+///
+pub fn warningText(chapter_wave: u16, sides: u8) TextId {
+    const opener = (chapter_wave -| 1) % WARNING_OPENERS.len;
+    return WARNINGS_START + @as(TextId, @intCast(opener * SIDE_MASKS + (sides & (SIDE_MASKS - 1))));
+}
 
 /// Where each chapter's beats start in BEATS (and the last chapter's end)
 const CHAPTER_BEAT_START: [CHAPTERS.len + 1]u16 = blk: {
@@ -188,7 +223,8 @@ pub fn chapterBeats(chapter: u8) BeatRange {
 
 comptime {
     @setEvalBranchQuota(20000);
-    if (BEATS.len > std.math.maxInt(TextId)) @compileError("too many lines for a TextId");
+    if (TEXT.len > std.math.maxInt(TextId)) @compileError("too many lines for a TextId");
+    for (TEXT[WARNINGS_START..]) |t| if (t.len > MAX_LINE_CHARS) @compileError("a wave warning is longer than MAX_LINE_CHARS");
     for (BEAT_DEFS, 0..) |d, i| {
         const where = std.fmt.comptimePrint("beat {d} (chapter {d})", .{ i, d.chapter + 1 });
         if (d.chapter >= CHAPTERS.len) @compileError(where ++ ": no such chapter");
@@ -285,4 +321,11 @@ test "[story] each chapter's beats are its own, one range after another, and eve
     }
     try std.testing.expect(next == BEATS.len);
     try std.testing.expect(BEATS[chapterBeats(0).start].voice == .ellie); //The story opens with her calling
+}
+
+test "[story] Tom's wave warnings name where the wave comes from, and take the openers in turn" {
+    try std.testing.expectEqualStrings("They're coming. From the north.", TEXT[warningText(1, 0b0001)]);
+    try std.testing.expectEqualStrings("Here they come again. From the north and south.", TEXT[warningText(2, 0b0101)]);
+    try std.testing.expectEqualStrings("More of them. From the north, east and west.", TEXT[warningText(3, 0b1011)]);
+    try std.testing.expectEqualStrings("They're coming. From all sides.", TEXT[warningText(4, 0b1111)]);
 }
