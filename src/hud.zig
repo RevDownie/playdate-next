@@ -97,19 +97,13 @@ pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameSt
     const wave_text = if (hud.chapter) |ch| if (story.CHAPTERS[ch].objective == .walk)
         format(&buf, "STORY Ch{d}  {s}", .{ ch + 1, story.CHAPTER_NAMES[ch] })
     else switch (spawner.phase) {
-        .wave => if (spawner.isHolding())
-            format(&buf, "STORY Ch{d}  Wave {d}/{d}  {d}s", .{ ch + 1, spawner.wave - wave_offset, story.CHAPTERS[ch].waveCount(), secondsLeft(spawner.hold - spawner.phase_time) })
-        else
-            format(&buf, "STORY Ch{d}  Wave {d}/{d}  Clear!", .{ ch + 1, spawner.wave - wave_offset, story.CHAPTERS[ch].waveCount() }),
+        .wave => format(&buf, "STORY Ch{d}  Wave {d}/{d}  {d} left", .{ ch + 1, spawner.wave - wave_offset, story.CHAPTERS[ch].waveCount(), spawner.left(game.enemies.len) }),
         .lull => if (spawner.isLastWave())
             format(&buf, "STORY Ch{d}  Cleared", .{ch + 1})
         else
             format(&buf, "STORY Ch{d}  Wave {d}/{d} in {d}", .{ ch + 1, spawner.wave + 1 - wave_offset, story.CHAPTERS[ch].waveCount(), secondsLeft(spawner.timer) }),
     } else switch (spawner.phase) {
-        .wave => if (spawner.isHolding())
-            format(&buf, "Wave {d}  {d}s", .{ spawner.wave, secondsLeft(spawner.hold - spawner.phase_time) })
-        else
-            format(&buf, "Wave {d}  Clear!", .{spawner.wave}),
+        .wave => format(&buf, "Wave {d}  {d} left", .{ spawner.wave, spawner.left(game.enemies.len) }),
         .lull => format(&buf, "Wave {d} in {d}", .{ spawner.wave + 1, secondsLeft(spawner.timer) }),
     };
     drawBoxed(graphics, font, wave_text, BOX_PAD_X, BOX_PAD_Y, .left, .normal);
@@ -240,6 +234,20 @@ fn drawLine(graphics: pd.playdate_graphics, fonts: Fonts, line: state.Line, widt
     }
 }
 
+/// The last few of a wave, off screen: a small black arrowhead edged in white, at the edge pointing the way to it,
+/// so a straggler is never lost. `dir` is unit length, screen space
+///
+pub fn drawEnemyMarker(graphics: pd.playdate_graphics, x: c_int, y: c_int, dir: @Vector(2, f32)) void {
+    const at = @Vector(2, f32){ @floatFromInt(x), @floatFromInt(y) };
+    const side = @Vector(2, f32){ -dir[1], dir[0] };
+    inline for (.{ .{ 9, 6, pd.kColorWhite }, .{ 7, 4, pd.kColorBlack } }) |s| {
+        const tip: @Vector(2, c_int) = @intFromFloat(@round(at + dir * @as(@Vector(2, f32), @splat(s[0]))));
+        const b1: @Vector(2, c_int) = @intFromFloat(@round(at - dir * @as(@Vector(2, f32), @splat(s[1])) + side * @as(@Vector(2, f32), @splat(s[0] - 1))));
+        const b2: @Vector(2, c_int) = @intFromFloat(@round(at - dir * @as(@Vector(2, f32), @splat(s[1])) - side * @as(@Vector(2, f32), @splat(s[0] - 1))));
+        graphics.fillTriangle.?(tip[0], tip[1], b1[0], b1[1], b2[0], b2[1], s[2]);
+    }
+}
+
 /// The walkie-talkie handset, WALKIE_W x WALKIE_H with its top left at `x`, `y`: an antenna, the body, the speaker
 /// grille and the light. Edged in white so it reads over the static
 ///
@@ -314,10 +322,8 @@ fn secondsLeft(timer: f32) u32 {
     return @as(u32, @intFromFloat(timer)) + 1;
 }
 
-/// The beats of a wave: "WAVE N", how long it keeps coming and from where as it starts (in story Tom calls where
-/// from instead, story.warningText), "CLEAR THE REST" when the
-/// spawning stops, and "WAVE N CLEARED" when it is cleared (not when it ran out of time: then the next
-/// wave starts straight away instead)
+/// The beats of a wave: "WAVE N" and how many are coming from where as it starts (in story Tom calls where from
+/// instead, story.warningText), and "WAVE N CLEARED" when it is cleared
 ///
 fn drawWaveBanner(graphics: pd.playdate_graphics, fonts: Fonts, spawner: *const state.Spawner, wave_offset: u16, in_story: bool, width: c_int) void {
     var buf: [48]u8 = undefined;
@@ -328,11 +334,9 @@ fn drawWaveBanner(graphics: pd.playdate_graphics, fonts: Fonts, spawner: *const 
             drawBoxed(graphics, fonts.big, format(&buf, "WAVE {d}", .{spawner.wave - wave_offset}), cx, BANNER_Y, .centre, .loud);
             if (in_story) return;
             var sides_buf: [40]u8 = undefined;
-            drawBoxed(graphics, fonts.small, format(&buf, "Incoming for {d}s {s}", .{ secondsLeft(spawner.hold) - 1, sidesText(&sides_buf, spawner.sides) }), cx, BANNER_Y + big_h, .centre, .normal);
-        } else if (!spawner.isHolding() and spawner.phase_time < spawner.hold + consts.WAVE_BANNER_TIME) {
-            drawBoxed(graphics, fonts.big, "CLEAR THE REST", cx, BANNER_Y, .centre, .loud);
+            drawBoxed(graphics, fonts.small, format(&buf, "{d} coming {s}", .{ spawner.count, sidesText(&sides_buf, spawner.sides) }), cx, BANNER_Y + big_h, .centre, .normal);
         },
-        .lull => if (spawner.cleared and spawner.phase_time < consts.WAVE_CLEARED_BANNER_TIME) {
+        .lull => if (spawner.wave > 0 and spawner.phase_time < consts.WAVE_CLEARED_BANNER_TIME) {
             drawBoxed(graphics, fonts.big, format(&buf, "WAVE {d} CLEARED", .{spawner.wave - wave_offset}), cx, BANNER_Y, .centre, .normal);
             drawBoxed(graphics, fonts.small, if (spawner.isLastWave()) "Chapter clear" else "Grab what you can", cx, BANNER_Y + big_h, .centre, .normal);
         },

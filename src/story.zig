@@ -88,8 +88,7 @@ pub const Voice = enum(u8) { tom, tom_radio, ellie, pa };
 /// What sets a beat off. game.tick writes these as `GameState.events`; for a wave trigger the beat's `arg` is the
 /// chapter's own wave number (1 based), and 0 for the rest
 /// - `wave_started`
-/// - `wave_over`: the wave ended, cleared or not (one that runs out of time goes straight into the next, and its
-///   lines must still play)
+/// - `wave_over`: the wave is cleared
 /// - `chapter_cleared`: the last wave is cleared. Stands in for reaching the exit until levels have one
 /// - `low_health`: health fell to PLAYER_LOW_HEALTH
 pub const Trigger = enum(u8) { wave_started, wave_over, chapter_cleared, low_health };

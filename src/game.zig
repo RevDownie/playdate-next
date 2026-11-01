@@ -117,12 +117,11 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     return if (done and game.story.lines.len == 0) .chapter_complete else .playing;
 }
 
-/// The story moments in the spawner's last update: a wave starting, and the one before it over (cleared, or run out
-/// of time into the next), and the last wave of a chapter cleared
+/// The story moments in the spawner's last update: a wave starting, a wave cleared, and the last wave of a chapter
+/// cleared
 ///
 fn waveEvents(events: *state.StoryEvents, spawner: *const state.Spawner, wave_before: u16, phase_before: state.WavePhase) void {
     if (spawner.wave != wave_before) {
-        if (phase_before == .wave) events.add(.{ .trigger = .wave_over, .wave = wave_before });
         events.add(.{ .trigger = .wave_started, .wave = spawner.wave, .sides = spawner.sides });
     } else if (phase_before == .wave and spawner.phase == .lull) {
         events.add(.{ .trigger = .wave_over, .wave = spawner.wave });

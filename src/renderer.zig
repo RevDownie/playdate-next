@@ -319,6 +319,13 @@ pub fn render(playdate_api: *pd.PlaydateAPI, assets: *const Assets, game: *const
             const marker = graphics_coords.offScreenMarker(screen.toScreen(p), screen.width, screen.height, consts.DROP_MARKER_INSET_SIDE, consts.DROP_MARKER_INSET_TOP, consts.DROP_MARKER_INSET_SIDE, consts.DROP_MARKER_INSET_BOTTOM) orelse continue;
             hud_mod.drawDropMarker(graphics, k, marker.pos[0], marker.pos[1], marker.dir);
         }
+        //...and so are the last few of a wave, so a straggler is never lost
+        if (game.spawner.phase == .wave and !game.spawner.isSpawning() and game.enemies.len <= consts.WAVE_MARK_LEFT) {
+            for (game.enemies.positions()) |p| {
+                const marker = graphics_coords.offScreenMarker(screen.toScreen(p), screen.width, screen.height, consts.DROP_MARKER_INSET_SIDE, consts.DROP_MARKER_INSET_TOP, consts.DROP_MARKER_INSET_SIDE, consts.DROP_MARKER_INSET_BOTTOM) orelse continue;
+                hud_mod.drawEnemyMarker(graphics, marker.pos[0], marker.pos[1], marker.dir);
+            }
+        }
     }
 
     //---Combo messages float up from above where they happened

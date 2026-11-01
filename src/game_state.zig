@@ -416,16 +416,22 @@ pub const Spawner = struct {
     phase: WavePhase = .lull,
     phase_time: f32 = 0, //Seconds since this lull or wave began (drives the HUD)
     timer: f32 = consts.FIRST_WAVE_DELAY, //Lull: until the next wave. Wave: until the next pack. Infinite stops spawning
-    hold: f32 = 0, //This wave's tuning (see consts.WaveDef)
+    count: u16 = 0, //This wave's tuning (see consts.WaveDef)
     peak: u8 = 0,
     pack: u8 = 0,
+    spawned: u16 = 0, //Of `count`, so far
     sides: u8 = 0, //Bit per level_loader.MapSide the wave comes from
-    cleared: bool = false, //This lull follows a wave the player cleared (rather than one that ran out of time)
     last_wave: u16 = 0, //Story: no wave after this one (0 = endless, survival)
 
-    /// Still spawning: the wave is being held out
-    pub fn isHolding(self: *const Spawner) bool {
-        return self.phase == .wave and self.phase_time < self.hold;
+    /// Some of the wave are still to come
+    pub fn isSpawning(self: *const Spawner) bool {
+        return self.phase == .wave and self.spawned < self.count;
+    }
+
+    /// Enemies of the wave still to kill: those alive (only this wave's, as the one before was cleared) and those
+    /// still to come
+    pub fn left(self: *const Spawner, alive: u8) u16 {
+        return self.count - self.spawned + alive;
     }
 
     /// Fighting the last wave there will be (never in an endless run)
