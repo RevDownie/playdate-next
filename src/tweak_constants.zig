@@ -120,7 +120,7 @@ pub const WaveDef = struct {
     hold: f32, //Seconds the wave keeps spawning
     peak: u8, //Enemies kept alive by the end of the hold
     pack: u8, //Enemies per pack (they drop in together on one cell, so they arrive as a crowd)
-    lull: f32, //Seconds of quiet after it is survived
+    lull: f32, //Seconds of quiet after it is cleared
 };
 pub const WAVES = [_]WaveDef{
     .{ .hold = 20, .peak = 14, .pack = 4, .lull = 7 }, //1: from one side, a taste
@@ -146,11 +146,11 @@ pub const WAVE_PEAK_SCALE: f32 = 1.0; //Every wave's peak is multiplied by this 
 /// four. One side is easy to read and to back away from; a horde on a single front walks into the gun in single
 /// file, so the surround is what eventually overruns the player
 pub const WAVES_PER_EXTRA_SIDE: u16 = 3;
-pub const WAVE_CLEAR_LEFT: u8 = 3; //After the hold, a wave is survived once no more than this many enemies are left
+pub const WAVE_CLEAR_LEFT: u8 = 3; //After the hold, a wave is cleared once no more than this many enemies are left
 pub const WAVE_CLEAR_MAX_TIME: f32 = 20.0; //...or followed straight away by the next wave (no lull) if that takes longer
 pub const FIRST_WAVE_DELAY: f32 = 3.0;
 pub const WAVE_BANNER_TIME: f32 = 2.0; //How long "WAVE N" shows when a wave starts, and "CLEAR THE REST" after the hold
-pub const WAVE_SURVIVED_BANNER_TIME: f32 = 2.5; //...and "WAVE N SURVIVED" when it is survived
+pub const WAVE_CLEARED_BANNER_TIME: f32 = 2.5; //...and "WAVE N CLEARED" when it is cleared
 pub const CHAPTER_COMPLETE_DELAY: f32 = 2.5; //Story: seconds after the last wave is cleared before the chapter ends
 pub const SPAWN_EDGE_BAND: f32 = 1.0; //Enemies drop in on free cells within this many metres of the map's edge
 /// ...but never closer than this to the player, measured on the spawn ring (an ellipse with the screen's aspect:

@@ -415,7 +415,7 @@ test "[scenario] a story chapter stops spawning after its waves and is complete 
     }
     try std.testing.expect(game.spawner.phase == .wave and game.enemies.len > 0);
 
-    //Cleared: a moment to see it was survived, then complete, with nothing more spawned
+    //Cleared: a moment to see it was, then complete, with nothing more spawned
     game.enemies.len = 0;
     var result = game_mod.TickResult.playing;
     frames = 0;

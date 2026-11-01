@@ -71,7 +71,6 @@ var mode: screens.Mode = .survival; //Of the run being played (or last played)
 var story_save: story.Save = .{}; //Read once at init, written at chapter boundaries
 var chapter: u8 = 0; //Story: the chapter being played, or on its card
 var chapter_secs: f32 = 0; //Story: play time of every attempt at this chapter so far (for judging its length)
-var chapter_deaths: u16 = 0;
 var story_finished: story.Save = .{}; //The totals of the story just finished, for The End card
 
 /// Frame timing and requests from outside the frame loop
@@ -187,19 +186,19 @@ fn restart() void {
     }
 }
 
-/// The chapter is complete: add its time and deaths to the story's, save the next chapter to play (a fresh story
+/// The chapter is complete: add its time to the story's, save the next chapter to play (a fresh story
 /// after the last) and show its outro card
 ///
 fn completeChapter() void {
     chapter_secs += game_state.run_time;
     const secs: u32 = @intFromFloat(chapter_secs);
     const last = chapter + 1 == story.CHAPTERS.len;
-    const totals = story.Save{ .chapter = if (last) 0 else chapter + 1, .play_secs = story_save.play_secs +| secs, .deaths = story_save.deaths +| chapter_deaths };
+    const totals = story.Save{ .chapter = if (last) 0 else chapter + 1, .play_secs = story_save.play_secs +| secs };
     if (last) story_finished = totals;
     story_save = if (last) .{} else totals;
     writeStorySave(story_save);
-    screen = .{ .story_card = .{ .kind = .outro, .chapter = chapter, .secs = secs, .deaths = chapter_deaths } };
-    debugLog("chapter complete: chapter={d} attempt={d:.1}s chapter_time={d}s deaths={d} kills={d} story_time={d}s story_deaths={d}", .{ chapter + 1, game_state.run_time, secs, chapter_deaths, game_state.player.kills, totals.play_secs, totals.deaths });
+    screen = .{ .story_card = .{ .kind = .outro, .chapter = chapter, .secs = secs } };
+    debugLog("chapter complete: chapter={d} attempt={d:.1}s chapter_time={d}s kills={d} story_time={d}s", .{ chapter + 1, game_state.run_time, secs, game_state.player.kills, totals.play_secs });
 }
 
 /// A on a story card: the intro starts its chapter, an outro leads to the next chapter's intro (or the end), and the
@@ -209,13 +208,12 @@ fn continueFromCard(card: screens.StoryCard) void {
     switch (card.kind) {
         .intro => {
             chapter_secs = 0;
-            chapter_deaths = 0;
             startChapter(card.chapter);
         },
         .outro => screen = .{ .story_card = if (card.chapter + 1 < story.CHAPTERS.len)
             .{ .kind = .intro, .chapter = card.chapter + 1 }
         else
-            .{ .kind = .the_end, .chapter = card.chapter, .secs = story_finished.play_secs, .deaths = story_finished.deaths } },
+            .{ .kind = .the_end, .chapter = card.chapter, .secs = story_finished.play_secs } },
         .the_end => screen = .{ .title = .{} },
     }
 }
@@ -231,7 +229,6 @@ fn endRun() void {
     screen = .{ .run_end = .{ .new_best = new_best } };
     if (mode == .story) {
         chapter_secs += game_state.run_time;
-        chapter_deaths +|= 1;
     }
     if (new_best) {
         bests[lvl].best_score = p.score;

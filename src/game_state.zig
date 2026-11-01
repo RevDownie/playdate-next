@@ -408,7 +408,7 @@ pub const Gore = struct {
 pub const WavePhase = enum(u8) { lull, wave };
 
 /// Where the run is in its waves (see the WAVE_* constants and enemy_spawn_system). A lull counts down to the next
-/// wave; a wave holds out (spawning) for `hold` seconds, then must be cleared to be survived
+/// wave; a wave keeps coming (spawning) for `hold` seconds, then must be cleared
 ///
 pub const Spawner = struct {
     wave: u16 = 0, //The current wave, or during a lull the one just fought (0 before the first)
@@ -419,7 +419,7 @@ pub const Spawner = struct {
     peak: u8 = 0,
     pack: u8 = 0,
     sides: u8 = 0, //Bit per level_loader.MapSide the wave comes from
-    survived: bool = false, //This lull follows a wave the player survived (rather than one that ran out of time)
+    cleared: bool = false, //This lull follows a wave the player cleared (rather than one that ran out of time)
     last_wave: u16 = 0, //Story: no wave after this one (0 = endless, survival)
 
     /// Still spawning: the wave is being held out

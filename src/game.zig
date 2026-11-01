@@ -96,7 +96,7 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     game.popups.update(dt);
     gore_sys.update(&game.gore, grid, dt);
 
-    //A story chapter is done once its last wave is cleared, after a moment to see it was survived, or once its walk
+    //A story chapter is done once its last wave is cleared, after a moment to see it was, or once its walk
     //is walked
     if (game.walk_left > 0) {
         game.walk_left -= maths.magnitude(game.player.vel) * dt;

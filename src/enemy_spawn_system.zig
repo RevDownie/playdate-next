@@ -20,7 +20,7 @@ const RING_SQUASH = Vec2f{ 1, consts.VIEW_HALF_HEIGHT / consts.VIEW_HALF_WIDTH }
 /// - hold out (`hold` seconds): packs keep spawning so the number of enemies alive tracks a target that climbs
 ///   from WAVE_START_FRACTION of the wave's `peak` to all of it. The pressure is sustained: killing faster just
 ///   brings the next pack sooner (at most one pack per WAVE_PACK_INTERVAL)
-/// - clear the rest: no more spawns; survived once at most WAVE_CLEAR_LEFT are left (a lull follows), or followed
+/// - clear the rest: no more spawns; cleared once at most WAVE_CLEAR_LEFT are left (a lull follows), or followed
 ///   straight away by the next wave if that takes longer than WAVE_CLEAR_MAX_TIME
 /// A pack drops in together on one cell just off screen in the wave's direction(s), so it arrives as a crowd
 ///
@@ -130,7 +130,7 @@ fn startLull(spawner: *state.Spawner) void {
     spawner.phase = .lull;
     spawner.phase_time = 0;
     spawner.timer = if (spawner.isLastWave()) std.math.inf(f32) else waveDef(spawner.wave).lull;
-    spawner.survived = true;
+    spawner.cleared = true;
 }
 
 /// Drop up to `count` enemies together on one cell. First SPAWN_ATTEMPTS random points in the ring just off
@@ -249,7 +249,7 @@ test "[enemy_spawn_system] the target climbs from the start fraction to the peak
     try std.testing.expect(targetAlive(40, 2) == 40);
 }
 
-test "[enemy_spawn_system] a wave holds out, refilling as enemies die, then is cleared and survived" {
+test "[enemy_spawn_system] a wave holds out, refilling as enemies die, then is cleared" {
     const player = Vec2f{ 0, 0 };
     var map: TestMap = .{};
     map.init(player);
@@ -284,13 +284,13 @@ test "[enemy_spawn_system] a wave holds out, refilling as enemies die, then is c
         try std.testing.expect(@reduce(.Add, maths.normaliseSafe((p - player) / RING_SQUASH, @splat(0)) * dir) > 0.6); //Within ~50 degrees
     }
 
-    //Clearing: nothing more spawns; survived once down to WAVE_CLEAR_LEFT
+    //Clearing: nothing more spawns; cleared once down to WAVE_CLEAR_LEFT
     const left = enemies.len;
     update(&spawner, &enemies, prng.random(), player, &map.spawn, &map.field, &grid, dt);
     try std.testing.expect(enemies.len == left and spawner.phase == .wave);
     enemies.len = consts.WAVE_CLEAR_LEFT;
     update(&spawner, &enemies, prng.random(), player, &map.spawn, &map.field, &grid, dt);
-    try std.testing.expect(spawner.phase == .lull and spawner.survived and spawner.wave == 1);
+    try std.testing.expect(spawner.phase == .lull and spawner.cleared and spawner.wave == 1);
     try std.testing.expect(spawner.timer == waveDef(1).lull);
 }
 
@@ -308,7 +308,7 @@ test "[enemy_spawn_system] a wave that isn't cleared in time is followed straigh
         update(&spawner, &enemies, prng.random(), player, &map.spawn, &map.field, &grid, 0.1);
         try std.testing.expect(!(spawner.phase == .lull and spawner.wave > 0)); //Never a lull: nothing was killed
     }
-    try std.testing.expect(spawner.wave == 2 and !spawner.survived);
+    try std.testing.expect(spawner.wave == 2 and !spawner.cleared);
 }
 
 test "[enemy_spawn_system] packs arrive together, spawning never overfills, and later waves come from more sides" {
@@ -371,13 +371,13 @@ test "[enemy_spawn_system] the last wave is never followed by another: it waits 
     var t: f32 = 0;
     while (t < end) : (t += 0.1) update(&spawner, &enemies, prng.random(), player, &map.spawn, &map.field, &grid, 0.1);
     try std.testing.expect(spawner.wave == 1 and spawner.phase == .wave and spawner.isLastWave());
-    //Down to the few a wave is usually survived with isn't enough: all of them must go
+    //Down to the few a wave is usually cleared with isn't enough: all of them must go
     enemies.len = consts.WAVE_CLEAR_LEFT;
     update(&spawner, &enemies, prng.random(), player, &map.spawn, &map.field, &grid, 0.1);
     try std.testing.expect(spawner.phase == .wave);
     enemies.len = 0;
     update(&spawner, &enemies, prng.random(), player, &map.spawn, &map.field, &grid, 0.1);
-    try std.testing.expect(spawner.phase == .lull and spawner.survived);
+    try std.testing.expect(spawner.phase == .lull and spawner.cleared);
     for (0..2000) |_| update(&spawner, &enemies, prng.random(), player, &map.spawn, &map.field, &grid, 0.1);
     try std.testing.expect(enemies.len == 0 and spawner.wave == 1 and spawner.last_wave == 1);
 }

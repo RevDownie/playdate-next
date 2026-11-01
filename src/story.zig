@@ -78,24 +78,22 @@ comptime {
 
 /// Where the story is up to, saved between sessions at chapter boundaries only. Fixed size binary: a magic tag, so
 /// a missing, foreign or old format file reads as a fresh story, then the chapter to play next and, for judging the
-/// story's length, the play time and deaths of the chapters completed so far
+/// story's length, the play time of the chapters completed so far
 ///
 pub const Save = struct {
     chapter: u8 = 0, //Index into CHAPTERS
     play_secs: u32 = 0, //Every attempt at every completed chapter
-    deaths: u16 = 0,
 };
 
 pub const FILE_NAME = "story.bin";
-const MAGIC = "UTS2";
-pub const SAVE_SIZE = MAGIC.len + 1 + 4 + 2;
+const MAGIC = "UTS3";
+pub const SAVE_SIZE = MAGIC.len + 1 + 4;
 
 pub fn encode(save: Save) [SAVE_SIZE]u8 {
     var bytes: [SAVE_SIZE]u8 = undefined;
     @memcpy(bytes[0..MAGIC.len], MAGIC);
     bytes[MAGIC.len] = save.chapter;
     std.mem.writeInt(u32, bytes[MAGIC.len + 1 ..][0..4], save.play_secs, .little);
-    std.mem.writeInt(u16, bytes[MAGIC.len + 5 ..][0..2], save.deaths, .little);
     return bytes;
 }
 
@@ -108,7 +106,6 @@ pub fn decode(bytes: []const u8) Save {
     return .{
         .chapter = ch,
         .play_secs = std.mem.readInt(u32, bytes[MAGIC.len + 1 ..][0..4], .little),
-        .deaths = std.mem.readInt(u16, bytes[MAGIC.len + 5 ..][0..2], .little),
     };
 }
 
@@ -129,7 +126,7 @@ test "[story] every chapter is on a real level, survive chapters have waves and 
 
 test "[story] the save round trips" {
     for (0..CHAPTERS.len) |c| {
-        const save = Save{ .chapter = @intCast(c), .play_secs = 1234 + @as(u32, @intCast(c)), .deaths = 7 };
+        const save = Save{ .chapter = @intCast(c), .play_secs = 1234 + @as(u32, @intCast(c)) };
         const bytes = encode(save);
         try std.testing.expect(std.meta.eql(decode(&bytes), save));
     }
@@ -138,7 +135,7 @@ test "[story] the save round trips" {
 test "[story] a missing, short, foreign or out of range save is a fresh story" {
     const fresh = Save{};
     try std.testing.expect(std.meta.eql(decode(&.{}), fresh));
-    const bytes = encode(.{ .chapter = 1, .play_secs = 60, .deaths = 2 });
+    const bytes = encode(.{ .chapter = 1, .play_secs = 60 });
     try std.testing.expect(std.meta.eql(decode(bytes[0 .. SAVE_SIZE - 1]), fresh));
     var foreign = bytes;
     foreign[0] = 'X';

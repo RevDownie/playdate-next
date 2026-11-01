@@ -198,8 +198,8 @@ fn secondsLeft(timer: f32) u32 {
     return @as(u32, @intFromFloat(timer)) + 1;
 }
 
-/// The beats of a wave: "WAVE N", how long to hold out and where it is coming from as it starts, "CLEAR THE REST"
-/// when the spawning stops, and "WAVE N SURVIVED" when it is cleared (not when it ran out of time: then the next
+/// The beats of a wave: "WAVE N", how long it keeps coming and from where as it starts, "CLEAR THE REST" when the
+/// spawning stops, and "WAVE N CLEARED" when it is cleared (not when it ran out of time: then the next
 /// wave starts straight away instead)
 ///
 fn drawWaveBanner(graphics: pd.playdate_graphics, fonts: Fonts, spawner: *const state.Spawner, wave_offset: u16, width: c_int) void {
@@ -210,12 +210,12 @@ fn drawWaveBanner(graphics: pd.playdate_graphics, fonts: Fonts, spawner: *const 
         .wave => if (spawner.phase_time < consts.WAVE_BANNER_TIME) {
             drawBoxed(graphics, fonts.big, format(&buf, "WAVE {d}", .{spawner.wave - wave_offset}), cx, BANNER_Y, .centre, .loud);
             var sides_buf: [40]u8 = undefined;
-            drawBoxed(graphics, fonts.small, format(&buf, "Hold out {d}s {s}", .{ secondsLeft(spawner.hold) - 1, sidesText(&sides_buf, spawner.sides) }), cx, BANNER_Y + big_h, .centre, .normal);
+            drawBoxed(graphics, fonts.small, format(&buf, "Incoming for {d}s {s}", .{ secondsLeft(spawner.hold) - 1, sidesText(&sides_buf, spawner.sides) }), cx, BANNER_Y + big_h, .centre, .normal);
         } else if (!spawner.isHolding() and spawner.phase_time < spawner.hold + consts.WAVE_BANNER_TIME) {
             drawBoxed(graphics, fonts.big, "CLEAR THE REST", cx, BANNER_Y, .centre, .loud);
         },
-        .lull => if (spawner.survived and spawner.phase_time < consts.WAVE_SURVIVED_BANNER_TIME) {
-            drawBoxed(graphics, fonts.big, format(&buf, "WAVE {d} SURVIVED", .{spawner.wave - wave_offset}), cx, BANNER_Y, .centre, .normal);
+        .lull => if (spawner.cleared and spawner.phase_time < consts.WAVE_CLEARED_BANNER_TIME) {
+            drawBoxed(graphics, fonts.big, format(&buf, "WAVE {d} CLEARED", .{spawner.wave - wave_offset}), cx, BANNER_Y, .centre, .normal);
             drawBoxed(graphics, fonts.small, if (spawner.isLastWave()) "Chapter clear" else "Grab what you can", cx, BANNER_Y + big_h, .centre, .normal);
         },
     }
@@ -285,14 +285,14 @@ pub fn drawGameOver(graphics: pd.playdate_graphics, fonts: Fonts, game: *const G
         const c = story.CHAPTERS[ch];
         drawBoxed(graphics, fonts.small, format(&buf, "Ch{d}  {s}", .{ ch + 1, story.CHAPTER_NAMES[ch] }), cx, y, .centre, .normal);
         y += small_h;
-        drawBoxed(graphics, fonts.small, format(&buf, "Wave {d}/{d}   Survived {d}:{d:0>2}", .{ game.spawner.wave -| (c.first_wave -| 1), c.waveCount(), secs / 60, secs % 60 }), cx, y, .centre, .normal);
+        drawBoxed(graphics, fonts.small, format(&buf, "Wave {d}/{d}   Time {d}:{d:0>2}", .{ game.spawner.wave -| (c.first_wave -| 1), c.waveCount(), secs / 60, secs % 60 }), cx, y, .centre, .normal);
         y += small_h;
         drawBoxed(graphics, fonts.small, format(&buf, "Kills {d}", .{p.kills}), cx, y, .centre, .normal);
         y += small_h + 4;
         if (over.canRestart()) drawBoxed(graphics, fonts.small, "Press " ++ BUTTON_A ++ " to retry", cx, y, .centre, .loud);
         return;
     }
-    drawBoxed(graphics, fonts.small, format(&buf, "Wave {d}   Survived {d}:{d:0>2}", .{ game.spawner.wave, secs / 60, secs % 60 }), cx, y, .centre, .normal);
+    drawBoxed(graphics, fonts.small, format(&buf, "Wave {d}   Time {d}:{d:0>2}", .{ game.spawner.wave, secs / 60, secs % 60 }), cx, y, .centre, .normal);
     y += small_h;
     drawBoxed(graphics, fonts.small, format(&buf, "Kills {d}", .{p.kills}), cx, y, .centre, .normal);
     y += small_h;
@@ -333,7 +333,7 @@ const CARD_TEXT_MARGIN = 40; //Each side of the intro text, which wraps
 const CARD_TEXT_LINES = 3;
 
 /// A story card on a blank screen. Intro: the chapter's name and its intro line. Outro: how long the chapter took
-/// over every attempt and how many deaths. The end: the same for the whole story
+/// over every attempt. The end: the same for the whole story
 ///
 pub fn drawStoryCard(graphics: pd.playdate_graphics, fonts: Fonts, card: screens.StoryCard, width: c_int, height: c_int) void {
     var buf: [48]u8 = undefined;
@@ -357,13 +357,13 @@ pub fn drawStoryCard(graphics: pd.playdate_graphics, fonts: Fonts, card: screens
             y += small_h;
             drawBoxed(graphics, fonts.big, story.CHAPTER_NAMES[card.chapter], cx, y, .centre, .normal);
             y += big_h + 8;
-            drawBoxed(graphics, fonts.small, format(&buf, "Time {d}:{d:0>2}   Deaths {d}", .{ card.secs / 60, card.secs % 60, card.deaths }), cx, y, .centre, .normal);
+            drawBoxed(graphics, fonts.small, format(&buf, "Time {d}:{d:0>2}", .{ card.secs / 60, card.secs % 60 }), cx, y, .centre, .normal);
         },
         .the_end => {
             y += small_h;
             drawBoxed(graphics, fonts.big, "The End", cx, y, .centre, .normal);
             y += big_h + 8;
-            drawBoxed(graphics, fonts.small, format(&buf, "Story time {d}:{d:0>2}   Deaths {d}", .{ card.secs / 60, card.secs % 60, card.deaths }), cx, y, .centre, .normal);
+            drawBoxed(graphics, fonts.small, format(&buf, "Story time {d}:{d:0>2}", .{ card.secs / 60, card.secs % 60 }), cx, y, .centre, .normal);
         },
     }
     if (card.canContinue()) drawBoxed(graphics, fonts.small, "Press " ++ BUTTON_A ++ " to continue", cx, height - CARD_TOP - small_h, .centre, .loud);

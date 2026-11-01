@@ -31,7 +31,6 @@ pub const StoryCard = struct {
     kind: CardKind,
     chapter: u8, //Index into story.CHAPTERS
     secs: u32 = 0, //Outro: the chapter's play time over every attempt. The end: the whole story's
-    deaths: u16 = 0, //...and its deaths
     time: f32 = 0, //On the card
 
     pub fn canContinue(self: StoryCard) bool {
