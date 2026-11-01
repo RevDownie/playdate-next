@@ -21,6 +21,8 @@ pub const Input = struct {
     down: bool = false,
     fire_held: bool = false, //A or B
     fire_pressed: bool = false, //A or B went down this frame
+    up_pressed: bool = false, //Up went down this frame (menus)
+    down_pressed: bool = false, //Down went down this frame (menus)
     crank_delta: f32 = 0, //Degrees turned since last frame, positive is forward
 };
 
@@ -418,10 +420,16 @@ pub const Spawner = struct {
     pack: u8 = 0,
     sides: u8 = 0, //Bit per level_loader.MapSide the wave comes from
     survived: bool = false, //This lull follows a wave the player survived (rather than one that ran out of time)
+    last_wave: u16 = 0, //Story: no wave after this one (0 = endless, survival)
 
     /// Still spawning: the wave is being held out
     pub fn isHolding(self: *const Spawner) bool {
         return self.phase == .wave and self.phase_time < self.hold;
+    }
+
+    /// Fighting the last wave there will be (never in an endless run)
+    pub fn isLastWave(self: *const Spawner) bool {
+        return self.last_wave != 0 and self.wave >= self.last_wave;
     }
 };
 

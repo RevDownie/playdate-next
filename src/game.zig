@@ -21,7 +21,8 @@ const camera_sys = @import("camera_system.zig");
 
 const Vec2f = @Vector(2, f32);
 
-pub const TickResult = enum { playing, player_died };
+/// `chapter_complete` only comes in a story chapter (a run with a `last_wave`), once it has been cleared
+pub const TickResult = enum { playing, player_died, chapter_complete };
 
 /// The orchestrator: advances the simulation one frame by running every system in a fixed order.
 /// Systems only see the data they are handed; per frame scratch comes from `frame_arena`.
@@ -94,6 +95,9 @@ pub fn tick(game: *state.GameState, level: *const Level, field: *flow_field.Flow
     game.popups.update(dt);
     gore_sys.update(&game.gore, grid, dt);
 
+    //A story chapter is done once its last wave is cleared, after a moment to see it was survived
+    const spawner = &game.spawner;
+    if (spawner.isLastWave() and spawner.phase == .lull and spawner.phase_time >= consts.CHAPTER_COMPLETE_DELAY) return .chapter_complete;
     return .playing;
 }
 
@@ -105,6 +109,14 @@ pub fn beginRun(game: *state.GameState, start_pos: Vec2f) void {
     game.player.pos = start_pos;
     game.camera.pos = start_pos;
     game.trigger.button_cooldown = consts.FIRE_BUTTON_DELAY;
+}
+
+/// Start a story chapter: a fresh run that plays `waves` waves and then stops spawning
+///
+pub fn beginChapter(game: *state.GameState, start_pos: Vec2f, waves: u16) void {
+    std.debug.assert(waves > 0);
+    beginRun(game, start_pos);
+    game.spawner.last_wave = waves;
 }
 
 /// Whether the run that just ended beats the saved `best`. Debug invincibility is a cheat, so it never does

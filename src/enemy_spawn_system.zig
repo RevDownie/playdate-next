@@ -33,7 +33,10 @@ pub fn update(spawner: *state.Spawner, enemies: *state.Enemies, rand: std.Random
         },
         .wave => {
             if (!spawner.isHolding()) {
-                if (enemies.len <= consts.WAVE_CLEAR_LEFT) {
+                if (spawner.isLastWave()) {
+                    //Nothing follows the last wave, so every one of them must go and there is no time limit
+                    if (enemies.len == 0) startLull(spawner);
+                } else if (enemies.len <= consts.WAVE_CLEAR_LEFT) {
                     startLull(spawner);
                 } else if (spawner.phase_time >= spawner.hold + consts.WAVE_CLEAR_MAX_TIME) {
                     startWave(spawner, rand, spawner.wave + 1);
@@ -112,6 +115,7 @@ fn startWave(spawner: *state.Spawner, rand: std.Random, n: u16) void {
     var sides: u8 = 0;
     while (@popCount(sides) < numSides(n)) sides |= @as(u8, 1) << rand.uintLessThan(u3, level_loader.NUM_SIDES);
     spawner.* = .{
+        .last_wave = spawner.last_wave,
         .wave = n,
         .phase = .wave,
         .timer = 0, //First pack straight away
@@ -125,7 +129,7 @@ fn startWave(spawner: *state.Spawner, rand: std.Random, n: u16) void {
 fn startLull(spawner: *state.Spawner) void {
     spawner.phase = .lull;
     spawner.phase_time = 0;
-    spawner.timer = waveDef(spawner.wave).lull;
+    spawner.timer = if (spawner.isLastWave()) std.math.inf(f32) else waveDef(spawner.wave).lull;
     spawner.survived = true;
 }
 
@@ -352,4 +356,28 @@ test "[enemy_spawn_system] enemy kinds mix, with runners from wave 2, brutes fro
     try std.testing.expect(counts[0][brute] == 0 and counts[1][brute] > 0 and counts[2][brute] > counts[1][brute]);
     try std.testing.expect(counts[2][runner] < 2000 * 0.35 and counts[2][brute] < 2000 * 0.15);
     try std.testing.expect(counts[0][@backingInt(state.EnemyKind.shambler)] > 2000 / 5); //Every wave has shamblers
+}
+
+test "[enemy_spawn_system] the last wave is never followed by another: it waits to be cleared, then spawning stops" {
+    const player = Vec2f{ 0, 0 };
+    var map: TestMap = .{};
+    map.init(player);
+    const grid = map.grid();
+    var spawner = state.Spawner{ .last_wave = 1 };
+    var enemies = state.Enemies{};
+    var prng = std.Random.DefaultPrng.init(5);
+    //Nothing killed, well past the time a wave is followed by the next one
+    const end = consts.FIRST_WAVE_DELAY + waveDef(1).hold + consts.WAVE_CLEAR_MAX_TIME + 5;
+    var t: f32 = 0;
+    while (t < end) : (t += 0.1) update(&spawner, &enemies, prng.random(), player, &map.spawn, &map.field, &grid, 0.1);
+    try std.testing.expect(spawner.wave == 1 and spawner.phase == .wave and spawner.isLastWave());
+    //Down to the few a wave is usually survived with isn't enough: all of them must go
+    enemies.len = consts.WAVE_CLEAR_LEFT;
+    update(&spawner, &enemies, prng.random(), player, &map.spawn, &map.field, &grid, 0.1);
+    try std.testing.expect(spawner.phase == .wave);
+    enemies.len = 0;
+    update(&spawner, &enemies, prng.random(), player, &map.spawn, &map.field, &grid, 0.1);
+    try std.testing.expect(spawner.phase == .lull and spawner.survived);
+    for (0..2000) |_| update(&spawner, &enemies, prng.random(), player, &map.spawn, &map.field, &grid, 0.1);
+    try std.testing.expect(enemies.len == 0 and spawner.wave == 1 and spawner.last_wave == 1);
 }

@@ -7,6 +7,8 @@ const consts = @import("tweak_constants.zig");
 const state = @import("game_state.zig");
 const GameState = state.GameState;
 const MapSide = @import("level_loader.zig").MapSide;
+const screens = @import("screens.zig");
+const story = @import("story.zig");
 
 // Screen space text drawn over the world by the renderer: the HUD, the run end screen and the helpers they share.
 // Text sits on solid boxes so it stays readable over a full horde and the dithered ground.
@@ -17,6 +19,7 @@ pub const Hud = struct {
     best_score: u64, //On the current level: each level has its own
     level_name: []const u8, //The current level, so the run end screen can say whose best it is
     game_over: ?state.RunEnd = null, //Set while the run end screen is up
+    chapter: ?u8 = null, //Story mode: the chapter being played (index into story.CHAPTERS)
 };
 
 /// System fonts, loaded once up front
@@ -76,9 +79,18 @@ pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameSt
     const font = fonts.hud;
     const row_h: c_int = graphics.getFontHeight.?(font) + BOX_PAD_Y * 2 + 1;
 
-    //Top left: the wave, or the countdown to the next one
+    //Top left: the wave, or the countdown to the next one. In story, the chapter and how many waves it has
     const spawner = &game.spawner;
-    const wave_text = switch (spawner.phase) {
+    const wave_text = if (hud.chapter) |ch| switch (spawner.phase) {
+        .wave => if (spawner.isHolding())
+            format(&buf, "STORY Ch{d}  Wave {d}/{d}  {d}s", .{ ch + 1, spawner.wave, spawner.last_wave, secondsLeft(spawner.hold - spawner.phase_time) })
+        else
+            format(&buf, "STORY Ch{d}  Wave {d}/{d}  Clear!", .{ ch + 1, spawner.wave, spawner.last_wave }),
+        .lull => if (spawner.isLastWave())
+            format(&buf, "STORY Ch{d}  Cleared", .{ch + 1})
+        else
+            format(&buf, "STORY Ch{d}  Wave {d}/{d} in {d}", .{ ch + 1, spawner.wave + 1, spawner.last_wave, secondsLeft(spawner.timer) }),
+    } else switch (spawner.phase) {
         .wave => if (spawner.isHolding())
             format(&buf, "Wave {d}  {d}s", .{ spawner.wave, secondsLeft(spawner.hold - spawner.phase_time) })
         else
@@ -197,7 +209,7 @@ fn drawWaveBanner(graphics: pd.playdate_graphics, fonts: Fonts, spawner: *const 
         },
         .lull => if (spawner.survived and spawner.phase_time < consts.WAVE_SURVIVED_BANNER_TIME) {
             drawBoxed(graphics, fonts.big, format(&buf, "WAVE {d} SURVIVED", .{spawner.wave}), cx, BANNER_Y, .centre, .normal);
-            drawBoxed(graphics, fonts.small, "Grab what you can", cx, BANNER_Y + big_h, .centre, .normal);
+            drawBoxed(graphics, fonts.small, if (spawner.isLastWave()) "Chapter clear" else "Grab what you can", cx, BANNER_Y + big_h, .centre, .normal);
         },
     }
 }
@@ -254,11 +266,48 @@ pub fn drawGameOver(graphics: pd.playdate_graphics, fonts: Fonts, game: *const G
     y += small_h;
     drawBoxed(graphics, fonts.small, format(&buf, "Score {d}", .{p.score}), cx, y, .centre, .normal);
     y += small_h;
-    if (over.new_best) {
+    if (hud.chapter) |ch| {
+        drawBoxed(graphics, fonts.small, format(&buf, "Story chapter {d}", .{ch + 1}), cx, y, .centre, .normal);
+    } else if (over.new_best) {
         drawBoxed(graphics, fonts.small, "NEW BEST!", cx, y, .centre, .loud);
     } else {
         drawBoxed(graphics, fonts.small, format(&buf, "Best on {s} {d}", .{ hud.level_name, hud.best_score }), cx, y, .centre, .normal);
     }
     y += small_h + 4;
-    if (over.canRestart()) drawBoxed(graphics, fonts.small, "Press A to go again", cx, y, .centre, .loud);
+    if (over.canRestart()) drawBoxed(graphics, fonts.small, if (hud.chapter != null) "Press A to retry" else "Press A to go again", cx, y, .centre, .loud);
+}
+
+const TITLE_Y = 50;
+
+/// The title screen on a blank screen: the game's name and the modes, the chosen one loud
+///
+pub fn drawTitle(graphics: pd.playdate_graphics, fonts: Fonts, title: screens.Title, width: c_int) void {
+    const cx = @divTrunc(width, 2);
+    const big_h: c_int = graphics.getFontHeight.?(fonts.big) + 6;
+    const small_h: c_int = graphics.getFontHeight.?(fonts.small) + 6;
+    drawBoxed(graphics, fonts.big, "UNTIL THERE WERE NONE", cx, TITLE_Y, .centre, .normal);
+    var y = TITLE_Y + big_h + 24;
+    for ([_]screens.Mode{ .story, .survival }, [_][]const u8{ "Story", "Survival" }) |mode, label| {
+        drawBoxed(graphics, fonts.small, label, cx, y, .centre, if (mode == title.choice) .loud else .normal);
+        y += small_h;
+    }
+    drawBoxed(graphics, fonts.hud, "Up/Down to choose, A to start", cx, y + 24, .centre, .normal);
+}
+
+/// A story card on a blank screen: plain text between chapters
+///
+pub fn drawStoryCard(graphics: pd.playdate_graphics, fonts: Fonts, card: screens.StoryCard, width: c_int, height: c_int) void {
+    var buf: [48]u8 = undefined;
+    const cx = @divTrunc(width, 2);
+    const big_h: c_int = graphics.getFontHeight.?(fonts.big) + 6;
+    const y = @divTrunc(height - big_h * 2, 2);
+    const heading = switch (card.kind) {
+        .intro => format(&buf, "Chapter {d}", .{card.chapter + 1}),
+        .outro => format(&buf, "Chapter {d} complete", .{card.chapter + 1}),
+        .the_end => "The End",
+    };
+    drawBoxed(graphics, fonts.big, heading, cx, y, .centre, .normal);
+    var sub_buf: [32]u8 = undefined;
+    if (card.kind == .intro) drawBoxed(graphics, fonts.small, format(&sub_buf, "of {d}", .{story.CHAPTERS.len}), cx, y + big_h, .centre, .normal);
+    if (card.canContinue()) drawBoxed(graphics, fonts.small, "Press A to continue", cx, y + big_h * 2, .centre, .loud);
 }

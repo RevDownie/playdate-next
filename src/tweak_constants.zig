@@ -151,6 +151,7 @@ pub const WAVE_CLEAR_MAX_TIME: f32 = 20.0; //...or followed straight away by the
 pub const FIRST_WAVE_DELAY: f32 = 3.0;
 pub const WAVE_BANNER_TIME: f32 = 2.0; //How long "WAVE N" shows when a wave starts, and "CLEAR THE REST" after the hold
 pub const WAVE_SURVIVED_BANNER_TIME: f32 = 2.5; //...and "WAVE N SURVIVED" when it is survived
+pub const CHAPTER_COMPLETE_DELAY: f32 = 2.5; //Story: seconds after the last wave is cleared before the chapter ends
 pub const SPAWN_EDGE_BAND: f32 = 1.0; //Enemies drop in on free cells within this many metres of the map's edge
 /// ...but never closer than this to the player, measured on the spawn ring (an ellipse with the screen's aspect:
 /// 2.3m to the sides is 1.38m above and below), which keeps the screen's corners inside it
@@ -275,6 +276,7 @@ pub const DROP_MARKER_INSET_SIDE: i32 = 24;
 
 pub const MAX_SCORE: u64 = 9999999999;
 pub const GAME_OVER_INPUT_DELAY: f32 = 1.0; //Seconds the run end screen ignores fire before A/B starts the next run
+pub const CARD_INPUT_DELAY: f32 = 0.6; //Seconds a story card ignores A, so a press held from before doesn't skip it
 pub const GAME_OVER_PANEL_DELAY: f32 = 0.8; //Seconds the player is seen falling down before the run end panel covers them
 comptime {
     if (GAME_OVER_PANEL_DELAY > GAME_OVER_INPUT_DELAY) @compileError("The run end panel must show before A/B can restart");
