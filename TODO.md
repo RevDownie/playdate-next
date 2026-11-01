@@ -1,7 +1,7 @@
 # TODO
 
 ## Gameplay
-- Swap level mid run
+- Story mode
 - Explosive barrels
 
 ## Enemy spawning
