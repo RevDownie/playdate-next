@@ -132,8 +132,8 @@ pub fn drawFps(sys: pd.playdate_sys, width: c_int, height: c_int) void {
 pub fn drawPopup(graphics: pd.playdate_graphics, fonts: Fonts, kind: state.PopupKind, value: u32, x: c_int, y: c_int) void {
     var buf: [24]u8 = undefined;
     switch (kind) {
-        .combo => drawBoxed(graphics, fonts.small, format(&buf, "x{d}", .{value}), x, y - graphics.getFontHeight.?(fonts.small), .centre, .normal),
-        .milestone => drawBoxed(graphics, fonts.big, format(&buf, "COMBO x{d}!", .{value}), x, y - graphics.getFontHeight.?(fonts.big), .centre, .loud),
+        .combo => drawBoxed(graphics, fonts.hud, format(&buf, "x{d}", .{value}), x, y - graphics.getFontHeight.?(fonts.hud), .centre, .normal),
+        .milestone => drawBoxed(graphics, fonts.small, format(&buf, "COMBO x{d}!", .{value}), x, y - graphics.getFontHeight.?(fonts.small), .centre, .loud),
         .lost => drawBoxed(graphics, fonts.small, "COMBO LOST", x, y - graphics.getFontHeight.?(fonts.small), .centre, .loud),
     }
 }
