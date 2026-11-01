@@ -193,7 +193,15 @@ pub const CAMERA_SHAKE_MAX: f32 = 3.0 / METRES_TO_PIXELS;
 pub const CAMERA_SHAKE_SETTLE_RATE: f32 = 25; //Per second: most of a kick has gone in a few frames
 
 pub const FIRE_ANGLE_DELTA: f32 = 30; //12 bullets per crank revolution
-pub const FIRE_BUTTON_DELAY: f32 = 0.25; //Button fire is the fallback: well under the rate of a steadily turned crank
+/// Holding A or B fires nearly as fast as a steadily turned crank, so players who can't crank aren't left far behind.
+/// The crank keeps the edge of turning faster in a burst
+pub const FIRE_BUTTON_DELAY: f32 = 0.1;
+const STEADY_CRANK_SHOTS_PER_SEC: f32 = 360.0 / FIRE_ANGLE_DELTA; //A revolution a second
+comptime {
+    if (1.0 / FIRE_BUTTON_DELAY > STEADY_CRANK_SHOTS_PER_SEC) @compileError("Button fire should not outpace a steadily turned crank");
+    if (1.0 / FIRE_BUTTON_DELAY < STEADY_CRANK_SHOTS_PER_SEC * 0.75) @compileError("Button fire should be close to a steadily turned crank, for players who can't crank");
+}
+pub const RUN_START_FIRE_DELAY: f32 = 0.3; //Seconds holding A/B doesn't fire at the start of a run, so the press that started it doesn't
 
 pub const BUMP_DISTANCE = 0.2;
 pub const BUMP_DISTANCE_SMALL = 0.125;

@@ -108,7 +108,7 @@ pub fn beginRun(game: *state.GameState, start_pos: Vec2f) void {
     game.reset();
     game.player.pos = start_pos;
     game.camera.pos = start_pos;
-    game.trigger.button_cooldown = consts.FIRE_BUTTON_DELAY;
+    game.trigger.button_cooldown = consts.RUN_START_FIRE_DELAY;
 }
 
 /// Start a story chapter: a fresh run that plays `waves` waves and then stops spawning
@@ -139,7 +139,7 @@ test "[game] a run begins at the start point with nothing carried over but the r
     try std.testing.expect(game.player.score == 0 and game.player.health == consts.PLAYER_MAX_HEALTH);
     try std.testing.expect(game.bullets.ammo == consts.START_AMMO and game.enemies.len == 0);
     try std.testing.expect(@reduce(.And, game.player.pos == Vec2f{ 2, -3 }) and @reduce(.And, game.camera.pos == Vec2f{ 2, -3 }));
-    try std.testing.expect(game.trigger.button_cooldown == consts.FIRE_BUTTON_DELAY);
+    try std.testing.expect(game.trigger.button_cooldown == consts.RUN_START_FIRE_DELAY);
     try std.testing.expect(game.invincible);
     try std.testing.expect(std.meta.eql(game.rng, rng_next)); //The random sequence carries on
 }

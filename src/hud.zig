@@ -47,11 +47,22 @@ const Style = enum { normal, loud };
 const BOX_PAD_X = 3;
 const BOX_PAD_Y = 1;
 
-/// Draw `text` on a solid box. `x` is the box's left edge, centre or right edge per `anchor`; `y` its top
+/// The A button as the system fonts draw it: a letter in a circle, as on the device. Use it whenever
+/// text tells the player to press it
+const BUTTON_A = "Ⓐ";
+
+/// Text length as the SDK counts it for UTF-8: codepoints, not bytes (the HUD's own text is ASCII plus the button
+/// glyphs)
+///
+fn textLen(text: []const u8) usize {
+    return std.unicode.utf8CountCodepoints(text) catch text.len;
+}
+
+/// Draw `text` (UTF-8) on a solid box. `x` is the box's left edge, centre or right edge per `anchor`; `y` its top
 ///
 fn drawBoxed(graphics: pd.playdate_graphics, font: *pd.LCDFont, text: []const u8, x: c_int, y: c_int, anchor: Anchor, style: Style) void {
     graphics.setFont.?(font);
-    const w = graphics.getTextWidth.?(font, text.ptr, text.len, pd.kASCIIEncoding, 0);
+    const w = graphics.getTextWidth.?(font, text.ptr, textLen(text), pd.kUTF8Encoding, 0);
     const h: c_int = graphics.getFontHeight.?(font);
     const left = switch (anchor) {
         .left => x,
@@ -60,7 +71,7 @@ fn drawBoxed(graphics: pd.playdate_graphics, font: *pd.LCDFont, text: []const u8
     };
     graphics.fillRect.?(left - BOX_PAD_X, y - BOX_PAD_Y, w + BOX_PAD_X * 2, h + BOX_PAD_Y * 2, if (style == .loud) pd.kColorBlack else pd.kColorWhite);
     _ = graphics.setDrawMode.?(if (style == .loud) pd.kDrawModeFillWhite else pd.kDrawModeCopy);
-    _ = graphics.drawText.?(text.ptr, text.len, pd.kASCIIEncoding, left, y);
+    _ = graphics.drawText.?(text.ptr, textLen(text), pd.kUTF8Encoding, left, y);
     _ = graphics.setDrawMode.?(pd.kDrawModeCopy);
 }
 
@@ -112,7 +123,7 @@ pub fn drawHud(graphics: pd.playdate_graphics, fonts: Fonts, game: *const GameSt
     drawBoxed(graphics, font, score_text, right, BOX_PAD_Y, .right, if (beating_best) .loud else .normal);
     const combo = game.player.kill_streak;
     if (combo >= consts.COMBO_SHOW_FROM) {
-        const combo_right = right - graphics.getTextWidth.?(font, score_text.ptr, score_text.len, pd.kASCIIEncoding, 0) - BOX_PAD_X * 2 - 2;
+        const combo_right = right - graphics.getTextWidth.?(font, score_text.ptr, textLen(score_text), pd.kUTF8Encoding, 0) - BOX_PAD_X * 2 - 2;
         var combo_buf: [16]u8 = undefined;
         drawBoxed(graphics, font, format(&combo_buf, "x{d}", .{combo}), combo_right, BOX_PAD_Y, .right, if (combo >= consts.COMBO_LOST_MIN) .loud else .normal);
     }
@@ -274,7 +285,7 @@ pub fn drawGameOver(graphics: pd.playdate_graphics, fonts: Fonts, game: *const G
         drawBoxed(graphics, fonts.small, format(&buf, "Best on {s} {d}", .{ hud.level_name, hud.best_score }), cx, y, .centre, .normal);
     }
     y += small_h + 4;
-    if (over.canRestart()) drawBoxed(graphics, fonts.small, if (hud.chapter != null) "Press A to retry" else "Press A to go again", cx, y, .centre, .loud);
+    if (over.canRestart()) drawBoxed(graphics, fonts.small, if (hud.chapter != null) "Press " ++ BUTTON_A ++ " to retry" else "Press " ++ BUTTON_A ++ " to go again", cx, y, .centre, .loud);
 }
 
 const TITLE_Y = 50;
@@ -291,7 +302,7 @@ pub fn drawTitle(graphics: pd.playdate_graphics, fonts: Fonts, title: screens.Ti
         drawBoxed(graphics, fonts.small, label, cx, y, .centre, if (mode == title.choice) .loud else .normal);
         y += small_h;
     }
-    drawBoxed(graphics, fonts.hud, "Up/Down to choose, A to start", cx, y + 24, .centre, .normal);
+    drawBoxed(graphics, fonts.hud, "Up/Down to choose, " ++ BUTTON_A ++ " to start", cx, y + 24, .centre, .normal);
 }
 
 /// A story card on a blank screen: plain text between chapters
@@ -309,5 +320,5 @@ pub fn drawStoryCard(graphics: pd.playdate_graphics, fonts: Fonts, card: screens
     drawBoxed(graphics, fonts.big, heading, cx, y, .centre, .normal);
     var sub_buf: [32]u8 = undefined;
     if (card.kind == .intro) drawBoxed(graphics, fonts.small, format(&sub_buf, "of {d}", .{story.CHAPTERS.len}), cx, y + big_h, .centre, .normal);
-    if (card.canContinue()) drawBoxed(graphics, fonts.small, "Press A to continue", cx, y + big_h * 2, .centre, .loud);
+    if (card.canContinue()) drawBoxed(graphics, fonts.small, "Press " ++ BUTTON_A ++ " to continue", cx, y + big_h * 2, .centre, .loud);
 }
